@@ -215,20 +215,27 @@ impl Palette {
 
     /// Derive a palette for `dark` with `accent` applied coherently.
     ///
-    /// Overrides `primary`, `primary_foreground`, `ring`, `focus_ring`,
-    /// `selection`, and `accent_soft`. The neutral shadcn surfaces (`accent`,
-    /// `secondary`, `muted`, …) are intentionally left alone so existing views
-    /// keep their neutral chrome regardless of accent.
+    /// Dark + Noctalia: overrides `primary`, `primary_foreground`, `ring`,
+    /// `focus_ring`, `selection`, and `accent_soft`.
+    /// Light: keeps the original `:root` neutrals (`primary` near-black with
+    /// white text, `ring` to match) and derives only `focus_ring`,
+    /// `selection`, and `accent_soft` from the accent — the accent tints
+    /// focus/selection, it does not recolor primary controls.
+    /// The neutral shadcn surfaces (`accent`, `secondary`, `muted`, …) are
+    /// intentionally left alone so existing views keep their neutral chrome
+    /// regardless of accent.
     pub fn with_accent(dark: bool, accent: Accent) -> Self {
         let mut palette = if dark { Self::dark() } else { Self::light() };
-        palette.primary = accent.base(dark);
-        palette.primary_foreground = accent.on(dark);
-        palette.ring = accent.base(dark);
+        if dark {
+            palette.primary = accent.base(true);
+            palette.primary_foreground = accent.on(true);
+            palette.ring = accent.base(true);
+        }
         palette.focus_ring = accent.base(dark);
         palette.selection = accent.soft(dark);
-    palette.accent_soft = accent.soft(dark);
-    palette
-}
+        palette.accent_soft = accent.soft(dark);
+        palette
+    }
     /// Noctalia-derived palette (reads ~/.config/noctalia/palettes/*.json;
     /// falls back to built-in dark when missing/unparsable).
     pub fn noctalia() -> Self {
@@ -342,9 +349,10 @@ pub struct ThemeChoice {
 }
 
 impl Default for ThemeChoice {
-    /// Dark-leaning default: follow the OS, blue accent (Zed-like).
+    /// Light-first default: the original web design is light (`:root`);
+    /// dark/Noctalia remain available in Interface settings.
     fn default() -> Self {
-        Self { mode: ThemeMode::System, accent: Accent::Blue }
+        Self { mode: ThemeMode::Light, accent: Accent::Blue }
     }
 }
 impl ThemeChoice {
@@ -802,7 +810,12 @@ mod tests {
         assert!(!sys.mode.resolve_dark(false));
         // Resolved palettes match the direct constructors' roles.
         assert_eq!(dark.palette(false).primary, Accent::Green.base(true));
-        assert_eq!(light.palette(true).primary, Accent::Green.base(false));
+        // Light keeps the original `:root` near-black primary (white text);
+        // the accent only tints focus/selection washes.
+        assert_eq!(light.palette(true).primary, Palette::light().primary);
+        assert_eq!(light.palette(true).primary_foreground, Palette::light().primary_foreground);
+        assert_eq!(light.palette(true).focus_ring, Accent::Green.base(false));
+        assert_eq!(light.palette(true).selection, Accent::Green.soft(false));
     }
 
     #[test]

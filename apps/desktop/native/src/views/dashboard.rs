@@ -17,18 +17,24 @@ use crate::{
     theme,
 };
 
-/// Status → (label, tone color). Mirrors `i18n/status.ts` tones:
-/// secondary / success / warning / destructive / info.
-fn status_tone(status: &str, palette: &theme::Palette) -> Hsla {
-    match status {
+/// Status → badge (fill, text). Mirrors `badge.tsx` variants: `secondary`
+/// uses the neutral pair; tones use a translucent tint fill with the tone
+/// itself as text (ref: `bg-emerald-50 text-emerald-700`, …). Alpha over the
+/// card derives the tint in both modes without extra palette roles.
+fn status_badge(status: &str, palette: &theme::Palette) -> (Hsla, Hsla) {
+    let tone = match status {
         "prepared" | "done" | "completed" | "reviewed" | "applied" | "published" => {
-            palette.success
+            Some(palette.success)
         }
-        "pausing" | "paused" | "interrupted" => palette.warning,
-        "failed" | "error" => palette.destructive,
+        "pausing" | "paused" | "interrupted" => Some(palette.warning),
+        "failed" | "error" => Some(palette.destructive),
         "running" | "parsing" | "preparing" | "translating" | "reviewing" | "autofixing"
-        | "postprocessing" => palette.info,
-        _ => palette.muted_foreground,
+        | "postprocessing" => Some(palette.info),
+        _ => None,
+    };
+    match tone {
+        Some(t) => (Hsla { a: 0.12, ..t }, t),
+        None => (palette.secondary, palette.secondary_foreground),
     }
 }
 /// Display the `created_at` timestamp as a plain date. ISO `YYYY-MM-DD…`
@@ -263,7 +269,8 @@ impl Dashboard {
                                     .px_2()
                                     .py_px()
                                     .rounded_sm()
-                                    .bg(status_tone(&project.status, &palette))
+                                    .bg(status_badge(&project.status, &palette).0)
+                                    .text_color(status_badge(&project.status, &palette).1)
                                     .text_xs()
                                     .child(project.status.clone()),
                             )

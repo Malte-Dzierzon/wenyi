@@ -12,6 +12,7 @@ use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem,
     SidebarToggleButton,
 };
+use gpui_kit::component::theme::{ActiveTheme as _, Theme, ThemeMode as KitThemeMode};
 use gpui_kit::component::{Icon, Side, Sizable as _, h_flex};
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder;
@@ -320,7 +321,19 @@ impl Render for App {
         // Keep the OS chrome in sync with the web title.
         window.set_window_title("Wenyi");
         theme::set_choice(self.theme_choice);
-        theme::set_system_dark(theme::system_is_dark(cx));
+        let system_dark = theme::system_is_dark(cx);
+        theme::set_system_dark(system_dark);
+        // Keep the kit chrome (sidebar/buttons/inputs/dialogs) in the same
+        // mode as our palette; guarded so steady state costs one comparison.
+        let dark = self.theme_choice.mode.resolve_dark(system_dark);
+        let kit_dark = cx.theme().mode.is_dark();
+        if dark != kit_dark {
+            Theme::change(
+                if dark { KitThemeMode::Dark } else { KitThemeMode::Light },
+                None,
+                cx,
+            );
+        }
         let palette = theme::current_palette();
         let collapsed = self.sidebar_collapsed;
         let expanded_width = px(sidebar_prefs::clamp_width(self.sidebar_width));
