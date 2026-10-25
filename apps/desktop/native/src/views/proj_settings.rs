@@ -181,6 +181,9 @@ pub struct ProjSettingsView {
     check_error: Option<String>,
     checking: bool,
     op: Option<&'static str>,
+    /// Whether this screen is currently shown; the 3s busy-poll only
+    /// re-arms while visible (set by the App shell on navigation).
+    visible: bool,
 }
 
 /// One `caps.operations[]` entry: overrideable operation + default tier.
@@ -245,6 +248,18 @@ impl ProjSettingsView {
             check_error: None,
             checking: false,
             op: None,
+            visible: true,
+        }
+    }
+
+    /// Called by the App shell on navigation. Becoming visible resumes the
+    /// busy-poll with an immediate refresh.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if visible && !self.visible {
+            self.visible = true;
+            self.refresh(cx);
+        } else {
+            self.visible = visible;
         }
     }
 
@@ -338,8 +353,9 @@ impl ProjSettingsView {
                 cx.notify();
             });
             // Poll project status while busy (WS lands later); 3s cadence.
+            // Only re-arms while visible; navigation resumes via `set_visible`.
             _ = this.update(cx, |view: &mut ProjSettingsView, cx| {
-                if view.busy_status() {
+                if view.visible && view.busy_status() {
                     let (Some(client), pid) = (view.client.clone(), view.pid.clone()) else {
                         return;
                     };
@@ -348,7 +364,9 @@ impl ProjSettingsView {
                             .timer(std::time::Duration::from_secs(3))
                             .await;
                         _ = this.update(cx, |view: &mut ProjSettingsView, cx| {
-                            view.refresh(cx);
+                            if view.visible {
+                                view.refresh(cx);
+                            }
                         });
                     })
                     .detach();

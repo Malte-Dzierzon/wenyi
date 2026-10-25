@@ -1,7 +1,8 @@
 # Rust migration — port-vs-redesign and interop policy
 
-How the Python engine becomes the Rust monolith from 05. For what is ported,
-see 04; for where it lands, see 05.
+How the Python engine becomes the Rust monolith from 05 — behind an already
+stable native UI (UI-first order, doc 15). For what is ported, see 04; for
+where it lands, see 05; for the UI rebuild itself, see doc 18.
 
 ## 1. Method
 
@@ -96,11 +97,15 @@ from 05: `store`, `llm`, `doc`, `engine`, `gui`, `cli`, `app`.
 - **Round-trip fixtures**: EPUB/DOCX in→out identity for untranslated content;
   TOC/anchor/style preservation diffs.
 
-## 5. Seam order (incremental inside, cutover per crate)
+## 5. Seam order (UI first, then engine behind it)
 
-Recommended order — each step is independently verifiable against fixtures:
+U0–U6 (doc 15) rebuild the UI against the live Python backend first; the
+engine port below happens behind the stable native UI. Each step is
+independently verifiable against fixtures:
 
-1. `store` traits + SQLite (all other work stands on this).
+0. `gui` crate exists (U1–U6, loopback binding). Engine steps keep its
+   contract green; P7 switches the binding in-process (taxonomy unchanged).
+1. `store` traits + SQLite (all engine work stands on this).
 2. `doc` pure layers first (`postprocess`, `prompts`, `i18n`, glossary matcher,
    markup), then readers/writers with round-trip fixtures.
 3. `llm` transports + routing + retry (fixture-driven with fake server).
@@ -108,9 +113,9 @@ Recommended order — each step is independently verifiable against fixtures:
    autofix → report/assemble), SRT last (independent).
 5. `cli` on clap against the engine; legacy `migrate-config`/`migrate-usage`
    become `import-legacy-state` (SQLite + YAML reader for old workspaces).
-6. `gui` screens in nav order; event bus wired throughout.
-7. `app` wiring (single-instance, tray, updater, dialogs, keyring).
-8. Cutover: freeze Python, run full fixture suite, delete Python/TS/Tauri —
+6. `app` wiring (single-instance, tray, updater, dialogs, keyring) — shared
+   with the `gui` crate from U5; engine phases reuse, not rebuild.
+7. Cutover: freeze Python, run full fixture suite, delete Python + loopback —
    all callers already migrated by construction (no shims survive).
 
 Big-bang is rejected for the whole rewrite (unreviewable, unbisectable), but

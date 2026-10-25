@@ -1,49 +1,125 @@
 # Desktop GUI
 
+> **Framework: GPUI-Kit 0.8 (DECIDED, U0 passed 2026-10-25).** Iced 0.14
+> remains documented as the fallback (§2). Slint/egui rejected.
+
 Target GUI toolkit selection, screen plan, architecture, visual direction, and packaging for the Rust-native Wenyi desktop rewrite.
 
-## 1. Verified toolkit facts (checked 2026-10-25)
+## 1. Toolkit facts (checked 2026-10-25 unless noted)
 
-| Toolkit | Latest version (2026-10-25) | License | Sources |
+| Toolkit | Version | License | Sources |
 | --- | --- | --- | --- |
-| Iced | 0.14.0, released 2025-12-07 | MIT | [Release 0.14.0](https://github.com/iced-rs/iced/releases/tag/0.14.0), [docs.rs iced 0.14.0](https://docs.rs/crate/iced/0.14.0/source), [HN thread](https://news.ycombinator.com/item?id=46185323) |
-| Slint | 1.17 (2026-06-24; 1.15 released 2026-02-04, 1.15.1 patch) | GPL-3.0-only for open source, OR royalty-free Desktop/Mobile/Web license (no royalties for desktop apps), OR paid embedded royalties | [Slint 1.17 blog](https://slint.dev/blog/slint-1.17-released), [Slint 1.15 blog](https://slint.dev/blog/slint-1.15-released.html), [pricing](https://slint.dev/pricing), [royalty-free license (PDF)](https://slint.dev/agreements/slint-royalty-free-license.pdf), [terms](https://slint.dev/terms-and-conditions.html) |
-| egui | 0.36.2 (2026-09-08; 0.36.0 improved mobile keyboard/IME/autocorrect) | MIT OR Apache-2.0 | [egui releases](https://github.com/emilk/egui/releases), [CHANGELOG](https://github.com/emilk/egui/blob/master/CHANGELOG.md) |
+| Iced (fallback) | 0.14.0, released 2025-12-07 | MIT | [Release 0.14.0](https://github.com/iced-rs/iced/releases/tag/0.14.0), [docs.rs](https://docs.rs/crate/iced/0.14.0/source) |
+| Slint (rejected) | 1.17 (2026-06-24) | GPL-3.0-only, or royalty-free desktop license, or paid embedded | [Slint 1.17 blog](https://slint.dev/blog/slint-1.17-released), [pricing](https://slint.dev/pricing) |
+| egui (rejected) | 0.36.2 (2026-09-08) | MIT OR Apache-2.0 | [egui releases](https://github.com/emilk/egui/releases) |
+| GPUI-Kit (DECIDED) | 0.8.0 published and tested (U0); pins `gpui-pre =0.3.9` (Zed snapshot `zed@93d7456`), optional `gpui-fast 0.1.10` fork (not used) | Apache-2.0 (all crates), docs CC BY 4.0 | [repo](https://github.com/longbridge/gpui-kit), [crates.io](https://crates.io/crates/gpui-kit), [LICENSE-APACHE](https://raw.githubusercontent.com/longbridge/gpui-kit/main/LICENSE-APACHE), [Cargo.toml](https://raw.githubusercontent.com/longbridge/gpui-kit/main/Cargo.toml) |
 
-Accessibility facts: Slint exposes AccessKit-based screen-reader support ([Slint 1.1 blog](https://slint.dev/blog/slint-1.1-released) documents the integration; stability milestone unverified — do not cite a version); [ecosystem survey](https://github.com/intendednull/buiy/blob/main/docs/prior-art/accesskit/ecosystem.md). egui integrates AccessKit via eframe ([accesskit.dev](https://accesskit.dev/)). Iced screen-reader support is on the roadmap but not shipped as of 0.14 ([roadmap discussion](https://news.ycombinator.com/item?id=45599106)).
+GPUI-Kit facts (verified 2026-10-25, tested at 0.8.0 in U0): one-dependency `gpui-kit = "0.8"`
+re-exporting GPUI + `gpui-base` (unstyled behavior/state/infra) +
+`gpui-component` (75+ styled components: Sidebar, DataTable, Editor with
+tree-sitter/LSP, Dialog, Tabs, Progress, Form, Settings, TextView
+Markdown/HTML, Dock, VirtualList, Tree) + assets. Production proof: Longbridge
+Pro desktop app. MSRV effectively Rust 1.92+ (via `oo7 0.6.0`). AccessKit
+accessibility built in ([docs](https://raw.githubusercontent.com/longbridge/gpui-kit/main/website/docs/accessibility.md)).
+Headless UI integration tests incl. Linux offscreen Vulkan
+([docs](https://raw.githubusercontent.com/longbridge/gpui-kit/main/website/docs/test.md)).
+Theming: semantic `ColorTokens`, light/dark, 20+ built-in themes,
+`ThemeRegistry`. Async: GPUI foreground/background executors (`cx.spawn`,
+`cx.background_spawn`); tokio bridged via channels, not built in
+([docs](https://raw.githubusercontent.com/longbridge/gpui-kit/main/website/docs/task.md)).
+Linux: Wayland/X11 sessions + Vulkan driver required; build still needs X11
+dev packages (`libxkbcommon-x11-dev` etc.) even on Wayland-only systems
+([install docs](https://raw.githubusercontent.com/longbridge/gpui-kit/main/website/docs/installation.md),
+[issue #2514](https://github.com/longbridge/gpui-component/issues/2514)); WebView
+on Linux needs X11/XWayland; CI covers Ubuntu x86_64 with rendering tests.
 
-Release highlights relevant to Wenyi: Iced 0.14 added reactive rendering and time-travel debugging ([CHANGELOG](https://github.com/iced-rs/iced/blob/0.14/CHANGELOG.md)); Slint 1.17 added drag-and-drop and takes the toolkit further toward desktop readiness ([Slint 1.17 blog](https://slint.dev/blog/slint-1.17-released)); Slint 1.12 added WGPU support ([Slint blog](https://slint.dev/blog/)); egui 0.36 added `TextEdit::event_filter` and text-selection fixes.
+Accessibility facts: Slint has production AccessKit integration; egui via
+eframe; GPUI-Kit has built-in AccessKit roles/names/states/actions. Iced
+screen-reader support is on the roadmap but not shipped as of 0.14
+([roadmap discussion](https://news.ycombinator.com/item?id=45599106)).
 
-## 2. Comparison on the 10 mission criteria
+## 2. Comparison: GPUI-Kit vs Iced (decided for GPUI-Kit)
 
-Mission criteria for the rewrite target: a modular Rust monolith, single binary, SQLite, no web product, Linux/Wayland-first (openSUSE Tumbleweed), MIT-licensed, Material-3-inspired minimal GUI.
+Slint stays rejected (license friction vs MIT project). egui stays rejected
+(weakest retained-app architecture, manual repaint plumbing).
 
-| # | Criterion | Iced 0.14 | Slint 1.17 | egui 0.36 |
-| --- | --- | --- | --- | --- |
-| 1 | MIT-project license fit | MIT: zero friction, single license for the whole binary | Friction: project code stays MIT but the GUI dependency is GPL-3.0-only unless the royalty-free desktop license (a separate proprietary grant, [terms](https://slint.dev/terms-and-conditions.html)) is accepted and tracked forever | MIT/Apache-2.0: zero friction |
-| 2 | Wayland / Linux-first | winit backend, Wayland supported; pure-Rust rendering stack suits Tumbleweed packaging | Wayland supported (FemtoVG/winit and software backends; WGPU since 1.12); Qt backend optional but pulls Qt deps | eframe/winit, Wayland supported (explicit `wayland` feature in egui-winit) |
-| 3 | Async / long-task story | Elm-style `Command`/`Subscription` over tokio; engine progress streams map directly onto subscriptions; no manual repaint management | `invoke_from_event_loop` + worker threads; async possible but callback-bridged rather than native | Manual: threads/channels plus `request_repaint`; background translation loop must drive repaints explicitly — workable but boilerplate-heavy for a 10k-page job |
-| 4 | Accessibility (screen readers) | Weakest: on roadmap, not shipped | Strongest: production AccessKit integration | Good: AccessKit integration via eframe |
-| 5 | Text-editing richness | `text_editor` widget adequate for proofreading panes and glossary editing | `TextEdit`/`LineEdit` with live-preview tooling; declarative bindings reduce editing bugs | Strongest editor (`TextEdit::event_filter` in 0.36.2, IME/autocorrect support) but immediate-mode state must be managed per frame |
-| 6 | Multi-screen retained app fit | Best: retained Elm architecture, first-class navigation stacks, testable `update` functions | Good: declarative `.slint` markup separates UI from logic, but splits the codebase across two languages | Weakest: immediate-mode suits tools/HUDs; a 7-screen wizard/review app becomes a state-management exercise |
-| 7 | Single-binary distribution | Static Rust binary; no runtime beyond system graphics/fonts | Static binary with software/FemtoVG renderer; style assets compile in | Static binary; font/icon assets embed easily |
-| 8 | Theming (Material-3-expressive minimal) | Full control: custom theme + widget styling in Rust; M3-expressive tokens implementable directly | Builtin Material and Cupertino styles, but M3-expressive customization means fighting the stock style or writing a custom one in `.slint` | Custom visuals require hand-rolled widgets; no theme system to speak of |
-| 9 | Maturity / docs / hiring surface | 0.14 is the most mature Iced to date (reactive rendering, time-travel debugging); Elm docs map 1:1 onto app code | Most commercially backed (SixtyFPS GmbH), live-preview tooling, Figma integration | Most battle-tested renderer, huge widget ecosystem (egui crates), but app-architecture guidance is thin |
-| 10 | OS integration path (tray, dialogs, updater, keyring) | All via small Rust crates (`tray-icon`, `rfd`, `keyring`, custom updater) — same pattern the Tauri shell already proves (see `apps/desktop/src/background.rs`, `native_export.rs`, `updates.rs`) | Same crates usable, but Slint's event loop ownership complicates tray/updater interop | Same crates usable; eframe owns the loop similarly to Iced |
+| # | Criterion | GPUI-Kit 0.7 | Iced 0.14 |
+| --- | --- | --- | --- |
+| 1 | License fit | Apache-2.0: zero friction | MIT: zero friction |
+| 2 | Wayland / Linux-first | Supported with caveats: Vulkan driver required, X11 dev packages needed at build time even on Wayland-only, WebView needs XWayland | winit backend, Wayland supported; pure-Rust stack suits Tumbleweed packaging |
+| 3 | Async / long-task story | GPUI executors + channel/streaming pattern; tokio bridge needed for the existing engine protocol | Elm `Command`/`Subscription` over tokio; engine streams map directly |
+| 4 | Accessibility | Built-in AccessKit | Roadmap only, not shipped |
+| 5 | Text editing (proofreading, CJK) | Editor component (tree-sitter, 200k lines); IME quality on Linux **unverified — spike item** | `text_editor` adequate; CJK workable |
+| 6 | Component coverage for 13 screens | 75+: Sidebar, DataTable, Dialog, Tabs, Progress, Form, Settings, Markdown/HTML TextView, Dock — closest to the React inventory | Stock widgets only; tables/dock/markdown hand-built |
+| 7 | Single-binary distribution | Static binary; heavier system deps (Vulkan, X11 dev libs at build) | Static binary; lighter deps |
+| 8 | Theming (minimal) | Semantic tokens + 20 themes; custom minimal theme via `ThemeRegistry` | Full control in Rust |
+| 9 | Maturity / risk | Production app (Longbridge Pro) but snapshot-dependence: pins `gpui-pre 0.3.9`, optional `gpui-fast` fork; MSRV 1.92+ | 0.14 most mature Iced; no fork dependence |
+| 10 | OS integration (tray, dialogs, updater, keyring) | Via small Rust crates as with Iced; event-loop interop unverified — spike item | Same crates; pattern proven by Tauri shell |
+| 11 | Testing | Headless UI integration tests with offscreen Vulkan on Linux | Headless GUI tests; thinner story |
 
-## 3. Recommendation: Iced (provisional verdict confirmed)
+## 3. U0 spike results — PASS (2026-10-25)
 
-Evidence overturns the provisional pick only if a criterion above is factually wrong; verification found no such evidence. Iced wins on criteria 3, 6, 8 (the three that dominate implementation cost for a multi-screen translation workbench) and ties or wins 1, 7, 9, 10. Slint leads only on accessibility (4) and commercial tooling, at the cost of permanent license tracking against an MIT project. egui leads only on raw editor widgets (5), at the cost of the weakest app architecture (6) and manual repaint plumbing for background jobs (3).
+**Verdict: GPUI-Kit is viable. D9 ratified for GPUI-Kit 0.8 (see doc 16).**
+Spike ran in `/tmp/u0-spike` (isolated; never in the repo), ~2 hours wall time.
 
-Accepted trade-off: Iced has no production screen-reader support. Mitigation is explicit: keep all user-facing strings in a central string table from day one (port `packages/ui/src/i18n` — English + zh-CN — as Fluent/`i18n` resources), keep the widget tree semantic (labels on every control), and re-evaluate Iced accessibility before 1.0; the string-table discipline makes a later toolkit or accessibility-layer swap local. Accessibility work is tracked in `16-decisions-and-open-questions.md`.
+Tested versions (locked in `Cargo.lock`): `gpui-kit 0.8.0`,
+`gpui-component 0.8.0`, `gpui-base 0.8.0`, `gpui-pre =0.3.9` (Zed snapshot
+`zed@93d7456`), `tokio 2.x` (multi-thread runtime), toolchain
+`rustc 1.99.1 stable`. Upstream rev at probe time: `7b14e03f` (2026-10-24).
+License: Apache-2.0 all crates (verified `crates/*/Cargo.toml` +
+`LICENSE-APACHE`); docs CC BY 4.0. Redistribution: preserve copyright +
+license text; no copyleft, no commercial restriction. Upstream-first: no fork
+needed (`gpui-fast` not used).
 
-## 4. Screen plan: 13 nav entries become 7 persistent destinations
+| Spike item | Result | Evidence |
+|---|---|---|
+| 1. Hello-world window on Tumbleweed/Wayland | **PASS** | `Button` + click counter rendered; real click received (`Clicked! total=1`); frames logged; clean `cx.quit()` exit 0; Wayland socket to umbriel ESTAB; AMD GPU (0x1002:0x747e) via Vulkan 1.4 |
+| 2. Text input (CJK programmatic) | **PASS (partial)** | `Input` + `InputState` entity: `set_value("hello CJK: ")` + readback `"hello CJK: "` verified. Live IME composition keystrokes NOT tested (no input-injection harness on this Wayland backend); `zwp_text_input_v3` bindings confirmed in `gpui-pre-linux` (`wayland/client.rs:54`) |
+| 3. Async bridging (background + tokio) | **PASS** | `cx.spawn` + `background_spawn` → entity update ok; external tokio multi-thread runtime + oneshot channel → entity update ok; `block_on` pre-start ok. UI thread never blocked (all sleeps off-thread) |
+| 4. Headless UI test on Linux | **PASS** | Upstream `cargo test -p gpui-kit-recipes --test settings`: `typing_updates_the_owner_after_unrelated_redraws ... ok` (71 s incl. compile) |
 
-Current inventory (`packages/ui/src/routes/manifest.tsx:79-98` routeEntries, 14 entries incl. one redirect; 13 user-facing navEntries in `manifest.tsx:125-139`): Dashboard, CreateProject (`/projects/new`), ProgressPage (`/projects/:pid`), ProofreadingPage (`/projects/:pid/proofreading[/:ci]`), ReviewPage, SubtitlesPage, GlossaryPage, StylePage, ContentsPage, ExportPage, SettingsPage (project), InterfaceSettingsPage (global `/settings`), EventsPage. `navEntries` already groups them into global vs. project audiences and book vs. srt audiences.
+Build commands:
 
-Target IA (native app, no URL routing — a navigation stack replaces paths):
+```sh
+cargo new u0-spike && cd u0-spike
+# Cargo.toml: gpui-kit = "0.8" (+ tokio/futures for probe2)
+RUSTFLAGS="-L /tmp/u0-spike/native-libs" cargo build   # see sysdeps note
+./target/debug/u0-spike            # hello-world + Button + frames
+cargo run --bin probe2             # tokio bridge + background + Input probes
+```
 
-| Target screen | Type | Merges | Rationale |
+System packages (openSUSE Tumbleweed): all present except
+`libxkbcommon-x11-devel` (headers), which has no passwordless install path
+here. Workaround for the spike: symlink
+`native-libs/libxkbcommon-x11.so → /usr/lib64/libxkbcommon-x11.so.0` +
+`RUSTFLAGS="-L …"`. Production builds need the devel package installed
+normally (`zypper in libxkbcommon-x11-devel`). Otherwise: gcc, wayland-devel,
+libxkbcommon-devel, libxcb-devel, vulkan-devel, fontconfig-devel all present;
+runtime needs a working Vulkan driver (present: radeon + lvp ICDs).
+
+Known limitations (verified, not assumed):
+
+- X11 dev headers required at link time even for pure-Wayland apps
+  (linker error `-lxkbcommon-x11` without the symlink; matches upstream
+  issue #2514). Packaging must list the devel package.
+- GPUI pins are exact (`=0.3.9`); any snapshot bump is a coordinated
+  `gpui-kit` release upgrade, not a `cargo update` — depend only on
+  `gpui-kit`, never on `gpui-pre*` directly.
+- MSRV effectively 1.92+ (via `oo7 0.6.0`); tested toolchain 1.99.1.
+- `InputState::set_value` needs `(&mut Window, &mut Context)` — windowed
+  context required even for programmatic edits (verified via compiler).
+- Live IME composition, multi-hundred-page editor perf, and drag-drop into
+  the GPUI window remain untested — carried as U1–U3 risks, not blockers.
+
+## 4. Reference inventory: 13 current screens (parity baseline)
+
+> UI-first rule: the first native implementation reproduces these screens as
+> closely as reasonably possible — translation, not redesign. The 7-destination
+> consolidation below is the post-parity target, not the first milestone.
+
+Current inventory (`packages/ui/src/routes/manifest.tsx:79-98` routeEntries, 14 entries incl. one redirect; 13 user-facing navEntries in `manifest.tsx:125-139`): Dashboard, CreateProject (`/projects/new`), ProgressPage (`/projects/:pid`), ProofreadingPage (`/projects/:pid/proofreading[/:ci]`), ReviewPage, SubtitlesPage, GlossaryPage, StylePage, ContentsPage, ExportPage, SettingsPage (project), InterfaceSettingsPage (global `/settings`), EventsPage. `navEntries` already groups them into global vs. project audiences and book vs. srt audiences. Full per-screen table (source paths, backend ops, states): doc 04 §1 + `18-desktop-parity.md`.
+
+| Target screen | Type | Merges (post-parity) | Rationale |
 | --- | --- | --- | --- |
 | Library | destination | Dashboard + CreateProject entry | One home: project list with status chips; "New project" opens the wizard as a modal flow, not a route |
 | Project overview | destination | ProgressPage + stats/stages (`packages/backend/wenyi_backend/routers/configuration.py:124-206`) | Run control (start/pause/resume/review/export), stage list, live progress; the single place a running job is visible |
@@ -56,7 +132,7 @@ Target IA (native app, no URL routing — a navigation stack replaces paths):
 | Settings | destination | InterfaceSettingsPage + SettingsPage | One settings screen with Global / Project tabs; ends the current split where language policy lives in two places |
 | Activity log | drawer | EventsPage demoted to drawer | Event log becomes a slide-over drawer on Project overview, not a destination; nothing in the current log needs full-screen focus |
 
-Net: 7 persistent destinations (Library, Overview, Read & correct, Review, Glossary, Export, Settings) + conditional Subtitles + Style reference + Activity drawer.
+Net (post-parity): 7 persistent destinations (Library, Overview, Read & correct, Review, Glossary, Export, Settings) + conditional Subtitles + Style reference + Activity drawer.
 
 ## 5. Screen relationships
 
@@ -78,18 +154,39 @@ flowchart TB
     Library --> Settings
 ```
 
-## 6. GUI architecture
+## 6. GUI architecture (toolkit-neutral; binding differs by pick)
 
-Elm architecture, one `Model` per screen plus a shared `App` shell:
+- Navigation is a stack of screens; the Activity drawer and New-project wizard
+  are overlays, not stack entries.
+- Engine binding, phase 1 (UI-first): the native UI talks to the **existing
+  Python desktop backend over the loopback REST + WS contract it already
+  serves** (`transport.ts` + `runtime.ts`: `apiBase` + bearer token from
+  sidecar discovery, WS `/ws/projects/{pid}/progress` with kinds `snapshot |
+  stats | state | progress | batch | chapter | term | pipeline | log`). Same
+  event taxonomy, new renderer — no new backend protocol. Minimal op list:
+  doc 18 §3.
+- Engine binding, phase 2 (post-parity): in-process engine calls replace
+  loopback HTTP per doc 05; the event taxonomy stays identical.
+- Progress rendering: coarse progress at most ~4 Hz (mirrors the 500 ms
+  coalescing in `ws.ts:42-53`); chapter/batch/term events invalidate only
+  affected rows. A 10k-page book must not re-render the chapter list per
+  segment (doc 13 perf budgets).
+- State ownership: the GUI holds no translation truth. Data is read from the
+  backend on demand per visible screen; edits go through backend operations
+  so locks, revision history, and usage ledgers stay single-writer.
+- GPUI-Kit binding: `cx.background_spawn` worker owns the HTTP/WS client;
+  results return via weak entity updates (channel/streaming pattern per
+  GPUI-Kit task docs). Iced fallback binding: `Subscription` over the same
+  stream.
 
-- `App { screen: Screen, nav: NavStack, engine: EngineHandle, settings: Settings }`. Each screen is `ScreenModel` + `view(&self) -> Element<Message>` + `update(&mut self, Message) -> Command<Message>`. Navigation is a stack of `Screen` values; the Activity drawer and New-project wizard are overlays, not stack entries.
-- Engine binding: the translation engine (ported pipeline, see `07-translation-engine.md` and `05-target-architecture.md`) runs on a dedicated tokio runtime inside the same process. The GUI never calls engine functions directly; it sends `EngineCommand` over an mpsc channel and receives `EngineEvent` over a broadcast channel. Iced `Subscription`s convert the broadcast stream into `Message`s. This is the in-process equivalent of today's WebSocket relay (`packages/ui/src/lib/ws.ts:5-17`; kinds `snapshot | stats | state | progress | batch | chapter | term | pipeline | log`) — same event taxonomy, no sockets. The Tauri CSP (`apps/desktop/tauri.conf.json:17`) currently whitelists `http://127.0.0.1:* ws://127.0.0.1:*` for the loopback sidecar; that entire transport is deleted, not ported.
-- Progress rendering: coarse progress (`done/total/label`) updates a header bar at most ~4 Hz (throttle in the subscription, mirroring the 500 ms coalescing in `ws.ts:42-53`); chapter/batch/term events invalidate only the affected list rows. A 10k-page book must not re-render the chapter list per segment — see perf budgets in `13-reliability-and-performance.md`.
-- State ownership: the GUI holds no translation truth. Chapter/segment/glossary data is read from SQLite (`12-data-and-persistence.md`) on demand per visible screen; edits go through engine commands so locks, revision history, and usage ledgers stay single-writer.
+## 7. Visual direction: reproduce first, minimal theme after
 
-## 7. Visual direction: Material-3-expressive, minimal
-
-Iced custom theme implementing a small M3 token set: `primary / on-primary / surface / surface-container / outline` + 3 type roles (title/body/label) + 2 shapes (8dp cards, full-pill chips) + one motion rule (150 ms fades for progress, no animation on data lists). No custom widget library: stock Iced widgets (button, text_input, text_editor, scrollable, pick_list, progress_bar) restyled through the theme. Dark and light schemes from day one (the current UI already supports both; do not regress). Density: single comfortable density — no compact mode in v1.
+Phase 1 reproduces the current look: Tailwind + shadcn-style HSL tokens
+(`packages/ui/src/index.css`, light/dark via `.dark` class), px-scale spacing
+(`tailwind.preset.js`), brand font, existing layout proportions per screen
+(doc 18 checklist). Dark and light schemes from day one — do not regress.
+The minimal custom theme (small token set, 3 type roles, 2 shapes, restrained
+motion) lands only after parity validation.
 
 ## 8. Packaging per OS
 
@@ -103,6 +200,7 @@ Iced custom theme implementing a small M3 token set: `primary / on-primary / sur
 
 - `packages/ui/src/routes/manifest.tsx` (routeEntries, navEntries, isVisibleFor)
 - `packages/ui/src/lib/ws.ts` (ProgressMessage kinds, 500 ms coalescing)
+- `apps/desktop/frontend/src/` (`main.tsx`, `runtime.ts`, `transport.ts`, `platform.ts`, desktop-only components)
 - `apps/desktop/tauri.conf.json` (CSP loopback entries, updater requireSignedVersion)
 - `apps/desktop/Cargo.toml` (tauri 2, rfd 0.15, tauri-plugin-updater 2, keyring-adjacent deps)
 - `apps/desktop/src/main.rs`, `background.rs`, `instance.rs`, `updates.rs`, `native_export.rs`, `native_drop.rs`
@@ -112,4 +210,4 @@ Iced custom theme implementing a small M3 token set: `primary / on-primary / sur
 
 ## Open questions
 
-See `16-decisions-and-open-questions.md` (Iced accessibility re-evaluation gate; updater signing-key custody; RPM maintenance owner).
+See `16-decisions-and-open-questions.md` (updater signing-key custody; RPM maintenance owner; U3 IME retest).

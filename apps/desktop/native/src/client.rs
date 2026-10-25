@@ -795,7 +795,7 @@ pub struct PreviewChapter {
 }
 
 /// `GET /projects/{pid}/chapters[]` — mirrors `ChapterSummary` in `schemas.py`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ChapterSummary {
     pub index: u32,
     #[serde(default)]
@@ -815,7 +815,7 @@ pub struct ChapterSummary {
 
 /// `GET /projects/{pid}/stats` — mirrors `ProjectStats` in `schemas.py`.
 /// Usage/timing are free-form ledgers; the UI reads known keys defensively.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
 pub struct ProjectStats {
     #[serde(default)]
     pub usage: serde_json::Value,
@@ -825,7 +825,7 @@ pub struct ProjectStats {
 }
 
 /// `GET /projects/{pid}/workflow` — mirrors `WorkflowOut` in `schemas.py`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct WorkflowOut {
     pub source: String,
     pub kind: String,
@@ -837,7 +837,7 @@ pub struct WorkflowOut {
     pub progress: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct WorkflowStage {
     pub id: String,
     pub label: String,
@@ -1063,7 +1063,7 @@ impl ExportRequest {
 }
 
 /// `ExportOut` — mirrors `schemas.py`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ExportOut {
     #[serde(default)]
     pub options: serde_json::Value,
@@ -1088,7 +1088,7 @@ pub struct NativeExportPlan {
 }
 
 /// `EventOut` — mirrors `schemas.py`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct EventOut {
     pub id: i64,
     #[serde(rename = "type")]

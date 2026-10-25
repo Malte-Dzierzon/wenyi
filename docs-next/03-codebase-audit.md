@@ -24,12 +24,37 @@ Per-subsystem verdicts for the Rust rewrite. Verdict vocabulary: **port**
 | `packages/backend/wenyi_backend` | HTTP contract: `create_app`, Bearer `TokenMiddleware`, 14 routers, services, emitters, WS relay | api + desktop backends, frontends | **reuse-as-spec** — routes/schemas/WS kinds define behavior to absorb in-process; no HTTP server in target | Med: route-by-route parity checklist (doc 04) |
 | `apps/api/wenyi_api` | PG/Redis/arq adapters, `PostgresStorage`, 13-table `db/schema.sql`, queues `wenyi:workflows`/`wenyi:exports` | web deploys | **remove-later** — platform-specific, no desktop value | Low (isolated) |
 | `apps/desktop/backend/wenyi_desktop` | SQLite catalog, per-project stores, asyncio runner, keyring creds, desktop-only routers | desktop app | **reuse-as-spec then remove** — catalog schema + runner semantics inform Rust design; no Python retained | Med: catalog recovery rules worth porting (doc 12) |
-| `apps/desktop/src` (Tauri host) | single-instance, tray, sidecar spawn, dialogs, updater, drop/export grants | desktop app | **reuse-as-spec (patterns only)** — OS behaviors reimplemented in native Rust GUI (doc 10) | Med: updater/signing flow |
 | `apps/web` + `apps/desktop/frontend` + `packages/ui` + `packages/shared-schema` | React hosts + 13-screen shared UI + generated `api.d.ts` | users (UI) | **reuse-as-spec (UX only)** — 13-screen inventory + workflows port to native GUI (doc 10); all TS deleted | Med: interaction details lost if spec is sloppy |
 | Root `config.yaml`, `pyproject.toml`, `package.json`, `docker/`, `deploy/`, `scripts/` | defaults, workspace manifests, web images/compose, entry/packaging helpers | builds, deploys | **remove-later**; config defaults **port** as Rust defaults; packaging helpers inform the GUI/packaging design (doc 10) | Low |
 | `.github/workflows/` | `tests.yml`, `build.yml`, `desktop.yml` | CI | **adapt** — replaced by Rust CI (doc 14); keep PG/E2E jobs until web deleted | Low |
 | `docs/` (+`zh/`, `design/`) | Current-code guides + unimplemented proposals | developers | **reuse-as-spec selectively** — pipeline/architecture guides inform port; `design/` proposals are explicitly not behavior (`docs/architecture.md`) | Low, but cite carefully |
 | Tests: `packages/core/tests/` (~82 files), backend/api/desktop test dirs, Playwright E2E both apps | Contract/golden coverage incl. `test_architecture_boundaries.py`, `test_orchestrator_contract.py`, `test_storage_injection.py` | confidence | **port the assertions, not the code** — boundary/contract/storage tests become Rust tests; E2E becomes GUI E2E (doc 14) | Med: coverage gaps hide in unported tests |
+
+## Infrastructure classification (verified 2026-10-25)
+
+| Item | Purpose (verified) | Verdict | Reason |
+|---|---|---|---|
+| `docker/Dockerfile.api` (+ `.buildx`) | Web API/worker image (uvicorn/arq, web-only deps) | **Remove** (P8) | Serves only `apps/api`; no CI/registry use |
+| `docker/Dockerfile.web` (+ `.buildx`) | React build + nginx proxy | **Remove** (P8) | Serves only `apps/web` |
+| `docker/nginx.conf` | SPA + `/api` + `/ws` proxy | **Remove** (P8) | Web-only; target has no HTTP surface |
+| `deploy/docker-compose.yml` | pg16/redis7/api/worker/export-worker/web stack | **Remove** (P8) | Web-only hosting; desktop needs none of it (`docs/desktop.md:5`) |
+| `deploy/docker-compose.dev.yml` | Exposes PG/Redis ports for host dev | **Remove** (P8) | Only useful with the web stack |
+| `deploy/docker-compose.buildx.yml` | BuildKit variant selector | **Remove** (P8) | Redundant with plain Dockerfiles |
+| `.dockerignore` | Docker context filter | **Remove** (P8) | Dies with Docker |
+| `.env.example` | Compose + provider key template | **Simplify** (P1) | Keep `*_API_KEY` names as the keyring/env contract; drop DATABASE/REDIS/CORS/mirror vars |
+| `tests.yml` PG/Redis services | Integration-test backends (GH service containers, not repo Docker) | **Keep** until P8 | Required for `pytest -m integration` today; no repo Docker involved |
+| `test_nginx_proxy.py` | Docker-gated nginx test (`WENYI_TEST_DOCKER=1`, never set in CI) | **Remove** (P8) | Tests a deleted proxy; currently always skipped |
+| `build.yml` (CLI PyInstaller) | 5-platform CLI binaries | **Remove** (P8) | CLI is spec-only (doc 01); Rust `clap` binary replaces it |
+| `desktop.yml` (Tauri) | 4-platform desktop bundles + signed updater | **Remove** (P8) | Replaced by single-binary Rust packaging (doc 10 §8) |
+| `docs/design/` + `docs/zh/design/` | Unimplemented proposals | **Keep as reference** | Explicitly not behavior (`docs/architecture.md`); never cite as spec |
+| `docs/zh/` | Chinese translations | **Keep** | User-facing; bilingual rule in `AGENTS.md` |
+| `.agents/skills/` | `land` (targets upstream `dev`), `release-notes` | **Simplify** | `land` targets a branch that doesn't exist in this fork; update or drop at P1 |
+| `scripts/check_*.py`, `package_release.py`, `release_version.py` | Wheel checks, release packaging, version resolution | **Remove** (P8) | Python-packaging-only; `cargo` replaces them |
+| `scripts/desktop_*.py`, `desktop.mjs` | Sidecar build, PE check, updater manifest | **Remove** (P8) | Tauri-packaging-only |
+
+No Kubernetes, Helm, or container-registry publishing exists anywhere in the
+repo (verified: no manifests, no `docker push`/registry workflow, CI builds no
+images).
 
 ## Entry points (all)
 

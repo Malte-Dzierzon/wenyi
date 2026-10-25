@@ -40,9 +40,9 @@ CONTRIBUTING requires: before changing the core translation pipeline, test on a 
 
 **P5 review/polish/QA.** Shadow-only invariant test: run review, assert formal chapter `target`s byte-identical until autofix publishes via the recoverable index. Evidence-index and conflict-detection tests ported from `packages/core/tests/test_review*.py`. Human-judged before/after eval on a public-domain book (see §3).
 
-**P6 GUI.** Headless GUI tests for project lifecycle and progress rendering (no LLM: drive against `FakeProvider` + fixture book); platform tests for single-instance lock, tray presence, file dialogs, updater signature check — ported from the Rust inline tests in `apps/desktop/src/` and the Playwright desktop specs.
+**U0–U6 native UI (against live Python backend).** U0: spike artifacts (throwaway). U1–U5: headless UI tests per screen group (transport/discovery, mocked WS progress streams, editor ops, table/dialog ops, platform behaviors) + live-backend smoke runs; each screen exits on its doc 18 §6 checklist (same ops/payloads, all states reachable, side-by-side screenshots light+dark/en+zh-CN). U6: full parity suite — export bytes identical for the fixture book through old and new UI; Tauri fallback E2E still green until retirement. Platform tests (single-instance, tray, dialogs, updater signature, keyring negative) ported from `apps/desktop/src/` inline tests and Playwright desktop specs.
 
-**P7 CLI + integration.** CLI surface tests asserting command/flag parity with `packages/cli` (spec in the target-CLI doc); end-to-end run of a fixture book through import → translate (fake) → review → export, comparing artifacts against the Python implementation's output on the same fixture.
+**P7 CLI + integration.** CLI surface tests asserting command/flag parity with `packages/cli` (spec in the target-CLI doc); end-to-end run of a fixture book through import → translate (fake) → review → export, comparing artifacts against the Python implementation's output on the same fixture; UI in-process binding regression (same checklists over the new binding).
 
 **P8 removal.** Deletion checklist tests: after each component is removed, workspace-wide grep for its imports/symbols must return empty; final `cargo build` + full offline suite green with no Python/Node toolchain present.
 

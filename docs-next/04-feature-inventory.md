@@ -106,8 +106,18 @@ CLI-supported inputs are declared in help text: `EPUB / FB2 / TXT / Markdown /
 HTML / PDF / DOCX / SRT` (`commands/workflows.py:325`). Export formats:
 `Literal["epub", "txt", "html", "markdown", "pdf", "docx", "srt"]`
 (`packages/backend/wenyi_backend/schemas.py:210`); writer dispatch
-(`packages/core/wenyi_core/assemble/writer.py:35` `assemble`).
+(`packages/core/wenyi_core/assemble/writer.py:35` `assemble`). Detail: doc 09 §2.
 
+| Format | Reader | Writer | Status |
+|---|---|---|---|
+| EPUB | `ingest/epub_reader.py:read_epub()` (+ package/TOC/layout/chapters) | `assemble/epub_writer.py` (+ navigation/presentation/resources) | existing-working → preserve, primary format |
+| FB2 | `ingest/fb2_reader.py:read_fb2()` | EPUB writer (no native FB2 writer) | existing-working → preserve |
+| TXT/MD | `ingest/text_reader.py:read_text()` | `assemble/text_writer.py` | existing-working → preserve |
+| HTML | `ingest/html_reader.py:read_html()` | `assemble/html_writer.py` | existing-working → preserve |
+| DOCX | `ingest/docx_reader.py:read_docx()` | `assemble/docx_writer.py` (+ blocks/numbering/styles) | existing-working → preserve |
+| PDF (MinerU, default) | `ingest/pdf_reader.py` → `pdf_to_html.py:convert_pdf_to_html()` | `assemble/pdf_writer.py` (weasyprint/fpdf2) | existing-working → preserve protocol; native rendering deferred (doc 16 Q3) |
+| PDF (BabelDOC bridge) | `ingest/pdf_babeldoc.py` via `pdf_bridge/client.py` (HTTP-only, AGPL isolation) | `_assemble_pdf_babeldoc()` | existing-working → preserve bridge boundary exactly |
+| SRT | `ingest/srt_reader.py:parse_srt()` | `assemble/srt_writer.py` | existing-working → preserve |
 
 ## 6. Glossary
 

@@ -64,6 +64,9 @@ pub struct Dashboard {
     confirm_delete: Option<Project>,
     /// Called when a card body is clicked — mirrors the overlay `<Link>`.
     on_open: Option<std::rc::Rc<dyn Fn(Project, &mut Window, &mut App)>>,
+    /// Whether this screen is currently shown. The App shell sets it on
+    /// navigation; the 5s poll timer only re-arms while visible.
+    visible: bool,
 }
 
 impl Dashboard {
@@ -75,6 +78,7 @@ impl Dashboard {
             deleting: None,
             confirm_delete: None,
             on_open: None,
+            visible: true,
         }
     }
 
@@ -88,6 +92,18 @@ impl Dashboard {
     pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
         self.client = Some(client);
         self.refresh(cx);
+    }
+
+    /// Called by the App shell on navigation. Becoming visible resumes the
+    /// poll loop with an immediate refresh (the timer chain stops on its own
+    /// while hidden, so at most one chain is ever live).
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if visible && !self.visible {
+            self.visible = true;
+            self.refresh(cx);
+        } else {
+            self.visible = visible;
+        }
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -104,25 +120,35 @@ impl Dashboard {
                 match result {
                     Ok(projects) => {
                         tracing::info!(count = projects.len(), "projects fetched");
-                        view.projects = Some(projects);
-                        view.error = None;
+                        // Skip the re-render when nothing changed.
+                        if view.projects.as_ref() != Some(&projects) || view.error.is_some() {
+                            view.projects = Some(projects);
+                            view.error = None;
+                            cx.notify();
+                        }
                     }
                     Err(err) => {
                         tracing::warn!(error = %err, "projects fetch failed");
-                        view.error = Some(err.to_string());
+                        let msg = err.to_string();
+                        if view.error.as_ref() != Some(&msg) {
+                            view.error = Some(msg);
+                            cx.notify();
+                        }
                     }
                 }
-                cx.notify();
             });
         })
         .detach();
         // 5s refetch like the React query (`refetchInterval: 5000`).
+        // Only re-arms while visible; navigation resumes via `set_visible`.
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(5))
                 .await;
             _ = this.update(cx, |view: &mut Dashboard, cx| {
-                view.refresh(cx);
+                if view.visible {
+                    view.refresh(cx);
+                }
             });
         })
         .detach();

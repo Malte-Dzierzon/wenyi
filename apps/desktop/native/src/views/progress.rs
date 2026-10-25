@@ -34,6 +34,7 @@ use crate::{
 /// Load all progress data in one background round-trip.
 /// Report fetch failures are non-fatal (mirrors the disclosure-scoped
 /// `ErrorNotice`): stored separately so the page still renders.
+#[derive(PartialEq)]
 struct Snapshot {
     project: Project,
     project_total_words: u64,
@@ -81,6 +82,9 @@ pub struct ProgressView {
     /// Cross-screen link into Contents (mirrors the React
     /// "read contents source" link), set by the App pass.
     on_open_contents: Option<std::rc::Rc<dyn Fn()>>,
+    /// Whether this screen is currently shown; the 3s busy-poll timer only
+    /// re-arms while visible (set by the App shell on navigation).
+    visible: bool,
 }
 
 impl ProgressView {
@@ -95,6 +99,18 @@ impl ProgressView {
             translating_chapter: None,
             usage_group: UsageGroup::ByStage,
             on_open_contents: None,
+            visible: true,
+        }
+    }
+
+    /// Called by the App shell on navigation. Becoming visible resumes the
+    /// poll loop with an immediate refresh.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if visible && !self.visible {
+            self.visible = true;
+            self.refresh(cx);
+        } else {
+            self.visible = visible;
         }
     }
 
@@ -120,23 +136,33 @@ impl ProgressView {
             _ = this.update(cx, |view: &mut ProgressView, cx| {
                 match result {
                     Ok(snapshot) => {
-                        view.snapshot = Some(snapshot);
-                        view.error = None;
+                        if view.snapshot.as_ref() != Some(&snapshot) || view.error.is_some() {
+                            view.snapshot = Some(snapshot);
+                            view.error = None;
+                            cx.notify();
+                        }
                     }
                     Err(err) => {
-                        view.error = Some(err.to_string());
+                        let msg = err.to_string();
+                        if view.error.as_ref() != Some(&msg) {
+                            view.error = Some(msg);
+                            cx.notify();
+                        }
                     }
                 }
-                cx.notify();
             });
         })
         .detach();
         // Poll while busy (WS lands later); 3s cadence like chapter queries.
+        // Only re-arms while visible; navigation resumes via `set_visible`.
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(3))
                 .await;
             _ = this.update(cx, |view: &mut ProgressView, cx| {
+                if !view.visible {
+                    return;
+                }
                 let busy = view
                     .snapshot
                     .as_ref()

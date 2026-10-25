@@ -86,6 +86,9 @@ pub struct ExportView {
     order_select: Option<Entity<SelectState<Vec<String>>>>,
     pdf_select: Option<Entity<SelectState<Vec<String>>>>,
     pdf_select_options: Vec<String>,
+    /// Whether this screen is currently shown; the 2s active-export poll
+    /// only re-arms while visible (set by the App shell on navigation).
+    visible: bool,
 }
 
 impl ExportView {
@@ -118,6 +121,18 @@ impl ExportView {
             order_select: None,
             pdf_select: None,
             pdf_select_options: Vec::new(),
+            visible: true,
+        }
+    }
+
+    /// Called by the App shell on navigation. Becoming visible resumes the
+    /// active-export poll with an immediate refresh when exports are active.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if visible && !self.visible {
+            self.visible = true;
+            self.refresh_exports(cx);
+        } else {
+            self.visible = visible;
         }
     }
 
@@ -227,6 +242,9 @@ impl ExportView {
     /// 2s refetch while any export is pending/running/queued (mirrors
     /// `refetchInterval` in the source).
     fn schedule_poll(&mut self, cx: &mut Context<Self>) {
+        if !self.visible {
+            return;
+        }
         let active = self
             .exports
             .as_ref()
@@ -240,7 +258,9 @@ impl ExportView {
                 .timer(std::time::Duration::from_secs(2))
                 .await;
             _ = this.update(cx, |view: &mut ExportView, cx| {
-                view.refresh_exports(cx);
+                if view.visible {
+                    view.refresh_exports(cx);
+                }
             });
         })
         .detach();
@@ -258,14 +278,20 @@ impl ExportView {
             _ = this.update(cx, |view: &mut ExportView, cx| {
                 match result {
                     Ok(list) => {
-                        view.exports_error = None;
-                        view.exports = Some(list);
+                        if view.exports.as_ref() != Some(&list) || view.exports_error.is_some() {
+                            view.exports_error = None;
+                            view.exports = Some(list);
+                            cx.notify();
+                        }
                     }
                     Err(err) => {
-                        view.exports_error = Some(err.to_string());
+                        let msg = err.to_string();
+                        if view.exports_error.as_ref() != Some(&msg) {
+                            view.exports_error = Some(msg);
+                            cx.notify();
+                        }
                     }
                 }
-                cx.notify();
                 view.schedule_poll(cx);
             });
         })

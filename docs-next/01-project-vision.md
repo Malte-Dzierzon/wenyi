@@ -4,104 +4,70 @@
 
 Wenyi becomes a single native Rust desktop application: one binary, local-first,
 EPUB-first, able to translate book-length works (up to ~10k pages) on a Linux
-desktop. The direction is stated in `README.md` (fork statement): "a native
-desktop application with a Rust backend and native Rust desktop GUI", "one
-native desktop app; no separate web application or browser-based frontend".
+desktop (Wayland on openSUSE Tumbleweed first; X11/other distros best-effort).
 
-Concretely, the end-state is:
-
-- **Native Rust desktop.** Both engine and GUI are Rust; no Python runtime, no
-  browser WebView, no sidecar process. See doc 05 for the crate layout.
-- **Local-first.** All project state lives in local SQLite; translation runs
-  in-process; the only network traffic is LLM API calls (and optional
-  MinerU/BabelDOC conversion calls). No account, no server, no sync.
+- **Native Rust desktop.** Engine and GUI are Rust; no Python runtime, no
+  browser WebView, no sidecar process. Crate layout: doc 05.
+- **Local-first.** All project state in local SQLite; translation in-process;
+  the only network traffic is LLM API calls (plus optional MinerU/BabelDOC
+  conversion). No account, no server, no sync.
 - **EPUB-first.** EPUB round-trip fidelity (TOC, anchors, annotations, images,
-  bilingual styling) is the highest-priority format behavior; other formats
-  follow. Current EPUB semantics to preserve are in doc 09.
-- **10k-page scale.** Batch checkpoints, resumability, and streaming progress
-  must hold at book scale, not just short-story scale.
-- **Wayland-first, openSUSE Tumbleweed-first.** Primary development and test
-  target is Wayland on openSUSE Tumbleweed; X11/other distros are best-effort.
-  The GUI must be a minimal Material-3-inspired design (shared verdict: no
-  Electron/Tauri/WebView shell).
+  bilingual styling) is the top format priority; other formats follow (doc 09).
+- **Minimal GUI, UI-first.** Native UI rebuilt against the live Python backend
+  first (translation, not redesign — doc 18); GPUI-Kit 0.8, decided by U0
+  spike (doc 10 §3). Consolidation to 7 destinations happens only after
+  parity.
 
 ## Non-goals
 
-- **No web product or server.** No browser frontend, no self-hosted multi-user
-  mode, no `apps/web`, no `packages/ui` as a web stack (see doc 17).
-- **No PostgreSQL / Redis / Arq / Docker / deploy tooling in the final
-  product.** These exist only to serve the web platform (`apps/api`,
-  `deploy/`, `docker/`); the desktop product uses SQLite only (see doc 02).
-- **No CLI as a shipped product surface.** The CLI command surface is reused
-  *as a spec* for headless/scripted use only if cheap; it is not a supported
-  product (doc 17 decides).
+- **No web product or server.** No `apps/web`, no `apps/api`, no PG/Redis/arq,
+  no `docker/`/`deploy/` (doc 17). These serve only the web platform (doc 02).
 - **No new features during the rewrite.** Parity first; improvements go through
   doc 16 after parity.
+- **No CLI as a shipped product.** The CLI surface is a spec for headless use
+  (doc 04 §2); the GUI is the product.
 
-## Users and workflows
+## Core workflows (from `packages/ui/src/routes/manifest.tsx`)
 
-The user is a single reader/translator working with long-form texts (novels,
-monographs, narrative nonfiction — `README.md`, "Current functionality"). Core
-workflows, preserved from the current 13-screen UI (`packages/ui/src/routes/manifest.tsx`):
-
-1. **Translate a book:** import source → configure models/languages → run
-   whole-book pipeline (prescan, translate, polish, review) → export.
-2. **Control terminology:** inspect/approve glossary terms and resolve
-   conflicts mid- or post-translation.
+1. **Translate a book:** import → configure models/languages → run pipeline
+   (prescan, translate, polish, review) → export.
+2. **Control terminology:** inspect glossary terms, resolve conflicts.
 3. **Review with evidence:** read reviewer issues anchored to segments, apply or
    reject autofixes, proofread paragraph-by-paragraph.
-4. **Resume and re-export:** reopen a project months later, continue an
-   interrupted run, export to another format without retranslating.
-5. **Translate subtitles:** lightweight SRT path without glossary/polish/review
-   (`AGENTS.md`: "SRT independent of book Orchestrator").
+4. **Resume and re-export:** reopen months later, continue interrupted runs,
+   export to another format without retranslating.
+5. **Translate subtitles:** lightweight SRT path, no glossary/polish/review.
 
-## Guiding principles
+## Principles
 
-1. **Local-first and offline-capable.** Everything except model inference works
-   without a network; keys never leave the machine except to the provider.
-2. **One binary.** Single installable artifact; no sidecar, no runtime to
-   install (extends today's desktop promise in `docs/desktop.md`: "you do not
-   need to install Python or deploy a server").
-3. **Boring architecture.** Flat modules, explicit dependencies, no frameworks
-   beyond need; dependency direction `UI → engine → storage` only (doc 05).
-4. **Parity before polish.** Every migration phase exits on a parity checklist
-   (doc 04), not on new capability.
+1. **Local-first.** Everything except model inference works offline; keys never
+   leave the machine except to the provider.
+2. **One binary.** No sidecar, no runtime to install.
+3. **Boring architecture.** `UI → engine → storage` only (doc 05); no
+   frameworks beyond need.
+4. **Parity before polish.** Every phase exits on the doc 04 checklist.
 5. **Deterministic core, model at the edges.** Pure functions for segmentation,
-   anchors, punctuation, term matching; LLM calls isolated behind a router
-   interface (current split: `wenyi_core/markup/`, `postprocess/` vs
-   `wenyi_core/llm/`).
+   anchors, punctuation, term matching; LLM calls behind a router interface.
 6. **Stable identities.** Segment/chapter/anchor IDs survive reruns and
    re-exports (`AGENTS.md` state invariants).
 7. **Atomic, resumable state.** Manifest-last commits, batch checkpoints,
-   once-only usage accounting (`AGENTS.md` state invariants; doc 07).
-8. **Evidence over assertion.** Review issues must cite segments; quality claims
-   need golden-file or A/B evidence (doc 14).
-9. **Secrets stay secret.** Keys from environment or OS keyring only; never
-   plaintext in SQLite/YAML/JSON/logs (`AGENTS.md` configuration section).
-10. **Delete to finish.** Web stack, Python product code, and Tauri shell are
-    removed after parity — no dual-stack maintenance (doc 17).
+   once-only usage accounting (doc 07).
+8. **Secrets stay secret.** Keys from environment or OS keyring only; never
+   plaintext in SQLite/YAML/JSON/logs.
+9. **Delete to finish.** Web stack, Python product code, Tauri shell removed
+   after parity — no dual-stack maintenance (doc 17).
 
 ## Success criteria
 
-- A user can install one binary on openSUSE Tumbleweed (Wayland), import an
-  EPUB, translate a full book with glossary + review, and export EPUB/DOCX —
-  with no Python, no server, no browser involved.
-- Parity checklist (doc 04) passes: pipeline stages, formats, glossary, review,
-  provider set, and 13-screen workflows behave as audited (doc 03).
-- Interrupted runs resume without rework or double-billing; exports are
-  byte-stable snapshots.
-- Test gates pass: unit + golden-file + GUI E2E + model-quality comparison on
-  the reference text (doc 14).
-- Repository contains only the Rust product plus plan docs; all Python/TS
-  product code, Docker, and deploy tooling deleted (doc 17).
+- One binary on Tumbleweed/Wayland: import EPUB → translate full book with
+  glossary + review → export EPUB/DOCX. No Python, server, or browser.
+- Doc 04 checklist passes; interrupted runs resume without rework or
+  double-billing; exports are byte-stable snapshots.
+- Test gates pass: unit + golden-file + GUI E2E + model-quality comparison
+  (doc 14).
+- Repo contains only the Rust product plus plan docs (doc 17).
 
 ## Sources
 
-- `README.md` (fork direction, current functionality, limitations)
-- `AGENTS.md` (project positioning, state invariants, secrets rule)
-- `docs/desktop.md` (single-artifact promise, workspace pages)
+- `README.md`, `AGENTS.md`, `docs/desktop.md`
 - `packages/ui/src/routes/manifest.tsx` (13-screen inventory)
-
-## Open questions
-
-See `16-decisions-and-open-questions.md`.

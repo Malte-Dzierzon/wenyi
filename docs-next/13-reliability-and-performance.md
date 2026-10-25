@@ -35,7 +35,7 @@ One `jobs` table in `catalog.sqlite` (schema in doc 12) replaces arq + Redis que
 
 ## 5. Progress events (in-process)
 
-Same taxonomy as `TranslationEvent` (`events.py:21-34`) and `ws.ts` kinds, delivered over an mpsc/broadcast channel to an Iced `Subscription` (doc 10 §6): `snapshot | state | progress | batch | chapter | term | pipeline | log | stats | final`. Throttle: coarse `progress` at ≤4 Hz; `chapter`/`batch` on completion only; `stats` (usage/timing) on change. Chapter lists render from paged SQLite reads; event handlers invalidate rows, never rebuild lists.
+Same taxonomy as `TranslationEvent` (`events.py:21-34`) and `ws.ts` kinds, delivered over the UI event channel (binding per framework pick, doc 10 §6): `snapshot | state | progress | batch | chapter | term | pipeline | log | stats | final`. Throttle: coarse `progress` at ≤4 Hz; `chapter`/`batch` on completion only; `stats` (usage/timing) on change. Chapter lists render from paged SQLite reads; event handlers invalidate rows, never rebuild lists.
 
 ## 6. Perf budgets
 

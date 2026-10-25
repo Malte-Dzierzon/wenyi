@@ -1,30 +1,53 @@
 # Migration Roadmap
 
-Phased, dependency-ordered plan for the Rust-native rewrite. Each phase lists scope, dependencies, deliverables, acceptance, risks, and tests. No big bang: every phase lands a working, tested increment on top of the previous one.
+Phased, dependency-ordered plan for the Rust-native rewrite. Each phase lists scope, dependencies, deliverables, acceptance, risks, and tests. No big bang: every phase lands a working, tested increment on top of the previous one. **UI-first order (revised 2026-10-25):** the native GUI is rebuilt against the live Python backend first (U-phases), then the engine is ported behind the stable UI (P-phases) — the Tauri app stays as fallback until parity.
 
 ## Dependency map
 
 ```mermaid
 graph TD
-    P0[P0 audit — done] --> P1[P1 foundation: workspace, config, store, logging]
+    P0[P0 audit — done] --> U0[U0 spike: framework pick]
+    U0 --> U1[U1 shell + Library: transport + screens 1-2]
+    U1 --> U2[U2 overview + progress: WS + run control]
+    U2 --> U3[U3 read & correct: editor + history]
+    U3 --> U4[U4 glossary + review + style]
+    U4 --> U5[U5 export + desktop layer + rest]
+    U5 --> U6[U6 parity validation + Tauri/React retire]
+    U6 --> P1[P1 foundation: workspace, config, store, logging]
     P1 --> P2[P2 document processing: EPUB round-trip first]
     P1 --> P3[P3 providers: trait + FakeProvider + 2 real]
     P2 --> P4[P4 pipeline: translate + glossary]
     P3 --> P4
     P4 --> P5[P5 review / polish / QA]
-    P4 --> P6[P6 GUI shell + project views]
-    P5 --> P6
-    P2 --> P7[P7 CLI parity + integration validation]
+    P5 --> P7[P7 CLI parity + integration validation]
     P4 --> P7
-    P6 --> P7
-    P7 --> P8[P8 legacy removal]
+    P7 --> P8[P8 legacy removal: Python + loopback]
+    CUT[CUT web+docker — anytime after U0] -.-> P8
 ```
 
-P2 and P3 are independent given P1 (no edge between them) and can proceed in parallel. P6 starts after P4 lands its domain APIs (the GUI renders pipeline state; it must not design its own). P7 integrates everything behind the CLI surface. P8 deletes only after P7 proves parity.
+U0–U6 rebuild the UI against the **live Python backend** (doc 18); the Tauri
+app stays as fallback until U6. P1–P5 then port the engine behind the stable
+native UI; P7 validates; P8 deletes Python + the loopback contract. The
+web+docker cut (doc 17 rows 1–4) is independent — proven safe now, executable
+anytime (recommended: right after U0, to shrink the tree before UI work).
+
+Minimal-first scoping: each phase ports the smallest behavior that keeps the
+product coherent, deferring the rest explicitly. U1–U5 follow doc 18 §5 order.
+P2 = EPUB + TXT/MD/HTML first (DOCX/SRT/FB2 next, PDF last per doc 09 §4).
+P3 = OpenAI-compatible + DeepSeek + Ollama first (D5a). P4 = standard mode
+first, `best_of_three` after. P5 = review + autofix first, precision paths
+only if the eval corpus proves need. Anything deferred is recorded in the
+phase acceptance record (doc 14 §6), not silently dropped.
 
 ## Why this seam order
 
-The dependency direction in the current codebase (`AGENTS.md`: CLI/Web/Desktop → Orchestrator → domain services → `agents/ingest/glossary/assemble/Storage`) dictates bottom-up porting. Document processing (P2) is deterministic and LLM-free, so it yields the first byte-comparable parity proof without any model access. Providers (P3) are the only network seam, isolated behind `LLMClient`, so they port as one trait plus fakes. The pipeline (P4) is the first phase that needs both — hence it waits for both. GUI (P6) comes after the domain is stable because the current UI (`packages/ui`, 13 routes in `routes/manifest.tsx`) is a thin host over backend state; porting screens before the state exists invites inventing a second contract. CLI parity (P7) doubles as the integration harness. Removal (P8) is last, unconditionally — see `17-removal-plan.md`.
+The UI is a thin host over backend state (`packages/ui`, 13 routes in
+`routes/manifest.tsx`; desktop transport in `transport.ts`/`runtime.ts`), so
+rebuilding it first against the **unchanged loopback contract** cannot invent
+a second contract — the contract is the spec (doc 18 §3). The Python backend
+stays the behavior oracle throughout; engine phases (P1–P5) then port behind
+a stable, already-validated UI. CLI parity (P7) doubles as the integration
+gate before Python deletion (P8).
 
 ## Phases
 
@@ -32,10 +55,64 @@ The dependency direction in the current codebase (`AGENTS.md`: CLI/Web/Desktop �
 
 Scope: read-only survey of all workspaces. Deliverable: the shared repo brief + per-area audit notes (basis for docs-next). Acceptance: every architectural claim in planning docs cites an existing path. No tests.
 
-### P1 — Foundation
+### U0 — Framework spike (done, PASS 2026-10-25)
 
-Scope: Cargo workspace layout (`crates/` for domain, `crates/cli`, `crates/gui`), config loading (YAML defaults byte-identical to `_DEFAULT_CONFIG_YAML` in `packages/core/wenyi_core/config.py`), SQLite store (artifact keys, atomic commit, run locks), logging with secret redaction, error taxonomy.
-Dependencies: P0. Deliverables: building workspace, config + store + logging crates with unit tests.
+Scope was the four pass/fail items in doc 10 §3. All green; D9 ratified for
+GPUI-Kit 0.8. Evidence: doc 10 §3 results table + locked versions. Residual
+risk (live IME composition) retests in U3.
+
+### U1 — Shell + Library (in progress: shell + Dashboard done 2026-10-25)
+
+Scope: native window + nav shell + Dashboard + Create project (doc 18 §5 step 1). Backend: live Python sidecar via loopback REST (discovery, list/create/preview/upload).
+Dependencies: U0 (done, PASS). Deliverables: app that lists and creates projects against the real backend.
+Acceptance: screen 1–2 checklist (doc 18 §6); multipart upload + preview work; Tauri app untouched as fallback.
+Progress 2026-10-25: `apps/desktop/native/` scaffolded (`main`, `backend`, `client`, `theme`, `views::{app,dashboard}`); sidecar spawn + attach + shutdown verified live; Dashboard `GET /projects` + 5s refetch + delete flow verified against real sidecar; `scripts/desktop-ui.sh [old|native]` switching works. Remaining: Create project screen (upload + preview + multipart), Dashboard card click-through, dark mode wiring, pixel-level visual comparison (no screenshot path in this environment).
+Risks: sidecar discovery protocol mismatch — mitigated by reusing the exact `runtime.ts`/`transport.ts` semantics.
+Tests: headless UI tests for list/create; transport unit tests; see doc 14 §4.
+
+### U2 — Overview + progress (WS + run control)
+
+Scope: Progress/overview screen (doc 18 §5 step 2): run control (translate/prepare/pause/resume), WS progress rendering, report view.
+Dependencies: U1. Deliverables: end-to-end translation run driven from the native UI.
+Acceptance: screen 3 checklist; 4 Hz coarse progress + targeted invalidation; export bytes identical vs Tauri-driven run on the fixture book.
+Risks: WS reconnect/backoff parity — mitigate by porting `ws.ts` semantics exactly.
+Tests: mocked-stream progress tests + live-backend run test; see doc 14 §4.
+
+### U3 — Read & correct (editor + history)
+
+Scope: Contents + Proofreading screens (doc 18 §5 step 3): chapter list, segment editor, revision history, precision drafts.
+Dependencies: U2. Deliverables: full chapter/segment read + edit path.
+Acceptance: screens 6+8 checklist; CJK editing verified by a human pass; edit → persisted + visible ≤ 100 ms (doc 13 budget).
+Risks: editor component gaps (IME, large chapters) — spike de-risks, but real-book testing may surface more; record as U6 caveats, not silent cuts.
+Tests: editor + history tests; see doc 14 §4.
+
+### U4 — Glossary + review + style
+
+Scope: Glossary, Review, Style screens (doc 18 §5 steps 4–5): term tables + conflicts + import/export, review runs + evidence, synopsis/digest editing.
+Dependencies: U3. Deliverables: terminology + QA workflows in the native UI.
+Acceptance: screens 4+5+7 checklist; conflict resolve + review run work end to end against the live backend.
+Risks: DataTable perf on large glossaries — mitigate with virtualized lists + paged reads.
+Tests: table/dialog/run tests; see doc 14 §4.
+
+### U5 — Export + desktop layer + rest
+
+Scope: Export + native save, credentials/MinerU, updater + release notes, Settings (project + interface), Subtitles, Events (doc 18 §5 steps 6–7). Single-instance/tray/dialogs/keyring ports.
+Dependencies: U4. Deliverables: feature-complete native desktop app.
+Acceptance: screens 9–13 checklist + desktop-only layer; keyring negative test (no plaintext secrets); signed updater test.
+Risks: updater-channel continuity for existing installs (Q4 must land before U6).
+Tests: platform tests (instance, tray, dialogs, updater, keyring); see doc 14 §4.
+
+### U6 — Parity validation + Tauri/React retire
+
+Scope: full doc 18 §6 checklist across all screens (light + dark, en + zh-CN), then delete the Tauri shell + React frontend + `@wenyi/ui` + `shared-schema` per doc 17 rows 1–2 + 6 (TS part).
+Dependencies: U5. Deliverables: native UI as the only desktop UI; removal record.
+Acceptance: every screen checklist signed off; desktop E2E-equivalent coverage green; `grep from '@wenyi/` empty; Python backend + CLI untouched and passing.
+Risks: premature deletion — mitigated structurally (doc 17 preconditions).
+Tests: parity suite; see doc 14 §4.
+### P1 — Foundation (engine port starts here)
+
+Scope: Cargo workspace layout for the engine (`store`, `llm`, `doc`, `engine`, `cli` crates; `gui` crate already exists from U-phases), config loading (YAML defaults byte-identical to `_DEFAULT_CONFIG_YAML`), SQLite store (artifact keys, atomic commit, run locks), logging with secret redaction, error taxonomy.
+Dependencies: U6 (stable native UI + loopback contract as the integration spec). Deliverables: building workspace, config + store + logging crates with unit tests.
 Acceptance: default config renders byte-identical YAML; store round-trip + crash-recovery tests green; canary-secret log test green.
 Risks: SQLite concurrency semantics differing from Python `sqlite3` usage — mitigate by porting the lock discipline (`packages/core/wenyi_core/storage/` + `apps/desktop/backend/wenyi_desktop/local_*.py` patterns), not inventing new ones.
 Tests: deterministic unit tests; see doc 14 §4.
@@ -72,32 +149,26 @@ Acceptance: shadow-only invariant test (formal targets untouched until autofix);
 Risks: autofix publishing bugs corrupt formal text — mitigate with the recoverable-index requirement and rollback tests.
 Tests: port of `test_review*.py`; see doc 14 §4.
 
-### P6 — GUI
-
-Scope: native GUI (framework per doc 16) with the 13-screen inventory from `packages/ui/routes/manifest.tsx` as UX spec, progress/event rendering (port of the `/ws/projects/{pid}/progress` event kinds as in-process messages), single-instance/tray/dialogs/updater/keyring behaviors (ports of `apps/desktop/src/` modules + `local_credentials.py` keyring discipline).
-Dependencies: P4 (domain APIs), P5 (review screens need review state). Deliverables: working desktop app against local SQLite, no web product.
-Acceptance: headless GUI tests for project lifecycle; platform tests for single-instance, tray, dialogs, signed updater; keyring negative test (no plaintext secrets).
-Risks: framework immaturity on Wayland — decision and fallback in doc 16.
-Tests: GUI + platform tests; see doc 14 §4.
+### (P6 retired — superseded by U0–U6; number kept vacant to preserve history.)
 
 ### P7 — CLI parity + integration validation
 
-Scope: CLI surface port (commands in `packages/cli` as spec), full fixture-book run Python-vs-Rust artifact comparison, packaging (single binary, Linux-first per target verdicts).
-Dependencies: P2 + P4 + P6. Deliverables: CLI with identical command/flag surface; integration report.
-Acceptance: CLI help/flag diff empty vs Python CLI; fixture-book artifacts structurally identical; full offline suite green on clean checkout; quality eval recorded.
+Scope: CLI surface port (commands in `packages/cli` as spec), full fixture-book run Python-vs-Rust artifact comparison, packaging (single binary, Linux-first per target verdicts). Native UI switches from loopback HTTP to in-process engine calls (taxonomy unchanged, doc 10 §6).
+Dependencies: P2 + P4 + U6. Deliverables: CLI with identical command/flag surface; in-process UI binding; integration report.
+Acceptance: CLI help/flag diff empty vs Python CLI; fixture-book artifacts structurally identical; full offline suite green on clean checkout; quality eval recorded; UI works identically over in-process binding.
 Risks: flag-parity drift — mitigate with a generated parity test from the Typer app definition.
 Tests: CLI parity tests, end-to-end comparison; see doc 14 §4.
 
 ### P8 — Legacy removal
 
-Scope: delete per `17-removal-plan.md`, in dependency-safe order, each item only after its parity precondition is proven.
+Scope: delete per `17-removal-plan.md`, in dependency-safe order, each item only after its parity precondition is proven. (Web+docker rows may already be cut — see CUT edge.)
 Dependencies: P7. Deliverables: Rust-only repo (+ `docs/` as reference, LICENSE, history).
 Acceptance: per-item preconditions + verification steps all signed off; grep-clean for removed symbols; build + suite green without Python/Node toolchains.
 Risks: premature deletion — mitigated structurally: nothing is removed before migrated + validated (doc 17).
 
-## First implementation task (recommended)
+## First implementation task (done: U0 PASS; next: U1)
 
-P1 config + logging skeleton: create the Cargo workspace, port `_DEFAULT_CONFIG_YAML` loading with a byte-identical test, and add the secret-redacting logger with the canary test. Rationale: it is the smallest task that establishes the workspace conventions, the evidence-citation habit, and the secret-handling discipline every later phase depends on — and it is fully verifiable without network, models, or fixtures.
+U1 shell + Library (doc 18 §5 step 1, doc 15 U1): native window + nav shell + Dashboard + Create project against the live Python sidecar. Requires explicit U1 authorization per the U0 task — not started here.
 
 ## No-big-bang rationale
 

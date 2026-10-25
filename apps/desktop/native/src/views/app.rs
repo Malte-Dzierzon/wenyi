@@ -209,11 +209,60 @@ impl App {
             }
         }
         self.current_project = Some(project.clone());
-        self.location = Location::Project {
+        let location = Location::Project {
             project,
             screen: ProjectNav::Overview,
         };
+        self.navigate(location, cx);
+    }
+
+    /// Navigate to `location`, pausing poll loops on the previously visible
+    /// view and resuming them on the newly visible one. Only polling views
+    /// (dashboard / overview / events / export / project settings) need the
+    /// flag; one-shot views are unaffected.
+    fn navigate(&mut self, location: Location, cx: &mut Context<Self>) {
+        let old = std::mem::replace(&mut self.location, location.clone());
+        self.set_location_visible(&old, false, cx);
+        self.set_location_visible(&location, true, cx);
         cx.notify();
+    }
+
+    /// Apply a visibility flag to the polling view (if any) behind `location`.
+    fn set_location_visible(
+        &mut self,
+        location: &Location,
+        visible: bool,
+        cx: &mut Context<Self>,
+    ) {
+        match location {
+            Location::Global(GlobalNav::Projects) => {
+                self.dashboard.update(cx, |d, cx| d.set_visible(visible, cx));
+            }
+            Location::Project { project, screen } => match screen {
+                ProjectNav::Overview => {
+                    if let Some(view) = self.progress_views.get(&project.id) {
+                        view.update(cx, |v, cx| v.set_visible(visible, cx));
+                    }
+                }
+                ProjectNav::Events => {
+                    if let Some(view) = self.event_views.get(&project.id) {
+                        view.update(cx, |v, cx| v.set_visible(visible, cx));
+                    }
+                }
+                ProjectNav::Export => {
+                    if let Some(view) = self.export_views.get(&project.id) {
+                        view.update(cx, |v, cx| v.set_visible(visible, cx));
+                    }
+                }
+                ProjectNav::Settings => {
+                    if let Some(view) = self.settings_views.get(&project.id) {
+                        view.update(cx, |v, cx| v.set_visible(visible, cx));
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
     }
 
     /// Map a [`GlobalNav`] entry to its Lucide icon.
@@ -248,8 +297,7 @@ impl App {
             .active(active)
             .collapsed(self.sidebar_collapsed)
             .on_click(cx.listener(move |this: &mut App, _, _, cx| {
-                this.location = Location::Global(nav);
-                cx.notify();
+                this.navigate(Location::Global(nav), cx);
             }))
     }
 
@@ -270,11 +318,13 @@ impl App {
             .active(active)
             .collapsed(self.sidebar_collapsed)
             .on_click(cx.listener(move |this: &mut App, _, _, cx| {
-                this.location = Location::Project {
-                    project: project.clone(),
-                    screen: nav,
-                };
-                cx.notify();
+                this.navigate(
+                    Location::Project {
+                        project: project.clone(),
+                        screen: nav,
+                    },
+                    cx,
+                );
             }))
     }
 
@@ -310,8 +360,7 @@ impl App {
                 this.child(GlobalNav::InterfaceSettings.label())
             })
             .on_click(cx.listener(|this: &mut App, _, _, cx| {
-                this.location = Location::Global(GlobalNav::InterfaceSettings);
-                cx.notify();
+                this.navigate(Location::Global(GlobalNav::InterfaceSettings), cx);
             }))
     }
 }

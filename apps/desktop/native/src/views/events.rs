@@ -160,6 +160,9 @@ pub struct EventsView {
     events: Option<Vec<EventOut>>,
     error: Option<String>,
     expanded: HashSet<i64>,
+    /// Whether this screen is currently shown; the 5s poll timer only
+    /// re-arms while visible (set by the App shell on navigation).
+    visible: bool,
 }
 
 impl EventsView {
@@ -170,6 +173,18 @@ impl EventsView {
             events: None,
             error: None,
             expanded: HashSet::new(),
+            visible: true,
+        }
+    }
+
+    /// Called by the App shell on navigation. Becoming visible resumes the
+    /// poll loop with an immediate refresh.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if visible && !self.visible {
+            self.visible = true;
+            self.refresh(cx);
+        } else {
+            self.visible = visible;
         }
     }
 
@@ -200,24 +215,33 @@ impl EventsView {
                     Ok(mut events) => {
                         // Backend returns asc; newest first (mirrors `select`).
                         events.sort_by(|a, b| b.id.cmp(&a.id));
-                        view.events = Some(events);
-                        view.error = None;
+                        if view.events.as_ref() != Some(&events) || view.error.is_some() {
+                            view.events = Some(events);
+                            view.error = None;
+                            cx.notify();
+                        }
                     }
                     Err(err) => {
-                        view.error = Some(err.to_string());
+                        let msg = err.to_string();
+                        if view.error.as_ref() != Some(&msg) {
+                            view.error = Some(msg);
+                            cx.notify();
+                        }
                     }
                 }
-                cx.notify();
             });
         })
         .detach();
         // 5s refetch like the React query (`refetchInterval: 5000`).
+        // Only re-arms while visible; navigation resumes via `set_visible`.
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(5))
                 .await;
             _ = this.update(cx, |view: &mut EventsView, cx| {
-                view.refresh(cx);
+                if view.visible {
+                    view.refresh(cx);
+                }
             });
         })
         .detach();

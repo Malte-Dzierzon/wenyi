@@ -1,9 +1,9 @@
 # Target architecture — Rust modular monolith
 
-Single binary, single SQLite file per project workspace, no network product
-surface. This doc defines the Cargo workspace, crate responsibilities, and the
-dependency rules that carry today's Python boundaries into Rust. For what is
-being ported, see 04; for how, see 06.
+Single binary, SQLite only, no network product surface. Cargo workspace, crate
+responsibilities, and dependency rules carrying today's Python boundaries
+(`AGENTS.md`) into Rust. Detail docs: engine 07, providers 08, formats 09,
+GUI 10, config 11, storage 12, reliability 13, testing 14.
 
 ## 1. Workspace layout
 
@@ -16,7 +16,7 @@ wenyi/                       # new Rust repo (or ~/projects/wenyi/rust/)
     wenyi-doc/               # ingest readers, assemble writers, markup, glossary,
                              # review-evidence, i18n data, prompts (pure + I/O libs)
     wenyi-engine/            # pipeline services + Orchestrator facade
-    wenyi-gui/               # desktop GUI (Iced), screens, event bus view
+    wenyi-gui/               # desktop GUI (GPUI-Kit 0.8, doc 10), screens, event bus view
     wenyi-cli/               # CLI binary commands (clap)
     wenyi-app/               # production binary: wires engine+gui/cli, tray,
                              # single-instance, updater, keyring, file dialogs
@@ -56,41 +56,32 @@ platform glue, and nothing else with business logic.
 Rules (ported from `AGENTS.md` architecture boundaries):
 
 1. `wenyi-engine` is a thin facade: step routing + lock scopes only, mirroring
-   `orchestrator.py:30-56`. It never imports provider SDKs, format parsers, or
+   `orchestrator.py:30-56`. Never imports provider SDKs, format parsers, or
    GUI/CLI types.
-2. All state goes through `wenyi-store` traits. No `std::fs` writes of run
-   state and no `rusqlite` use outside `wenyi-store` (mirrors the
-   `Storage`-interface rule).
-3. `wenyi-doc` is side-effect-free except for explicit read/write functions
-   taking paths; it never sees run state.
-4. Review shadow-only invariant is a type rule: `wenyi-doc` review functions
-   return provisional patches; only `wenyi-engine`'s autofix service, holding
-   an explicit publish capability, may write formal chapters — and only after
-   writing the recoverable index (mirrors `review/` + `pipeline/review_autofix.py`).
-5. Concurrency lives in domain services; results merge in stable original order
-   (mirrors the ordering rule in `AGENTS.md`).
-6. SRT flow stays independent of the book orchestrator (mirrors `srt/` isolation).
+2. All state goes through `wenyi-store` traits. No `std::fs` run-state writes
+   and no `rusqlite` use outside `wenyi-store`.
+3. `wenyi-doc` is side-effect-free except explicit read/write functions taking
+   paths; it never sees run state.
+4. Shadow-only review is a type rule: review functions return provisional
+   patches; only autofix, holding an explicit publish capability, may write
+   formal chapters — after writing the recoverable index (doc 07 §5).
+5. Concurrency lives in domain services; results merge in stable original
+   order. SRT stays independent of the book orchestrator.
 
 ## 4. State design (SQLite)
 
-One SQLite file per project (replacing per-project `SqliteStorage` at
-`storage/sqlite.py:34` and the desktop catalog `local.sqlite3`): tables for
-chapters/segments (`target NULL` = pending, `""` valid — never truth-test),
-manifest row (written last, atomic commit = today's `os.replace` + manifest-last
-rule), glossary, usage ledger (append-only), events (append-only), review runs +
-recoverable autofix index, export history/retention. Lock scopes from
-`runstore.py:71-99` (book run lock, state lock, event lock, assemble lock)
-become a small lock-order module in `wenyi-store` with `try_lock` + rusqlite
-transactions. Export snapshots read from one committed transaction
-(`assemble_snapshot`, `finalization.py:173`).
-
+One SQLite file per project plus a `catalog.sqlite` for project/job listings
+(full schema: doc 12). Key mappings: `target NULL` = pending (`""` valid, never
+truth-tested); manifest row committed last; usage/events append-only; review
+runs + recoverable autofix index in tables. Lock scopes from
+`runstore.py:71-99` become `try_lock` + rusqlite transactions; export
+snapshots read from one committed transaction.
 ## 5. Event and progress design
 
-`LocalRuntime` + `ProgressHub` (`local_runtime.py:90,194`) become tokio tasks +
-a `tokio::sync::broadcast` bus in `wenyi-engine`/`wenyi-app`. The WS kind
-taxonomy (`snapshot|stats|state|progress|batch|chapter|term|pipeline|log|final`,
-`ws.ts:7,111`) becomes the Rust event enum — same names, in-process delivery,
-coalescing kept (cf. `ws.ts:41` burst coalescing). GUI subscribes; CLI prints.
+`LocalRuntime` + `ProgressHub` become tokio tasks + a broadcast bus. The WS
+kind taxonomy (`snapshot|stats|state|progress|batch|chapter|term|pipeline|log|final`)
+becomes the Rust event enum — same names, in-process delivery, coalescing kept
+(doc 13 §5). GUI subscribes; CLI prints.
 
 ## 6. Crate shortlist (versions verified 2026-10-25 via docs.rs)
 
@@ -108,20 +99,15 @@ coalescing kept (cf. `ws.ts:41` burst coalescing). GUI subscribes; CLI prints.
 | keyring | 3.0.5 | System-keyring-first credentials with memory-only fallback, porting `CredentialStore` (`local_credentials.py:70`); must enable explicit platform features (v3 has no default features). |
 | tiktoken-rs | 0.12.1 | Token budgets and batch sizing must match today's tiktoken counts (`ingest/tokens.py`). |
 | serde_yaml | 0.9.x | Config file format: same YAML schema as `config.yaml`, defaults render byte-identical (D4 in doc 16). |
-| iced | 0.14.0 | Retained Elm-architecture GUI: first-class nav stacks, Command/Subscription async over tokio, custom M3-expressive theming; full evaluation in doc 10. |
+| gpui-kit | 0.8.0 (`gpui-pre =0.3.9`) | GUI framework (DECIDED, U0 passed): 75+ components, AccessKit, headless tests; loopback binding first, in-process later (doc 10). |
 | thiserror | 2.0.2 | Typed errors replacing `IngestError`/provider-failure normalization with expected-input vs external-service distinction. |
 | rfd | (re-verify at build) | Native file dialogs; listed for intent — version not re-verified today, confirm before pinning. |
 
-Justification for hand-rolled EPUB/DOCX over `epub` 2.1.5 / `docx-rs` 0.4.22
-(both verified maintained today): `epub` is read-only (no round-trip write),
-and neither crate preserves arbitrary input run-level styles, TOC bindings,
-anchor/comment links, or bilingual paragraph styling — all hard requirements
-(04 §5, `AGENTS.md` input/output constraints). `zip` + `quick-xml` +
-`scraper` give byte-level round-trip control; the ported EPUB/DOCX tests
-(06 §4) pin the fidelity. Rejected as unneeded: any web framework (axum/actix),
-any PG/Redis client, Tauri, OpenAI SDK crates (plain `reqwest` keeps provider
-fields co-located per the provider-ownership rule), weasyprint/fpdf2
-equivalents (native PDF generation is deferred — 16).
+Hand-rolled EPUB/DOCX over `epub` 2.1.5 / `docx-rs` 0.4.22: `epub` is
+read-only, and neither preserves run-level styles, TOC bindings, anchor links,
+or bilingual styling (doc 09). Rejected: web frameworks, PG/Redis clients,
+Tauri, OpenAI SDK crates (plain `reqwest` keeps provider fields co-located),
+PDF-generation equivalents (deferred — doc 16 Q3).
 
 ## Sources
 
