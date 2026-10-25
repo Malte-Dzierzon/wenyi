@@ -1,0 +1,24 @@
+[package]
+name = "wenyi-native"
+version = "0.1.0"
+edition = "2021"
+description = "Native GPUI desktop UI for Wenyi (parallel to the Tauri/React app)."
+license = "MIT"
+publish = false
+
+[dependencies]
+gpui-kit = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"] }
+rfd = "0.15"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+futures = "0.3"
+getrandom = "0.3"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# UI tests use gpui-kit test-support via #[gpui_kit::test]
