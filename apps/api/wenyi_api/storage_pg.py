@@ -105,6 +105,16 @@ class PostgresStorage:
     def lock(self, *, blocking: bool = True):
         return self._session_lock("write", blocking=blocking)
 
+    def chapter_lock(self, chapter_index: int, blocking: bool = True):
+        """Keep one chapter's workers mutually exclusive without blocking others."""
+        if not isinstance(chapter_index, int) or isinstance(chapter_index, bool):
+            raise ValueError("Invalid chapter index")
+        return self._session_lock(f"chapter:{chapter_index}", blocking=blocking)
+
+    def curator_lock(self, blocking: bool = True):
+        """Keep curator passes mutually exclusive without blocking translation."""
+        return self._session_lock("curator", blocking=blocking)
+
     def export_lock(self, export_id: int, *, blocking: bool = True):
         """Keep one export's render/recovery mutually exclusive without blocking translation."""
         if not isinstance(export_id, int) or isinstance(export_id, bool) or export_id <= 0:
@@ -768,6 +778,13 @@ class PostgresStorage:
                 (target, time.time(), self.project_id, source),
             )
             return cursor.rowcount > 0
+
+    def set_term_mentions(self, source: str, count: int) -> None:
+        with self.state_lock(), self._conn as conn:
+            conn.execute(
+                "UPDATE glossary SET mentions=%s,updated_at=%s WHERE project_id=%s AND source=%s",
+                (max(0, count), time.time(), self.project_id, source),
+            )
 
     def delete_term(self, source: str) -> bool:
         with self.state_lock(), self._conn as conn:

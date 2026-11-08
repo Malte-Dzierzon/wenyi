@@ -157,6 +157,7 @@ class TermOut(BaseModel):
     first_chapter: Optional[int] = None
     note: str = ""
     status: str = "ok"
+    mentions: int = 0
 
 
 class TermIn(RequestModel):
@@ -465,3 +466,4 @@ class WorkflowOut(BaseModel):
     review_id: str | None = None
     stages: list[WorkflowStage]
     progress: dict | None = None
+    running_chapters: list[int] = []

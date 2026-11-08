@@ -192,11 +192,17 @@ def pause(pid: str) -> dict:
 
 
 @router.post("/{pid}/resume", response_model=JobEnqueued)
-async def resume(pid: str) -> dict:
+async def resume(pid: str, chapter: int | None = None) -> dict:
+    """Resume the latest interrupted task, or one chapter's task explicitly.
+
+    With parallel chapter workers, several jobs may be paused/errored at
+    once; `?chapter=N` resumes exactly that chapter's latest resumable job
+    instead of the global latest. Without it, behavior is unchanged.
+    """
     project = require_project(pid)
-    if project["status"] not in {"paused", "error", "uploaded"}:
+    if project["status"] not in {"paused", "error", "uploaded", "translating"}:
         raise HTTPException(409, "Project has no interrupted task")
-    previous = dal.latest_resumable_job(pid)
+    previous = dal.latest_resumable_job(pid, chapter=chapter)
     if previous is None:
         raise HTTPException(409, "Project has no resumable task")
     params = dict(previous.get("params") or {})

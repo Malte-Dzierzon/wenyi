@@ -106,6 +106,55 @@ def test_ledger_journal_recovers_between_book_and_review_writes(
     assert book_usage["totals"]["calls"] == 1
 
 
+def test_parallel_flush_usage_keeps_all_deltas(tmp_path):
+    """Chapter workers flushing concurrently must not lose increments.
+
+    Regression test for the multi-worker fundaments (roadmap step 4a):
+    without the `state_lock` around the read-modify-write in `flush_usage`,
+    workers read the same accumulated value and deltas are silently lost.
+    8 workers x 5 rounds make the overlap near-certain without the fix.
+    """
+    import threading
+
+    from wenyi_core.storage.sqlite import SqliteStorage
+
+    config = _config(tmp_path)
+    run_dir = str(tmp_path / "run")
+    workers, rounds = 8, 5
+
+    def worker(index: int, barrier: threading.Barrier) -> None:
+        store = SqliteStorage(run_dir, create=True)
+        client = FakeClient()
+        runtime = PipelineRuntime(config, client)
+        for round in range(rounds):
+            client.usage.record(
+                "strong",
+                UsageSample(prompt_tokens=1, completion_tokens=0, total_tokens=1),
+                "translation.body",
+                provider="provider-id",
+                model=f"model-{index}",
+            )
+            barrier.wait(timeout=60)
+            runtime.flush_usage(store, scope="translate")
+        store.close()
+
+    barrier = threading.Barrier(workers)
+    threads = [threading.Thread(target=worker, args=(index, barrier)) for index in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    assert not any(thread.is_alive() for thread in threads)
+    store = SqliteStorage(run_dir, create=False)
+    try:
+        book_usage = store.load_usage()
+    finally:
+        store.close()
+    assert book_usage is not None
+    assert book_usage["totals"]["total_tokens"] == workers * rounds
+    assert book_usage["totals"]["calls"] == workers * rounds
+
+
 def test_fixer_protocol_revisions_invalidate_old_autofix_plans(tmp_path, monkeypatch):
     from wenyi_core.llm import operations, routing
     from wenyi_core.llm.operations import OPERATIONS

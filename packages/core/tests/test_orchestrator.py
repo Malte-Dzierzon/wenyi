@@ -2541,14 +2541,16 @@ class TestFullGlossary(unittest.TestCase):
             if "literary translator" in c["messages"][0]["content"]
         ]
 
-    def test_every_translation_batch_keeps_absent_terms_and_aliases(self):
+    def test_every_translation_batch_filters_absent_terms_and_keeps_alias_hits(self):
+        """Only batch-relevant terms reach the prompt (full glossary = ~43k tokens)."""
         with tempfile.TemporaryDirectory() as d:
             translate_prompts = self._run_with_terms(d)
             self.assertTrue(translate_prompts)
             for p in translate_prompts:
-                self.assertIn("外部人物X", p)
-                self.assertIn("無関係用語", p)
-                self.assertIn("ホリキタ", p)
+                self.assertNotIn("外部人物X", p)
+                self.assertNotIn("無関係用語", p)
+            # ホリキタ matches via alias 堀北, which occurs in the chapter.
+            self.assertTrue(any("ホリキタ" in p for p in translate_prompts))
 
     def test_batch_glossary_refreshes_following_prompts(self):
         """Extract terms after each batch so later prompts immediately receive new forms of

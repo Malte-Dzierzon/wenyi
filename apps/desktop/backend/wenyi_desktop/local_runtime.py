@@ -36,8 +36,12 @@ TASK_NAMES = frozenset(
         "run_review",
         "run_srt",
         "run_export",
+        "run_glossary_curator",
     }
 )
+
+#: Seconds between background curator passes (one pass = ~20 terms).
+CURATOR_INTERVAL_SECONDS = 300
 
 
 class WorkspaceLock:
@@ -194,6 +198,10 @@ class LocalJob:
 class LocalRuntime:
     """Own bounded task slots; cancellation waits for the synchronous checkpoint boundary."""
 
+    #: Parallel workflow lanes (chapter translations run concurrently).
+    WORKFLOW_CONSUMERS = 3
+    EXPORT_CONSUMERS = 2
+
     def __init__(self, backend: LocalBackend, context: BackendContext):
         self.backend = backend
         self.context = context
@@ -206,6 +214,7 @@ class LocalRuntime:
         self._cancelling: set[asyncio.Task] = set()
         self._consumers: list[asyncio.Task] = []
         self._maintenance: asyncio.Task | None = None
+        self._curator: asyncio.Task | None = None
         self._stopping = asyncio.Event()
         self._stopped = asyncio.Event()
         self.accepting = False
@@ -222,11 +231,17 @@ class LocalRuntime:
             self.hub.start()
             self.accepting = True
             self._consumers = [
-                asyncio.create_task(self._consume(self.workflow_queue, 86400)),
-                asyncio.create_task(self._consume(self.export_queue, 3600)),
-                asyncio.create_task(self._consume(self.export_queue, 3600)),
+                *(
+                    asyncio.create_task(self._consume(self.workflow_queue, 86400))
+                    for _ in range(self.WORKFLOW_CONSUMERS)
+                ),
+                *(
+                    asyncio.create_task(self._consume(self.export_queue, 3600))
+                    for _ in range(self.EXPORT_CONSUMERS)
+                ),
             ]
             self._maintenance = asyncio.create_task(self._recover_periodically())
+            self._curator = asyncio.create_task(self._curate_periodically())
         except BaseException:
             self.lock.close()
             raise
@@ -355,6 +370,53 @@ class LocalRuntime:
                 except Exception:
                     log.exception("Could not recover local jobs")
 
+    async def _curate_periodically(self) -> None:
+        """Enqueue one curator pass per project every few minutes (quiet loop)."""
+        while not self._stopping.is_set():
+            try:
+                await asyncio.wait_for(self._stopping.wait(), timeout=CURATOR_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                try:
+                    await asyncio.to_thread(self._curate_once)
+                except Exception:
+                    log.exception("Could not enqueue curator passes")
+
+    def _curate_once(self) -> None:
+        from uuid import uuid4
+
+        from wenyi_backend.project_service import config_document, effective_config
+
+        for project in self.backend.list_projects():
+            pid = project["id"]
+            try:
+                store = self.backend.storage_for(pid, create=False)
+                try:
+                    if not store.all_terms():
+                        continue
+                finally:
+                    store.close()
+                active = any(
+                    job["kind"] == "glossary_curator" and job["status"] in {"queued", "running"}
+                    for job in self.backend.list_jobs(pid)
+                )
+                if active:
+                    continue
+                run_id = uuid4().hex
+                snapshot = config_document(effective_config(project))
+                self.backend.admit_job(
+                    pid,
+                    "glossary_curator",
+                    run_id,
+                    project_status="curating",
+                    params={},
+                    run_id=run_id,
+                    config_snapshot=snapshot,
+                )
+                self.enqueue("run_glossary_curator", _job_id=run_id, project_id=pid, run_id=run_id)
+            except Exception:
+                # One project's curator must not break the loop for others.
+                log.exception("Could not enqueue curator pass for project %s", pid)
+
     async def stop(self) -> None:
         if self._stopping.is_set():
             await self._stopped.wait()
@@ -374,12 +436,15 @@ class LocalRuntime:
             for task in tuple(self._active.values()):
                 self._cancel(task)
             await asyncio.gather(*tuple(self._active.values()), return_exceptions=True)
-            self.workflow_queue.put_nowait(None)
-            self.export_queue.put_nowait(None)
-            self.export_queue.put_nowait(None)
+            for _ in range(self.WORKFLOW_CONSUMERS):
+                self.workflow_queue.put_nowait(None)
+            for _ in range(self.EXPORT_CONSUMERS):
+                self.export_queue.put_nowait(None)
             await asyncio.gather(*self._consumers, return_exceptions=True)
             if self._maintenance is not None:
                 await self._maintenance
+            if self._curator is not None:
+                await self._curator
             await self.hub.stop()
         finally:
             self.lock.close()

@@ -79,13 +79,14 @@ def test_recovery_pauses_orphan_workflows_and_fails_exports(catalog, status):
     asyncio.run(run())
 
 
-def test_duplicate_delivery_and_independent_two_export_slots(catalog, monkeypatch):
+def test_duplicate_delivery_and_bounded_slots(catalog, monkeypatch):
     from wenyi_backend.workers import tasks
 
     async def run():
         runtime = LocalRuntime(catalog, current_context())
         release = asyncio.Event()
         workflow_started = asyncio.Event()
+        workflows_full = asyncio.Event()
         exports_started = asyncio.Event()
         calls = []
 
@@ -95,6 +96,8 @@ def test_duplicate_delivery_and_independent_two_export_slots(catalog, monkeypatc
             dal.set_job_status(job["id"], "running")
             if run_id == "workflow":
                 workflow_started.set()
+            if len([value for value in calls if value.startswith("workflow")]) == 3:
+                workflows_full.set()
             if len([value for value in calls if value.startswith("export")]) == 2:
                 exports_started.set()
             await release.wait()
@@ -110,9 +113,13 @@ def test_duplicate_delivery_and_independent_two_export_slots(catalog, monkeypatc
                 "run_translation", _job_id="workflow", project_id=pid, run_id="workflow"
             )
             await asyncio.wait_for(workflow_started.wait(), 3)
+            # Three workflow lanes: two more start immediately, the fourth waits.
+            enqueue(runtime, project(), "workflow-2")
+            enqueue(runtime, project(), "workflow-3")
             enqueue(runtime, project(), "queued-workflow")
             for index in range(3):
                 enqueue(runtime, project(), f"export-{index}", "export")
+            await asyncio.wait_for(workflows_full.wait(), 3)
             await asyncio.wait_for(exports_started.wait(), 3)
             assert calls.count("workflow") == 1
             assert "queued-workflow" not in calls
@@ -137,7 +144,7 @@ def test_queue_is_bounded_and_shutdown_interrupts_unstarted_work(catalog):
         assert runtime.workflow_queue.maxsize == 128
         # Exercise overflow and durable draining, not a 128-job disk benchmark.
         # No consumers are started, so admission remains deterministic.
-        runtime.workflow_queue = asyncio.Queue(maxsize=2)
+        runtime.workflow_queue = asyncio.Queue(maxsize=3)
         runtime.accepting = True
         pid = project()
         for index in range(runtime.workflow_queue.maxsize):

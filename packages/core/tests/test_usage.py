@@ -304,6 +304,49 @@ class TestOpenAICompatibleReasoningContent(unittest.TestCase):
                 content,
             )
 
+    def test_opencode_go_falls_back_to_reasoning_content_by_default(self):
+        # Free gateway models (beam-free) place answers in reasoning_content
+        # while leaving content empty; opencode-go recovers them without
+        # opt-in (unlike the generic compatible client).
+        reasoning_content = '{"translations":["译文"]}'
+        client = RoutedLLMClient(
+            model_config(
+                kind="opencode-go",
+                base_url="https://example.invalid/v1",
+                profiles={"strong": dict(model="beam-free")},
+            )
+        )
+        response = _make_response("", None, reasoning_content=reasoning_content)
+        with patch.object(
+            client.adapter("default"), "_ensure_client", return_value=_ClientStub([response])
+        ):
+            self.assertEqual(
+                client.complete(
+                    [{"role": "user", "content": "translate"}],
+                    json_mode=True,
+                    operation="translation.body",
+                ),
+                reasoning_content,
+            )
+
+    def test_empty_error_reports_response_details(self):
+        client = RoutedLLMClient(
+            model_config(
+                kind="opencode-go",
+                base_url="https://example.invalid/v1",
+                profiles={"strong": dict(model="beam-free")},
+            )
+        )
+        response = _make_response("", None, finish_reason="stop")
+        stub = _ClientStub([response for _ in range(6)])
+        with patch.object(client.adapter("default"), "_ensure_client", return_value=stub):
+            with self.assertRaisesRegex(EmptyResponseError, "finish_reason=stop"):
+                client.complete(
+                    [{"role": "user", "content": "translate"}],
+                    json_mode=True,
+                    operation="translation.body",
+                )
+
 
 class TestDeepSeekProviderDefaults(unittest.TestCase):
     def test_provider_only_config_uses_deepseek_defaults(self):

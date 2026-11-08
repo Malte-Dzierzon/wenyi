@@ -281,10 +281,10 @@ def test_resume_after_target_save_completes_glossary_without_retranslation(
 
 @pytest.mark.parametrize("checkpoint_saved", [False, True])
 @pytest.mark.parametrize("polish", [False, True])
-def test_resume_refreshes_full_glossary_before_pending_batches(
+def test_resume_refreshes_batch_glossary_before_pending_batches(
     tmp_path, config, monkeypatch, checkpoint_saved, polish
 ):
-    """Keep saved targets and refresh the full glossary after recovering extraction."""
+    """Keep saved targets and refresh the batch-filtered glossary after recovering extraction."""
     config.pipeline.polish = polish
     source = tmp_path / "book.txt"
     source.write_text(
@@ -302,9 +302,9 @@ def test_resume_refreshes_full_glossary_before_pending_batches(
 
     first = Orchestrator(config, client=FakeClient(handler=handler))
     store = first.prepare(str(source))
-    # Append in a deliberately nonalphabetical order; neither source occurs in the book.
-    store.upsert_term(GlossaryTerm(source="Zebra", target="斑马"))
-    store.upsert_term(GlossaryTerm(source="Apple", target="苹果"))
+    # Append in a deliberately nonalphabetical order; both occur in batch 2.
+    store.upsert_term(GlossaryTerm(source="slowly", target="缓慢地"))
+    store.upsert_term(GlossaryTerm(source="door", target="门"))
     extract = first._translation.extract_batch_glossary
 
     def interrupt(*args, **kwargs):
@@ -319,7 +319,8 @@ def test_resume_refreshes_full_glossary_before_pending_batches(
     saved = store.load_chapter(0).text_segments[0]
     assert saved.target is not None
     assert bool(store.completed_batch_glossary_keys(0)) == checkpoint_saved
-    store.upsert_term(GlossaryTerm(source="Outside", target="外部术语"))
+    # Added while paused; occurs in batch 3, proving the refresh reaches new terms.
+    store.upsert_term(GlossaryTerm(source="letter", target="信"))
 
     client = FakeClient(handler=handler)
     resumed = Orchestrator(config, client=client)
@@ -338,10 +339,20 @@ def test_resume_refreshes_full_glossary_before_pending_batches(
     assert len(calls) == 2
     for call in calls:
         user = call["messages"][-1]["content"]
-        assert "Alice → 爱丽丝" in user
-        assert "Outside → 外部术语" in user
-        assert user.index("Zebra → 斑马") < user.index("Apple → 苹果")
-        assert "Alice waited by the window." not in _numbered_sources(user)
+        sources = _numbered_sources(user)
+        # Alice (batch 1) never leaks into later batches.
+        assert "Alice → 爱丽丝" not in user
+        assert "Alice waited by the window." not in sources
+        if "The door opened slowly." in sources:
+            assert "slowly → 缓慢地" in user
+            assert "door → 门" in user
+            assert user.index("slowly → 缓慢地") < user.index("door → 门")
+            assert "letter → 信" not in user
+        else:
+            assert "A letter arrived later." in sources
+            assert "letter → 信" in user
+            assert "door → 门" not in user
+            assert "slowly → 缓慢地" not in user
     cached_client = FakeClient(handler=handler)
     Orchestrator(config, client=cached_client).run(str(source))
     assert cached_client.calls == []

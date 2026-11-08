@@ -17,6 +17,7 @@ TASK_FUNCTIONS = {
     "chapter_translation": "run_chapter_translation",
     "review": "run_review",
     "srt": "run_srt",
+    "glossary_curator": "run_glossary_curator",
 }
 TASK_STATUSES = {
     "parse": "parsing",
@@ -25,6 +26,7 @@ TASK_STATUSES = {
     "chapter_translation": "translating",
     "review": "reviewing",
     "srt": "translating",
+    "glossary_curator": "curating",
 }
 
 
@@ -33,7 +35,11 @@ async def start_job(pid: str, kind: str, *, params: dict | None = None) -> dict:
         raise HTTPException(422, "unsupported task kind")
     params = dict(params or {})
     params.pop("config_snapshot", None)
-    with project_write(pid) as (project, _storage):
+    chapter = params.get("chapter_index") if kind == "chapter_translation" else None
+    with project_write(pid, chapter=chapter, curator=(kind == "glossary_curator")) as (
+        project,
+        _storage,
+    ):
         if not project.get("source_path"):
             raise HTTPException(409, "upload a source file first")
         run_id = uuid4().hex

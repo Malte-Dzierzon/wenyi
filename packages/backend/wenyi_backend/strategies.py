@@ -9,61 +9,61 @@ from wenyi_core.config import Config
 STEP_REGISTRY = [
     {
         "id": "language_detection",
-        "name": "语言检测",
+        "name": "Language detection",
         "category": "prepare",
         "always_on": True,
         "locked": True,
     },
     {
         "id": "style_analysis",
-        "name": "风格与初始术语",
+        "name": "Style and seed terms",
         "category": "prepare",
         "always_on": True,
         "locked": True,
     },
-    {"id": "book_understanding", "name": "全书预理解", "category": "prepare"},
+    {"id": "book_understanding", "name": "Whole-book briefing", "category": "prepare"},
     {
         "id": "batch_translate",
-        "name": "批次翻译",
+        "name": "Batch translation",
         "category": "per_chapter",
         "always_on": True,
         "locked": True,
     },
     {
         "id": "polish",
-        "name": "翻译润色",
+        "name": "Translation polish",
         "category": "per_chapter",
         "depends_on": ["batch_translate"],
     },
     {
         "id": "annotation_alignment",
-        "name": "注释定位",
+        "name": "Note alignment",
         "category": "per_chapter",
         "depends_on": ["batch_translate"],
     },
     {
         "id": "term_extract",
-        "name": "实时术语提取",
+        "name": "Live term extraction",
         "category": "per_chapter",
         "always_on": True,
         "locked": True,
     },
     {
         "id": "review",
-        "name": "全书审校",
+        "name": "Whole-book review",
         "category": "post_process",
         "depends_on": ["batch_translate"],
     },
     {
         "id": "review_autofix",
-        "name": "发布审校修订",
+        "name": "Publish review fixes",
         "category": "post_process",
         "depends_on": ["review"],
     },
-    {"id": "punctuation_normalize", "name": "导出标点规范化", "category": "export"},
+    {"id": "punctuation_normalize", "name": "Export punctuation cleanup", "category": "export"},
     {
         "id": "report",
-        "name": "生成报告",
+        "name": "Generate report",
         "category": "post_process",
         "always_on": True,
         "locked": True,
@@ -80,8 +80,11 @@ _LEGACY_QUICK_STEPS = {
 }
 PRESET_TEMPLATES = [
     {
+        # NOTE: `name` doubles as the template ID (builtin_template_definition
+        # matches on it; stored projects reference it). Do not rename without
+        # a data migration. `description` is display-only.
         "name": "标准翻译",
-        "description": "与 dev 默认流程一致：预理解、润色、审校及自动修复",
+        "description": "Default pipeline: briefing, polish, review and autofix",
         "time_factor": 2,
         "recommended": True,
         "steps": _STANDARD,

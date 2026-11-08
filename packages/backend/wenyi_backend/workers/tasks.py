@@ -77,7 +77,7 @@ def _parse_source(pid, storage, config, progress):
     project = dal.get_project(pid)
     if project is None:
         raise ValueError(f"Project not found: {pid}")
-    progress(0, 1, "解析原文")
+    progress(0, 1, "Parsing source")
     if project["fmt"] == "srt":
         from wenyi_core.ingest.srt_reader import parse_srt
 
@@ -100,7 +100,7 @@ def _parse_source(pid, storage, config, progress):
         )
         preview = book_preview(doc, project["fmt"])
     storage.write_artifact("preview.json", preview)
-    progress(1, 1, "原文预览已就绪")
+    progress(1, 1, "Source preview ready")
     return "uploaded"
 
 
@@ -126,6 +126,9 @@ def _book_operation(kind, pid, storage, config, client, progress, params):
         orch.run_review(source, progress=progress)
         orch.run_report(source)
         return "reviewed"
+    if kind == "glossary_curator":
+        orch.run_curator(source, progress=progress)
+        return "curated"
     steps = {"translate", "report"}
     if config.pipeline.review:
         steps.add("review")
@@ -134,13 +137,24 @@ def _book_operation(kind, pid, storage, config, client, progress, params):
 
 
 def _record_terminal_status(pid, run_id, error: BaseException | None = None, *, status="error"):
-    """A late Future or duplicate delivery may update only its own task's project."""
+    """A late Future or duplicate delivery may update only its own task's project.
+
+    The project-level status is set only when no sibling job is still
+    active: with parallel chapter workers, an older job finishing must
+    not overwrite `translating` while newer jobs still run (and a newer
+    job finishing must not clear the status of a still-running older one).
+    """
     message = str(error) if error is not None else None
     job = dal.get_job_by_arq_id(run_id) if run_id else None
     if job:
         try:
-            latest = next((item for item in dal.list_jobs(pid) if item["kind"] != "export"), None)
-            if not latest or latest["id"] != job["id"]:
+            siblings_active = any(
+                item["id"] != job["id"]
+                and item["kind"] != "export"
+                and item["status"] in {"queued", "running"}
+                for item in dal.list_jobs(pid)
+            )
+            if siblings_active:
                 return
             project = dal.get_project(pid)
             if (
@@ -155,10 +169,13 @@ def _record_terminal_status(pid, run_id, error: BaseException | None = None, *, 
             try:
                 # Wait for a brief API write boundary rather than dropping the terminal status.
                 with storage.lock():
-                    latest = next(
-                        (item for item in dal.list_jobs(pid) if item["kind"] != "export"), None
+                    siblings_active = any(
+                        item["id"] != job["id"]
+                        and item["kind"] != "export"
+                        and item["status"] in {"queued", "running"}
+                        for item in dal.list_jobs(pid)
                     )
-                    if latest and latest["id"] == job["id"]:
+                    if not siblings_active:
                         dal.set_project_status(pid, status, error=message)
             finally:
                 storage.close()
@@ -166,6 +183,40 @@ def _record_terminal_status(pid, run_id, error: BaseException | None = None, *, 
             dal.set_job_status(job["id"], status, error=message)
     elif not run_id:
         dal.set_project_status(pid, status, error=message)
+
+
+def _chapter_lane(kind: str, params: dict) -> int | str | None:
+    """Return the lane for a job: chapter index, `"curator"`, or None (book)."""
+    if kind == "glossary_curator":
+        return "curator"
+    chapter = params.get("chapter_index") if kind == "chapter_translation" else None
+    return chapter if isinstance(chapter, int) and not isinstance(chapter, bool) else None
+
+
+def _superseded(pid: str, current: dict, lane: int | str | None) -> bool:
+    """True when a newer active job supersedes `current` on the same lane.
+
+    Same chapter for chapter jobs, curator lane for curator jobs, whole
+    project otherwise. (Global "latest wins" would starve parallel
+    chapter workers.)
+    """
+    for item in dal.list_jobs(pid):
+        if item["kind"] == "export" or item["id"] <= current["id"]:
+            continue
+        if item["status"] not in {"queued", "running"}:
+            continue
+        item_lane = _chapter_lane(item["kind"], item.get("params") or {})
+        if lane == "curator" or item_lane == "curator":
+            # The curator never supersedes translation and vice versa.
+            if lane == item_lane == "curator":
+                return True
+            continue
+        if lane is not None:
+            if item_lane == lane:
+                return True
+        elif item_lane is None:
+            return True
+    return False
 
 
 def _execute(
@@ -203,24 +254,25 @@ def _execute(
         emitter(done, total, label)
 
     try:
-        with storage.lock(), ExitStack() as scope:
+        lane = _chapter_lane(kind, params)
+        if lane == "curator":
+            run_lock = storage.curator_lock()
+        elif lane is not None:
+            run_lock = storage.chapter_lock(lane)
+        else:
+            run_lock = storage.lock()
+        with run_lock, ExitStack() as scope:
             if run_id:
                 current = dal.get_job_by_arq_id(run_id)
-                latest = next(
-                    (item for item in dal.list_jobs(pid) if item["kind"] != "export"), None
-                )
-                if (
-                    not current
-                    or not latest
-                    or current["id"] != latest["id"]
-                    or current["status"] != "queued"
-                ):
+                if not current or current["status"] != "queued":
+                    return
+                if _superseded(pid, current, lane):
                     return
                 job = current
                 dal.set_job_status(job["id"], "running")
             storage.recover_usage()
             live = scope.enter_context(LiveStatistics(redis, pid, run_id or "", storage))
-            progress(0, 0, "任务启动")
+            progress(0, 0, "Task starting")
             config = _build_config_for(pid, run_id)
             if kind == "parse":
                 result_status = _parse_source(pid, storage, config, progress)
@@ -273,7 +325,7 @@ def _execute(
                         result_status = _book_operation(
                             kind, pid, storage, config, client, progress, params
                         )
-            progress(1, 1, "任务完成")
+            progress(1, 1, "Task completed")
             storage.log_event("task_completed", kind=kind, run_id=run_id)
         # Publish completion only after telemetry and the project's run lock have exited.
         dal.set_project_status(pid, result_status)
@@ -352,6 +404,11 @@ async def run_review(ctx, *, project_id: str, run_id: str | None = None, **param
 @_worker_entry
 async def run_srt(ctx, *, project_id: str, run_id: str | None = None, **params):
     await _run("srt", project_id, run_id, params)
+
+
+@_worker_entry
+async def run_glossary_curator(ctx, *, project_id: str, run_id: str | None = None, **params):
+    await _run("glossary_curator", project_id, run_id, params)
 
 
 def _render_export_sync(

@@ -44,16 +44,33 @@ def busy(project: dict) -> bool:
 
 
 @contextmanager
-def project_write(pid: str):
-    """Serialize API writes against queued and running domain operations."""
+def project_write(pid: str, *, chapter: int | None = None, curator: bool = False):
+    """Serialize API writes against queued and running domain operations.
+
+    With `chapter`, only that chapter's lane is claimed so other chapters
+    proceed. With `curator`, only the curator lane is claimed so curation
+    runs beside translation. The authoritative conflict rule lives in
+    `admit_job` (active jobs table, checked atomically in the admission
+    transaction) — this only serializes concurrent admissions of the same
+    lane. It must NOT probe `.run.lock`: that lock is also held for brief
+    book operations (terminal status, reports), which would wrongly
+    reject chapter/curator starts.
+    """
     require_project(pid)
     storage = storage_for(pid)
     try:
-        with storage.lock(blocking=False):
-            project = require_project(pid)
-            if busy(project):
-                raise HTTPException(409, "project already has a running task")
-            yield project, storage
+        if curator:
+            with storage.curator_lock(blocking=False):
+                yield require_project(pid), storage
+        elif chapter is None:
+            with storage.lock(blocking=False):
+                project = require_project(pid)
+                if busy(project):
+                    raise HTTPException(409, "project already has a running task")
+                yield project, storage
+        else:
+            with storage.chapter_lock(chapter, blocking=False):
+                yield require_project(pid), storage
     except BlockingIOError as error:
         raise HTTPException(409, "project already has a running task") from error
     finally:

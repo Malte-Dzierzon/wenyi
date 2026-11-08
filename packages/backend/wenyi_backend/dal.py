@@ -3,7 +3,15 @@
 from .context import current_context
 
 RUNNING_PROJECT_STATUSES = frozenset(
-    {"preparing", "translating", "reviewing", "translating_subtitles", "parsing", "pausing"}
+    {
+        "preparing",
+        "translating",
+        "reviewing",
+        "translating_subtitles",
+        "parsing",
+        "pausing",
+        "curating",
+    }
 )
 
 

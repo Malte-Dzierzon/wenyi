@@ -146,7 +146,8 @@ def project_stats(pid: str) -> dict:
 def workflow(pid: str) -> dict:
     """Describe the latest workflow using its frozen configuration, not edited settings."""
     project = require_project(pid)
-    job = next((j for j in dal.list_jobs(pid) if j["kind"] != "export"), None)
+    jobs = dal.list_jobs(pid)
+    job = next((j for j in jobs if j["kind"] != "export"), None)
     params = (job or {}).get("params") or {}
     snapshot = params.get("config_snapshot")
     document = snapshot or config_document(effective_config(project))
@@ -158,30 +159,37 @@ def workflow(pid: str) -> dict:
         stages.append({"id": key, "label": label, "enabled": bool(enabled)})
 
     if kind == "parse":
-        add("parse", "解析原文与生成预览")
+        add("parse", "Parse source and build preview")
     elif kind == "srt":
-        add("srt", "分批翻译字幕并保存检查点")
-        add("assemble", "组装字幕文件")
+        add("srt", "Translate subtitle cues in batches with checkpoints")
+        add("assemble", "Assemble subtitle file")
+    elif kind == "glossary_curator":
+        add("curate", "Review glossary terms against book passages")
+        add("report", "File disagreements as conflicts")
     else:
         if kind != "review":
-            add("prepare", "解析、术语与风格准备")
-            add("book_understanding", "全书预理解", pipeline.get("book_understanding"))
+            add("prepare", "Parse, terminology and style setup")
+            add("book_understanding", "Whole-book briefing", pipeline.get("book_understanding"))
         if kind in {"translation", "chapter_translation"}:
-            add("translation", "分批翻译章节")
-            add("polish", "批次内润色", pipeline.get("polish"))
-            add("annotation_alignment", "逐段注释定位", pipeline.get("annotation_alignment"))
+            add("translation", "Translate chapters in batches")
+            add("polish", "In-batch polish", pipeline.get("polish"))
+            add(
+                "annotation_alignment",
+                "Per-paragraph note alignment",
+                pipeline.get("annotation_alignment"),
+            )
         if kind in {"translation", "review"}:
             review = kind == "review" or pipeline.get("review", False)
             autofix = params.get("autofix")
             if autofix is None:
                 autofix = pipeline.get("review_autofix")
-            add("review", "全书审校", review)
+            add("review", "Whole-book review", review)
             add(
                 "review_autofix",
-                "修复审校问题并写回",
+                "Fix review issues and write back",
                 review and autofix,
             )
-            add("report", "生成报告")
+            add("report", "Generate report")
     progress = None
     if job:
         try:
@@ -195,6 +203,15 @@ def workflow(pid: str) -> dict:
         except Exception:
             # Progress is advisory: persisted job state remains available without Redis.
             pass
+    running_chapters = sorted(
+        {
+            (job_item.get("params") or {}).get("chapter_index")
+            for job_item in jobs
+            if job_item["kind"] == "chapter_translation"
+            and job_item["status"] in {"queued", "running"}
+            and isinstance((job_item.get("params") or {}).get("chapter_index"), int)
+        }
+    )
     return {
         "source": "snapshot" if snapshot else "config",
         "kind": kind,
@@ -203,4 +220,5 @@ def workflow(pid: str) -> dict:
         "review_id": dal.job_review_id(job["id"]) if job and job.get("id") else None,
         "stages": stages,
         "progress": progress,
+        "running_chapters": running_chapters,
     }

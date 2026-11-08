@@ -19,6 +19,7 @@ class _RecordingStore:
 
     def __init__(self):
         self.lock_events: list[str] = []
+        self.state_lock_events: list[str] = []
         self.assemble_lock_events: list[str] = []
         self.events: list[tuple[str, dict]] = []
 
@@ -29,6 +30,22 @@ class _RecordingStore:
             yield
         finally:
             self.lock_events.append("lock:exit")
+
+    @contextmanager
+    def chapter_lock(self, chapter_index, blocking=True):
+        self.lock_events.append(f"chapter_lock:{chapter_index}:enter")
+        try:
+            yield
+        finally:
+            self.lock_events.append(f"chapter_lock:{chapter_index}:exit")
+
+    @contextmanager
+    def state_lock(self):
+        self.state_lock_events.append("state_lock:enter")
+        try:
+            yield
+        finally:
+            self.state_lock_events.append("state_lock:exit")
 
     @contextmanager
     def assemble_lock(self):
@@ -91,8 +108,8 @@ class TestOrchestratorContract(unittest.TestCase):
         return {"chapters": [{"index": 0}, {"index": 1}]}
 
     def test_run_routes_prepare_then_translation_under_lock(self):
-        """Prepare, restore language, build synopsis and translate under the book lock with
-        unchanged arguments.
+        """Prepare, restore language, build synopsis and translate with
+        unchanged arguments — single-chapter runs hold the chapter lock.
         """
         orch = self._orchestrator()
         store = _RecordingStore()
@@ -114,7 +131,7 @@ class TestOrchestratorContract(unittest.TestCase):
             only_chapter=1,
             progress=progress,
         )
-        self.assertEqual(store.lock_events, ["lock:enter", "lock:exit"])
+        self.assertEqual(store.lock_events, ["chapter_lock:1:enter", "chapter_lock:1:exit"])
 
     def test_run_rejects_unknown_chapter_before_translation(self):
         """Reject unknown chapter indices before translation and propagate the validation
