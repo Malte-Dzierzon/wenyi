@@ -191,7 +191,23 @@ pub struct ProjSettingsView {
 struct OperationCaps {
     id: String,
     tier: String,
+    description: String,
 }
+
+/// Phase group for the operation-model grid (display only; op ids unchanged).
+fn operation_group(op_id: &str) -> &'static str {
+    match op_id.split('.').next().unwrap_or("") {
+        "language" | "analysis" | "synopsis" => "Analysis",
+        "translation" | "polish" => "Translation",
+        "glossary" | "annotation" => "Glossary",
+        "review" => "Review",
+        "autofix" => "Autofix",
+        _ => "Other",
+    }
+}
+
+const OPERATION_GROUPS: [&str; 6] =
+    ["Analysis", "Translation", "Glossary", "Review", "Autofix", "Other"];
 
 impl ProjSettingsView {
     pub fn new(pid: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -301,14 +317,24 @@ impl ProjSettingsView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let config = block_on(client.get_config(&pid))?;
-                    let project = block_on(client.get_project(&pid))?;
-                    let routes = block_on(client.model_routes(&pid)).ok();
+                    // Independent reads run concurrently; wall time is the
+                    // slowest call (~600ms), not the sum (~800ms).
+                    let (config, project, routes, caps_raw) = block_on(async {
+                        tokio::join!(
+                            client.get_config(&pid),
+                            client.get_project(&pid),
+                            client.model_routes(&pid),
+                            client.capabilities_raw(),
+                        )
+                    });
                     // Raw capabilities carry `operations[]` (id + default
                     // tier); the typed `capabilities()` drops that field.
-                    let caps_raw =
-                        block_on(client.get::<serde_json::Value>("/capabilities")).ok();
-                    Ok::<_, crate::client::Error>((config, project, routes, caps_raw))
+                    Ok::<_, crate::client::Error>((
+                        config?,
+                        project?,
+                        routes.ok(),
+                        caps_raw.ok(),
+                    ))
                 })
                 .await;
             _ = this.update(cx, |view: &mut ProjSettingsView, cx| {
@@ -335,6 +361,11 @@ impl ProjSettingsView {
                                                 .get("tier")
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("strong")
+                                                .to_string(),
+                                            description: op
+                                                .get("description")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
                                                 .to_string(),
                                         })
                                     })
@@ -778,7 +809,15 @@ impl Render for ProjSettingsView {
                     .as_object()
                     .map(|m| m.keys().cloned().collect())
                     .unwrap_or_default();
-                for op in &ops {
+                for group in OPERATION_GROUPS {
+                    let group_ops: Vec<_> =
+                        ops.iter().filter(|op| operation_group(&op.id) == group).collect();
+                    if group_ops.is_empty() {
+                        continue;
+                    }
+                    body = body.child(div().text_xs().font_medium().text_color(palette.muted_foreground).child(format!("{group} — {}", group_ops.len())));
+                    let mut list = div().flex().flex_col().gap_1();
+                    for op in group_ops {
                     let op_id = op.id.clone();
                     let default_tier = op.tier.clone();
                     // Current value: `model` or `tier:<id>` (mirrors React).
@@ -835,11 +874,39 @@ impl Render for ProjSettingsView {
                             state.set_selected_value(&current, window, cx);
                         });
                     }
-                    body = body.child(
-                        div().flex().flex_col().gap_1()
-                            .child(div().text_sm().child(op_id.clone()))
-                            .child(Select::new(&entity)),
+                    // Compact table row (global Settings style): description
+                    // left, override badge, fixed-width select right.
+                    let desc = if op.description.is_empty() { op_id.clone() } else { format!("{} — {}", op.description, op_id) };
+                    let overridden = !current.starts_with("tier:");
+                    let mut row = div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_3()
+                        .py_1p5()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(palette.border)
+                        .child(div().flex_1().min_w_0().truncate().text_sm().child(desc));
+                    if overridden {
+                        row = row.child(
+                            div()
+                                .text_xs()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_sm()
+                                .bg(palette.muted)
+                                .text_color(palette.muted_foreground)
+                                .flex_none()
+                                .child("override"),
+                        );
+                    }
+                    row = row.child(
+                        div().w(px(220.0)).flex_none().child(Select::new(&entity)),
                     );
+                    list = list.child(row);
+                    }
+                    body = body.child(list);
                 }
             }
             body = body.child(
@@ -1179,6 +1246,7 @@ impl Render for ProjSettingsView {
 #[cfg(test)]
 mod tests {
     use super::operation_route;
+    use super::{OPERATION_GROUPS, operation_group};
 
     #[test]
     fn operation_route_sets_and_clears_default_tier() {
@@ -1195,5 +1263,22 @@ mod tests {
             cheap.pointer("/llm/routes/translate/tier").and_then(|v| v.as_str()),
             Some("cheap")
         );
+    }
+
+    #[test]
+    fn operation_groups_cover_all_prefixes() {
+        assert_eq!(operation_group("translation.body"), "Translation");
+        assert_eq!(operation_group("polish.body"), "Translation");
+        assert_eq!(operation_group("glossary.extract"), "Glossary");
+        assert_eq!(operation_group("annotation.align"), "Glossary");
+        assert_eq!(operation_group("review.scan"), "Review");
+        assert_eq!(operation_group("autofix.fix"), "Autofix");
+        assert_eq!(operation_group("language.detect"), "Analysis");
+        assert_eq!(operation_group("synopsis.book"), "Analysis");
+        assert_eq!(operation_group("srt.translate"), "Other");
+        assert_eq!(operation_group("no-dot"), "Other");
+        for group in ["Analysis", "Translation", "Glossary", "Review", "Autofix", "Other"] {
+            assert!(OPERATION_GROUPS.contains(&group));
+        }
     }
 }

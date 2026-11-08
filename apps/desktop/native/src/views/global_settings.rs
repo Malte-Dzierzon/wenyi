@@ -27,12 +27,15 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Disableable, IndexPath, StyledExt};
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{Disableable, Icon, IndexPath, Sizable as _, StyledExt};
+use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
 use gpui_kit::*;
 
 use crate::{
@@ -49,6 +52,30 @@ const TIERS: &[(&str, &str)] = &[
 
 /// Language options: (code, label). Local pref only.
 const LOCALES: &[(&str, &str)] = &[("en", "English"), ("zh-CN", "简体中文")];
+
+/// Settings workspace tab. Tab switches are render-only (`cx.notify()`);
+/// widget entities stay cached globally so hidden tabs keep focus/drafts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+enum SettingsTab {
+    #[default]
+    General,
+    Providers,
+    Models,
+    Routing,
+    Workflow,
+    Advanced,
+}
+
+impl SettingsTab {
+    const ALL: &'static [(SettingsTab, &'static str)] = &[
+        (SettingsTab::General, "General"),
+        (SettingsTab::Providers, "Providers"),
+        (SettingsTab::Models, "Models"),
+        (SettingsTab::Routing, "Routing"),
+        (SettingsTab::Workflow, "Workflow"),
+        (SettingsTab::Advanced, "Advanced"),
+    ];
+}
 
 fn section(value: &serde_json::Value, key: &str) -> serde_json::Value {
     value.get(key).cloned().unwrap_or(serde_json::Value::Null)
@@ -329,8 +356,12 @@ pub struct GlobalSettingsView {
     theme_mode_select: Option<Entity<SelectState<Vec<String>>>>,
     theme_accent_select: Option<Entity<SelectState<Vec<String>>>>,
     app_handle: Option<WeakEntity<crate::views::App>>,
-    yaml: Entity<TextareaState>,
+    yaml: Entity<EditorState>,
     pending_yaml: Option<String>,
+    /// Current draft text for the dirty comparison. `pending_yaml` is the
+    /// one-shot transport into the editor (consumed by `take()` in render),
+    /// so it cannot serve as the comparison baseline.
+    draft_yaml: Option<String>,
     yaml_dirty: bool,
     uncommitted: bool,
     op: Option<&'static str>,
@@ -364,11 +395,19 @@ pub struct GlobalSettingsView {
     ping_results: Option<Vec<serde_json::Value>>,
     ping_error: Option<String>,
     pinging: bool,
+    /// Active workspace tab (General default).
+    tab: SettingsTab,
+    /// "group:id" keys of expanded registry accordions. Everything starts
+    /// collapsed; newly added entries open (`add_entry` inserts them).
+    open_ids: HashSet<String>,
+    /// Tabs edited since the last save/load, for the dirty dots. Cleared by
+    /// `apply_config`; restore marks every draft tab.
+    touched: HashSet<SettingsTab>,
 }
 
 impl GlobalSettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let yaml = cx.new(|cx| TextareaState::new(window, cx));
+        let yaml = cx.new(|cx| EditorState::new(window, cx).language("yaml"));
         cx.subscribe(&yaml, |this: &mut GlobalSettingsView, _, _: &InputEvent, cx| {
             this.yaml_dirty = true;
             cx.notify();
@@ -423,6 +462,7 @@ impl GlobalSettingsView {
             theme_accent_select: None,
             app_handle: None,
             pending_yaml: None,
+            draft_yaml: None,
             uncommitted: false,
             yaml_dirty: false,
             op: None,
@@ -454,6 +494,9 @@ impl GlobalSettingsView {
             ping_results: None,
             ping_error: None,
             pinging: false,
+            tab: SettingsTab::General,
+            open_ids: HashSet::new(),
+            touched: HashSet::new(),
         }
     }
 
@@ -495,16 +538,15 @@ impl GlobalSettingsView {
     fn cred_pending(&self) -> bool {
         self.cred_drafts.values().any(|v| !v.trim().is_empty())
     }
-
     fn dirty(&self) -> bool {
-        let yaml_text = self.pending_yaml.clone().unwrap_or_default();
+        let yaml_text = self.draft_yaml.clone().unwrap_or_default();
         let saved = self.saved_yaml.clone().unwrap_or_default();
         let config_saved = !yaml_text.is_empty() && yaml_text == saved;
         !config_saved || self.uncommitted || self.yaml_dirty || self.cred_pending() || !self.editing_ids.is_empty()
     }
 
     fn config_saved(&self) -> bool {
-        match (&self.pending_yaml, &self.saved_yaml) {
+        match (&self.draft_yaml, &self.saved_yaml) {
             (Some(a), Some(b)) => a == b,
             _ => false,
         }
@@ -519,11 +561,37 @@ impl GlobalSettingsView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let config = block_on(client.get_global_config())?;
-                    let caps = block_on(client.get::<serde_json::Value>("/capabilities")).ok();
-                    let creds = block_on(client.credential_statuses()).ok();
-                    let mineru = block_on(client.mineru_status()).ok();
-                    Ok::<_, crate::client::Error>((config, caps, creds, mineru))
+                    let (config, caps, creds, mineru) = block_on(async {
+                        // Credential statuses touch the OS keyring, which can
+                        // block indefinitely (locked/missing Secret Service).
+                        // Time them out so settings always loads; statuses
+                        // simply stay empty and refresh on retry.
+                        let vault_timeout = std::time::Duration::from_secs(8);
+                        tokio::join!(
+                            client.get_global_config(),
+                            client.capabilities_raw(),
+                            async {
+                                tokio::time::timeout(
+                                    vault_timeout,
+                                    client.credential_statuses(),
+                                )
+                                .await
+                                .map_err(|_| crate::client::Error::Api {
+                                    status: 0,
+                                    detail: "credential vault timed out".into(),
+                                })?
+                            },
+                            async {
+                                tokio::time::timeout(vault_timeout, client.mineru_status())
+                                    .await
+                                    .map_err(|_| crate::client::Error::Api {
+                                        status: 0,
+                                        detail: "credential vault timed out".into(),
+                                    })?
+                            },
+                        )
+                    });
+                    Ok::<_, crate::client::Error>((config?, caps.ok(), creds.ok(), mineru.ok()))
                 })
                 .await;
             _ = this.update(cx, |view: &mut GlobalSettingsView, cx| {
@@ -568,11 +636,13 @@ impl GlobalSettingsView {
     fn apply_config(&mut self, config: GlobalConfigOut) {
         self.revision = config.revision;
         self.saved_yaml = Some(config.yaml.clone());
-        self.pending_yaml = Some(config.yaml);
+        self.pending_yaml = Some(config.yaml.clone());
+        self.draft_yaml = Some(config.yaml);
         self.effective = config.effective;
         self.yaml_dirty = false;
         self.typing_int = None;
         self.editing_ids.clear();
+        self.touched.clear();
         self.suggestions.clear();
         self.suggestion_error.clear();
         self.ping_results = None;
@@ -618,6 +688,7 @@ impl GlobalSettingsView {
     /// Mirror of React `setField`: update effective, re-derive the YAML draft.
     fn set_field(&mut self, group: &str, key: &str, value: serde_json::Value, cx: &mut Context<Self>) {
         self.effective = workflow_field(&self.effective, group, key, value);
+        self.touch(SettingsTab::Workflow);
         self.rederive_yaml(cx);
     }
 
@@ -635,7 +706,8 @@ impl GlobalSettingsView {
 
     fn rederive_yaml(&mut self, cx: &mut Context<Self>) {
         let draft = serde_json::to_string_pretty(&self.effective).unwrap_or_else(|_| "{}".into());
-        self.pending_yaml = Some(draft);
+        self.pending_yaml = Some(draft.clone());
+        self.draft_yaml = Some(draft);
         let desired = [
             get_i64(&self.effective, "segment", "max_tokens_per_batch", 1800).to_string(),
             get_i64(&self.effective, "segment", "max_tokens_per_segment", 1200).to_string(),
@@ -708,6 +780,7 @@ impl GlobalSettingsView {
         }
         let next = set_registry_field(&self.effective, group, id, key, value);
         self.effective = next;
+        self.touch(if group == "providers" { SettingsTab::Providers } else { SettingsTab::Models });
         self.rederive_yaml(cx);
     }
 
@@ -739,6 +812,8 @@ impl GlobalSettingsView {
             i += 1;
         }
         let name = format!("{prefix}{i}");
+        // New entries start expanded so the user sees where to type.
+        self.open_ids.insert(format!("{group}:{name}"));
         let mut next_llm = l.clone();
         if let Some(map) = next_llm.as_object_mut() {
             let mut group_map = map
@@ -752,6 +827,7 @@ impl GlobalSettingsView {
             map.insert("preset".to_string(), serde_json::Value::Null);
             map.insert(group.to_string(), group_map);
         }
+        self.touch(if group == "providers" { SettingsTab::Providers } else { SettingsTab::Models });
         self.set_llm(next_llm, cx);
     }
 
@@ -770,6 +846,8 @@ impl GlobalSettingsView {
             map.insert("preset".to_string(), serde_json::Value::Null);
         }
         self.cred_drafts.remove(id);
+        self.open_ids.remove(&format!("{group}:{id}"));
+        self.touch(if group == "providers" { SettingsTab::Providers } else { SettingsTab::Models });
         self.set_llm(next_llm, cx);
     }
 
@@ -793,6 +871,11 @@ impl GlobalSettingsView {
             }
         }
         self.editing_ids.remove(&format!("{group}:{old_id}"));
+        // Keep the renamed entry expanded.
+        if self.open_ids.remove(&format!("{group}:{old_id}")) {
+            self.open_ids.insert(format!("{group}:{new_id}"));
+        }
+        self.touch(if group == "providers" { SettingsTab::Providers } else { SettingsTab::Models });
         self.rederive_yaml(cx);
     }
 
@@ -896,6 +979,7 @@ impl GlobalSettingsView {
                     Ok(value) => {
                         if let Some(y) = value.get("yaml").and_then(|v| v.as_str()) {
                             view.pending_yaml = Some(y.to_string());
+                            view.draft_yaml = Some(y.to_string());
                         }
                         if let Some(e) = value.get("effective") {
                             view.effective = e.clone();
@@ -937,6 +1021,14 @@ impl GlobalSettingsView {
                         config.revision = revision;
                         view.apply_config(config);
                         view.uncommitted = true;
+                        // The whole draft now differs from the backend state.
+                        view.touched.extend([
+                            SettingsTab::Providers,
+                            SettingsTab::Models,
+                            SettingsTab::Routing,
+                            SettingsTab::Workflow,
+                            SettingsTab::Advanced,
+                        ]);
                         view.cred_drafts.clear();
                         view.notice =
                             Some("Defaults loaded into the draft. Save to apply.".into());
@@ -1322,8 +1414,8 @@ impl GlobalSettingsView {
                 map.insert("preset".to_string(), serde_json::Value::Null);
                 map.insert("tiers".to_string(), tiers);
             }
+            self.touch(SettingsTab::Routing);
             self.set_llm(next_llm, cx);
-            return;
         }
         if let Some(op) = key.strip_prefix("op:") {
             self.op_values.insert(op.to_string(), value.to_string());
@@ -1362,8 +1454,8 @@ impl GlobalSettingsView {
                 map.insert("preset".to_string(), serde_json::Value::Null);
                 map.insert("routes".to_string(), routes);
             }
+            self.touch(SettingsTab::Routing);
             self.set_llm(next_llm, cx);
-            return;
         }
         if let Some(rest) = key.strip_prefix("kind:") {
             // Protocol-specific options cannot be carried to another adapter.
@@ -1389,8 +1481,8 @@ impl GlobalSettingsView {
                 map.insert("models".to_string(), serde_json::Value::Object(mmap));
                 map.insert("preset".to_string(), serde_json::Value::Null);
             }
+            self.touch(SettingsTab::Providers);
             self.set_llm(next_llm, cx);
-            return;
         }
         if let Some(rest) = key.strip_prefix("conn:") {
             self.update_registry(
@@ -1411,6 +1503,834 @@ impl GlobalSettingsView {
             // Reset options when the connection changes (mirrors source).
             self.update_registry("models", rest, "options", serde_json::json!({}), cx);
         }
+    }
+
+    // -- Tab renderers (one per workspace tab; bodies moved from `render`) --
+
+    /// Per-tab dirty dot: "edited since last save/load" (`touched`, set by
+    /// the field mutators) plus live markers that clear themselves
+    /// (uncommitted ID edits, staged keys, YAML/MinerU drafts). General is
+    /// prefs-only and never dirty.
+    fn tab_dirty(&self, tab: SettingsTab) -> bool {
+        if self.touched.contains(&tab) {
+            return true;
+        }
+        match tab {
+            SettingsTab::General => false,
+            SettingsTab::Providers => {
+                self.editing_ids.iter().any(|k| k.starts_with("providers:"))
+                    || self.cred_pending()
+            }
+            SettingsTab::Models => self.editing_ids.iter().any(|k| k.starts_with("models:")),
+            SettingsTab::Routing => false,
+            SettingsTab::Workflow => self.mineru_dirty,
+            SettingsTab::Advanced => self.yaml_dirty,
+        }
+    }
+
+    /// Mark a tab edited. Called by the field mutators next to the
+    /// effective-object update, so dots track the edit origin exactly.
+    fn touch(&mut self, tab: SettingsTab) {
+        self.touched.insert(tab);
+    }
+
+    fn render_general_tab(&mut self, palette: &theme::Palette) -> Div {
+        // Local prefs only (language + theme) plus the updater placeholder.
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div().flex().flex_col().gap_2().child(
+                    div().text_lg().font_weight(FontWeight::BOLD).child("General"),
+                ).child(
+                    div().flex().flex_col().gap_1().child("Interface language").child(
+                        Select::new(self.lang_select.as_ref().unwrap()),
+                    ),
+                ),
+            )
+            .child(
+                div().flex().flex_col().gap_2().child(
+                    div().text_lg().font_weight(FontWeight::BOLD).child("Theme"),
+                ).child(
+                    div().flex().flex_col().gap_1().child("Mode").child(
+                        Select::new(self.theme_mode_select.as_ref().unwrap()),
+                    ),
+                ).child(
+                    div().flex().flex_col().gap_1().child("Accent").child(
+                        Select::new(self.theme_accent_select.as_ref().unwrap()),
+                    ),
+                ),
+            )
+            .child(
+                div().flex().flex_col().gap_1().p_3().rounded_md().border_1().border_color(palette.border)
+                    .child(div().text_sm().font_medium().child("App updates"))
+                    .child(div().text_sm().text_color(palette.muted_foreground).child("The Tauri auto-updater section is not ported to the native app yet.")),
+            )
+    }
+
+    fn render_providers_tab(
+        &mut self,
+        palette: &theme::Palette,
+        form_disabled: bool,
+        dirty: bool,
+        config_saved: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        // Collapsed-by-default accordion: one row per connection
+        // (id + kind + usage + key/ping status), fields inside.
+        let providers = self.providers();
+        let mut body = div().flex().flex_col().gap_2().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div().text_lg().font_weight(FontWeight::BOLD).child(format!(
+                        "API connections ({})",
+                        providers.len()
+                    )),
+                )
+                .child(div().flex_1())
+                .child(
+                    Button::new("ping")
+                        .label(if self.pinging { "Testing…" } else { "Test connection" })
+                        .disabled(form_disabled || self.pinging || !config_saved || dirty)
+                        .on_click(cx.listener(|this, _, _, cx| this.do_ping(cx))),
+                )
+                .child(
+                    Button::new("add-provider")
+                        .label("Add API connection")
+                        .disabled(form_disabled)
+                        .on_click(cx.listener(|this, _, _, cx| this.add_entry("providers", cx))),
+                ),
+        );
+        if !config_saved || dirty {
+            body = body.child(
+                div().text_sm().text_color(palette.muted_foreground)
+                    .child("Save the configuration before testing the connection."),
+            );
+        }
+        // Last ping outcome per connection for the header status dots.
+        let mut ping_ok: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        if let Some(results) = &self.ping_results {
+            for r in results {
+                if let Some(conn) = r.get("connection").and_then(|v| v.as_str()) {
+                    let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                    ping_ok.entry(conn.to_string()).or_insert(ok);
+                }
+            }
+        }
+        // Per-connection data + widgets, built before the accordion so the
+        // item closures only capture owned values.
+        struct ProviderRow {
+            id: String,
+            kind: String,
+            refs: Vec<String>,
+            kind_select: Entity<SelectState<Vec<String>>>,
+            url_input: Entity<InputState>,
+            env_input: Entity<InputState>,
+            timeout_input: Entity<InputState>,
+            cred: Entity<InputState>,
+            rename: Entity<InputState>,
+            cred_available: bool,
+            cred_mode: String,
+            cred_pending: bool,
+            ping: Option<bool>,
+            can_delete: bool,
+            open: bool,
+        }
+        let mut rows: Vec<ProviderRow> = Vec::with_capacity(providers.len());
+        for (id, provider) in &providers {
+            let refs = registry_references(&self.effective, "providers", id);
+            let kind = provider
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("openai-compatible")
+                .to_string();
+            let mut kind_opts = vec![kind.clone()];
+            for k in &self.provider_kinds {
+                if Some(k) != Some(&kind) {
+                    kind_opts.push(k.clone());
+                }
+            }
+            rows.push(ProviderRow {
+                kind_select: self.ensure_select(&format!("kind:{id}"), kind_opts, &kind, window, cx),
+                url_input: self.text_input(
+                    &format!("p:{id}:base_url"),
+                    provider.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    window,
+                    cx,
+                ),
+                env_input: self.text_input(
+                    &format!("p:{id}:api_key_env"),
+                    provider.get("api_key_env").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    window,
+                    cx,
+                ),
+                timeout_input: self.text_input(
+                    &format!("p:{id}:timeout"),
+                    provider.get("timeout").and_then(|v| v.as_i64()).unwrap_or(600).to_string(),
+                    window,
+                    cx,
+                ),
+                cred: self.cred_input(id, window, cx),
+                rename: self.rename_input("providers", id, window, cx),
+                cred_available: self
+                    .cred_statuses
+                    .get(id)
+                    .and_then(|s| s.get("available"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                cred_mode: self
+                    .cred_statuses
+                    .get(id)
+                    .and_then(|s| s.get("mode"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("environment")
+                    .to_string(),
+                cred_pending: self.cred_drafts.get(id).map(|v| !v.trim().is_empty()).unwrap_or(false),
+                ping: ping_ok.get(id).copied(),
+                can_delete: refs.is_empty(),
+                open: self.open_ids.contains(&format!("providers:{id}")),
+                id: id.clone(),
+                refs,
+                kind,
+            });
+        }
+        // Own disclosure rows (not the Accordion component): its toggle
+        // callback cannot write view state, so expanded rows would collapse
+        // on the next keystroke. Buttons toggle `open_ids` directly.
+        for row in rows {
+            // Header status dot: ping result wins, else key state.
+            let (dot_color, dot_label) = match (row.ping, row.cred_available, row.cred_pending) {
+                (Some(true), _, _) => (palette.success, "reachable"),
+                (Some(false), _, _) => (palette.destructive, "unreachable"),
+                (None, _, true) => (palette.warning, "unsaved key"),
+                (None, true, _) => (palette.success, "key saved"),
+                (None, false, _) => (palette.muted_foreground, "no key"),
+            };
+            let used_by = if row.refs.is_empty() {
+                "unused".to_string()
+            } else {
+                format!("{} model{}", row.refs.len(), if row.refs.len() == 1 { "" } else { "s" })
+            };
+            let open = row.open;
+            let toggle_key = format!("providers:{}", row.id);
+            let mut entry = div()
+                .flex()
+                .flex_col()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.border)
+                .child(
+                    div()
+                        .id(SharedString::from(format!("provider-toggle-{toggle_key}")))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .py_2()
+                        .min_w_0()
+                        .cursor_pointer()
+                        .on_click(cx.listener({
+                            let toggle_key = toggle_key.clone();
+                            move |this, _, _, cx| {
+                                if this.open_ids.contains(&toggle_key) {
+                                    this.open_ids.remove(&toggle_key);
+                                } else {
+                                    this.open_ids.insert(toggle_key.clone());
+                                }
+                                cx.notify();
+                            }
+                        }))
+                        .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).xsmall().flex_none().text_color(palette.muted_foreground))
+                        .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(dot_color).flex_none())
+                        .child(div().truncate().flex_1().font_weight(FontWeight::MEDIUM).child(row.id.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_sm()
+                                .bg(palette.muted)
+                                .text_color(palette.muted_foreground)
+                                .flex_none()
+                                .child(row.kind.clone()),
+                        )
+                        .child(
+                            div().text_xs().text_color(palette.muted_foreground).flex_none().child(format!(
+                                "{used_by} · {dot_label}"
+                            )),
+                        ),
+                );
+            if open {
+                let id_for_delete = row.id.clone();
+                let mut fields = div().flex().flex_col().gap_2().px_3().pb_3().child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div().flex_1().flex().flex_col().gap_1().child("Connection ID").child(
+                                Input::new(&row.rename).disabled(form_disabled),
+                            ),
+                        )
+                        .child(
+                            Button::new(format!("del-provider-{}", row.id))
+                                .label("Delete")
+                                .disabled(form_disabled || !row.can_delete)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.remove_entry("providers", &id_for_delete, cx)
+                                })),
+                        ),
+                );
+                if !row.can_delete {
+                    fields = fields.child(
+                        div().text_sm().text_color(palette.muted_foreground)
+                            .child(format!("Used by: {}", row.refs.join(", "))),
+                    );
+                }
+                let key_label = format!(
+                    "API key{}",
+                    if row.cred_available {
+                        format!(" (saved via {})", row.cred_mode)
+                    } else {
+                        " (not set)".to_string()
+                    }
+                );
+                let key_hint: &str = if row.cred_pending {
+                    "Unsaved key — it is written after the configuration saves."
+                } else {
+                    "Saved keys stay hidden; typing a key stages it for the next save."
+                };
+                fields = fields
+                    .child(
+                        div().flex().gap_2()
+                            .child(
+                                div().flex_1().flex().flex_col().gap_1().child("API provider").child(
+                                    Select::new(&row.kind_select).disabled(form_disabled),
+                                ),
+                            )
+                            .child(
+                                div().flex_1().flex().flex_col().gap_1()
+                                    .child("Request timeout (seconds)")
+                                    .child(Input::new(&row.timeout_input).disabled(form_disabled)),
+                            ),
+                    )
+                    .child(
+                        div().flex().flex_col().gap_1()
+                            .child("API base URL (leave blank for the provider default URL)")
+                            .child(Input::new(&row.url_input).disabled(form_disabled)),
+                    )
+                    .child(
+                        div().flex().flex_col().gap_1()
+                            .child("API key environment variable (leave blank for the provider default variable)")
+                            .child(Input::new(&row.env_input).disabled(form_disabled)),
+                    )
+                    .child(
+                        div().flex().flex_col().gap_1()
+                            .child(key_label)
+                            .child(Input::new(&row.cred).disabled(form_disabled))
+                            .child(div().text_sm().text_color(palette.muted_foreground).child(key_hint)),
+                    );
+                entry = entry.child(fields);
+            }
+            body = body.child(entry);
+        }
+        // Connectivity results (the Test button lives in the tab header;
+        // mirrors ModelConnectivity, saved-only gate).
+        if let Some(err) = &self.ping_error {
+            body = body.child(
+                div().p_3().rounded_md().bg(palette.destructive).text_color(palette.destructive_foreground).child(format!("Error: {err}")),
+            );
+        }
+        if let Some(results) = &self.ping_results {
+            let mut cbody = div().flex().flex_col().gap_2();
+            if results.is_empty() {
+                cbody = cbody.child(div().text_sm().child("No models are configured."));
+            } else {
+                let failed = results.iter().filter(|r| !r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)).count();
+                cbody = cbody.child(div().text_sm().child(
+                    if failed == 0 {
+                        format!("All {} models are reachable.", results.len())
+                    } else {
+                        format!("{failed} of {} models are unreachable.", results.len())
+                    },
+                ));
+                for r in results {
+                    let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let profile = r.get("profile").and_then(|v| v.as_str()).unwrap_or("?");
+                    let model = r.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                    let conn = r.get("connection").and_then(|v| v.as_str()).unwrap_or("?");
+                    let prov = r.get("provider").and_then(|v| v.as_str()).unwrap_or("?");
+                    let latency = r.get("latency_ms").and_then(|v| v.as_i64()).map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
+                    let category = r.get("category").and_then(|v| v.as_str()).unwrap_or("");
+                    let message = r.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let detail = {
+                        let base = category_message(category);
+                        let text = if base == "Probe failed." && !message.is_empty() { message } else { base };
+                        match r.get("status_code").and_then(|v| v.as_i64()) {
+                            Some(code) => format!("{text} (HTTP {code})"),
+                            None => text.to_string(),
+                        }
+                    };
+                    cbody = cbody.child(
+                        div().flex().flex_col().gap_1().p_2().rounded_md().border_1().border_color(palette.border)
+                            .child(div().text_sm().child(format!("{} · {model} ({conn} / {prov})", profile)))
+                            .child(div().text_sm().child(format!("{} · {latency} · {detail}", if ok { "Connected" } else { "Failed" }))),
+                    );
+                }
+            }
+            body = body.child(cbody);
+        }
+        body
+    }
+
+    fn render_models_tab(
+        &mut self,
+        palette: &theme::Palette,
+        form_disabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        // Same disclosure pattern as providers: id + connection + usage in
+        // the header, registry fields + name suggestions inside.
+        let models = self.models();
+        let provider_ids: Vec<String> = self.providers().into_iter().map(|(id, _)| id).collect();
+        let mut body = div().flex().flex_col().gap_2().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div().text_lg().font_weight(FontWeight::BOLD).child(format!(
+                        "Models ({})",
+                        models.len()
+                    )),
+                )
+                .child(div().flex_1())
+                .child(
+                    Button::new("add-model")
+                        .label("Add model")
+                        .disabled(form_disabled || provider_ids.is_empty())
+                        .on_click(cx.listener(|this, _, _, cx| this.add_entry("models", cx))),
+                ),
+        );
+        struct ModelRow {
+            id: String,
+            conn: String,
+            refs: Vec<String>,
+            conn_select: Entity<SelectState<Vec<String>>>,
+            name_input: Entity<InputState>,
+            rename: Entity<InputState>,
+            fetching: bool,
+            suggestions: Option<Vec<String>>,
+            suggestion_error: Option<String>,
+            can_delete: bool,
+            open: bool,
+        }
+        let mut rows: Vec<ModelRow> = Vec::with_capacity(models.len());
+        for (id, model) in &models {
+            let conn = model.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = model.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let refs = registry_references(&self.effective, "models", id);
+            rows.push(ModelRow {
+                conn_select: self.ensure_select(&format!("conn:{id}"), provider_ids.clone(), &conn, window, cx),
+                name_input: self.text_input(&format!("m:{id}:name"), name, window, cx),
+                rename: self.rename_input("models", id, window, cx),
+                fetching: self.fetching_models.contains(id),
+                suggestions: self.suggestions.get(id).cloned(),
+                suggestion_error: self.suggestion_error.get(id).cloned(),
+                can_delete: refs.is_empty(),
+                open: self.open_ids.contains(&format!("models:{id}")),
+                id: id.clone(),
+                conn,
+                refs,
+            });
+        }
+        for row in rows {
+            let used_by = if row.refs.is_empty() {
+                "unused".to_string()
+            } else {
+                format!("{} use{}", row.refs.len(), if row.refs.len() == 1 { "" } else { "s" })
+            };
+            let open = row.open;
+            let toggle_key = format!("models:{}", row.id);
+            let mut entry = div()
+                .flex()
+                .flex_col()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.border)
+                .child(
+                    div()
+                        .id(SharedString::from(format!("model-toggle-{toggle_key}")))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .py_2()
+                        .min_w_0()
+                        .cursor_pointer()
+                        .on_click(cx.listener({
+                            let toggle_key = toggle_key.clone();
+                            move |this, _, _, cx| {
+                                if this.open_ids.contains(&toggle_key) {
+                                    this.open_ids.remove(&toggle_key);
+                                } else {
+                                    this.open_ids.insert(toggle_key.clone());
+                                }
+                                cx.notify();
+                            }
+                        }))
+                        .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).xsmall().flex_none().text_color(palette.muted_foreground))
+                        .child(div().truncate().flex_1().font_weight(FontWeight::MEDIUM).child(row.id.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_sm()
+                                .bg(palette.muted)
+                                .text_color(palette.muted_foreground)
+                                .flex_none()
+                                .child(if row.conn.is_empty() { "—".to_string() } else { row.conn.clone() }),
+                        )
+                        .child(
+                            div().text_xs().text_color(palette.muted_foreground).flex_none().child(used_by),
+                        ),
+                );
+            if open {
+                let id_for_delete = row.id.clone();
+                let id_fetch = row.id.clone();
+                let mut fields = div().flex().flex_col().gap_2().px_3().pb_3().child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div().flex_1().flex().flex_col().gap_1().child("Model ID").child(
+                                Input::new(&row.rename).disabled(form_disabled),
+                            ),
+                        )
+                        .child(
+                            Button::new(format!("del-model-{}", row.id))
+                                .label("Delete")
+                                .disabled(form_disabled || !row.can_delete)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.remove_entry("models", &id_for_delete, cx)
+                                })),
+                        ),
+                );
+                if !row.can_delete {
+                    fields = fields.child(
+                        div().text_sm().text_color(palette.muted_foreground)
+                            .child(format!("Used by: {}", row.refs.join(", "))),
+                    );
+                }
+                fields = fields
+                    .child(
+                        div().flex().gap_2()
+                            .child(
+                                div().flex_1().flex().flex_col().gap_1().child("API connection").child(
+                                    Select::new(&row.conn_select).disabled(form_disabled),
+                                ),
+                            )
+                            .child(
+                                div().flex_1().flex().flex_col().gap_1()
+                                    .child("Model name")
+                                    .child(Input::new(&row.name_input).disabled(form_disabled)),
+                            ),
+                    );
+                // Suggestions (mirrors ModelNameField fetch).
+                if row.fetching {
+                    fields = fields.child(div().text_sm().text_color(palette.muted_foreground).child("Loading model names…"));
+                } else if let Some(names) = &row.suggestions {
+                    if names.is_empty() {
+                        fields = fields.child(div().text_sm().text_color(palette.muted_foreground).child("No models returned. Enter the name."));
+                    } else {
+                        let mut list = div().flex().flex_col().gap_1();
+                        for n in names.iter().take(20) {
+                            list = list.child(div().text_sm().child(n.clone()));
+                        }
+                        fields = fields.child(list);
+                    }
+                } else if let Some(err) = &row.suggestion_error {
+                    fields = fields.child(div().text_sm().text_color(palette.muted_foreground).child(err.clone()));
+                }
+                fields = fields.child(
+                    div().flex().gap_2()
+                        .child(
+                            Button::new(format!("fetch-models-{}", row.id))
+                                .label("Fetch model names")
+                                .disabled(form_disabled)
+                                .on_click(cx.listener(move |this, _, _, cx| this.fetch_suggestions(&id_fetch, cx))),
+                        ),
+                );
+                entry = entry.child(fields);
+            }
+            body = body.child(entry);
+        }
+        body
+    }
+
+    fn render_routing_tab(
+        &mut self,
+        palette: &theme::Palette,
+        form_disabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        // Tier defaults + per-operation routes. Operations render as compact
+        // table rows (label + tier badge left, select right) grouped by
+        // default tier — one line each instead of bordered cards.
+        let mut body = div().flex().flex_col().gap_2().child(
+            div().text_lg().font_weight(FontWeight::BOLD).child("Default models"),
+        );
+        let model_ids: Vec<String> = self.models().into_iter().map(|(id, _)| id).collect();
+        {
+            let mut tiers = div().flex().gap_2();
+            for (id, label) in TIERS {
+                let current = self.tier_values.get(*id).cloned().unwrap_or_default();
+                let mut opts = Vec::new();
+                if !current.is_empty() && !model_ids.contains(&current) {
+                    opts.push(current.clone());
+                }
+                opts.extend(model_ids.clone());
+                let select = self.ensure_select(&format!("tier:{id}"), opts, &current, window, cx);
+                tiers = tiers.child(
+                    div().flex_1().flex().flex_col().gap_1().child(*label).child(
+                        Select::new(&select).disabled(form_disabled),
+                    ),
+                );
+            }
+            body = body.child(tiers);
+        }
+        // Group operations by their default tier (TIERS order, then rest).
+        let mut grouped: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
+        for op in self.operations.clone() {
+            let oid = op.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if oid.is_empty() {
+                continue;
+            }
+            let tier = op.get("tier").and_then(|v| v.as_str()).unwrap_or("strong").to_string();
+            match grouped.iter_mut().find(|(t, _)| *t == tier) {
+                Some((_, ops)) => ops.push(op),
+                None => grouped.push((tier, vec![op])),
+            }
+        }
+        grouped.sort_by_key(|(t, _)| TIERS.iter().position(|(id, _)| id == t).unwrap_or(usize::MAX));
+        let tier_label = |t: &str| -> String { TIERS.iter().find(|(id, _)| *id == t).map(|(_, l)| l.to_string()).unwrap_or_else(|| t.to_string()) };
+        let mut ops = div().flex().flex_col().gap_2().child(
+            div().text_sm().font_medium().child("Models by operation"),
+        );
+        for (tier, tier_ops) in &grouped {
+            let mut group = div().flex().flex_col().gap_1().child(
+                div().text_xs().font_medium().text_color(palette.muted_foreground).child(format!(
+                    "{} — default {}",
+                    tier_label(tier),
+                    tier_ops.len(),
+                )),
+            );
+            for op in tier_ops {
+                let oid = op.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let desc = op.get("description").and_then(|v| v.as_str()).unwrap_or(&oid).to_string();
+                let current = self.op_values.get(&oid).cloned().unwrap_or_else(|| format!("tier:{tier}"));
+                let mut opts: Vec<String> = TIERS.iter().map(|(t, _)| format!("tier:{t}")).collect();
+                for m in &model_ids {
+                    if !opts.contains(m) {
+                        opts.push(m.clone());
+                    }
+                }
+                if !opts.contains(&current) {
+                    opts.push(current.clone());
+                }
+                let select = self.ensure_select(&format!("op:{oid}"), opts, &current, window, cx);
+                let route = section(&llm(&self.effective), "routes");
+                let fallbacks: Vec<String> = route
+                    .get(&oid)
+                    .and_then(|r| r.get("fallbacks"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|f| f.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+                // Overridden when the route names a concrete model or carries
+                // fallbacks; tier-following rows stay quiet.
+                let overridden = !current.starts_with("tier:") || !fallbacks.is_empty();
+                let mut row = div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .py_1p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(palette.border)
+                    .child(div().flex_1().min_w_0().truncate().text_sm().child(desc));
+                if overridden {
+                    row = row.child(
+                        div()
+                            .text_xs()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_sm()
+                            .bg(palette.muted)
+                            .text_color(palette.muted_foreground)
+                            .flex_none()
+                            .child(if fallbacks.is_empty() {
+                                "override".to_string()
+                            } else {
+                                format!("+{} fallback{}", fallbacks.len(), if fallbacks.len() == 1 { "" } else { "s" })
+                            }),
+                    );
+                }
+                row = row.child(
+                    div().w(px(220.0)).flex_none().child(
+                        Select::new(&select).disabled(form_disabled),
+                    ),
+                );
+                group = group.child(row);
+            }
+            ops = ops.child(group);
+        }
+        body = body.child(ops);
+        body
+    }
+
+    fn render_workflow_tab(
+        &mut self,
+        palette: &theme::Palette,
+        form_disabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        // Pipeline toggles + perf fields, then the MinerU section (which
+        // autosaves independently of the configuration draft).
+        let pipeline_book = get_bool(&self.effective, "pipeline", "book_understanding");
+        let pipeline_polish = get_bool(&self.effective, "pipeline", "polish");
+        let pipeline_review = get_bool(&self.effective, "pipeline", "review");
+        let pipeline_autofix = get_bool(&self.effective, "pipeline", "review_autofix");
+        let annotation = get_bool(&self.effective, "pipeline", "annotation_alignment");
+        let pdf_current = self.pdf_backend.clone();
+        let pdf_select = self.ensure_select("pdf_backend", vec!["mineru".to_string(), "babeldoc".to_string()], &pdf_current, window, cx);
+        let mineru_available = self
+            .mineru_status
+            .get("available")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        div().flex().flex_col().gap_3()
+            .child(
+                div().flex().flex_col().gap_2()
+                    .child(div().text_lg().font_weight(FontWeight::BOLD).child("Workflow"))
+                    .child(Checkbox::new("wf-book").label("Book understanding").checked(pipeline_book).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("book_understanding", *checked, cx))))
+                    .child(Checkbox::new("wf-polish").label("Polishing").checked(pipeline_polish).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("polish", *checked, cx))))
+                    .child(Checkbox::new("wf-review").label("Whole-book review").checked(pipeline_review).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("review", *checked, cx))))
+                    .child(Checkbox::new("wf-autofix").label("Apply autofixes to the saved translation after review").checked(pipeline_autofix).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("review_autofix", *checked, cx))))
+                    .child(div().text_sm().font_medium().child("Segmentation and performance"))
+                    .child(Checkbox::new("wf-align").label("Paragraph annotation alignment").checked(annotation).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("annotation_alignment", *checked, cx))))
+                    .child(
+                        div().flex().gap_2()
+                            .child(div().flex_1().flex().flex_col().gap_1().child("Tokens per batch").child(Input::new(&self.batch_tokens).disabled(form_disabled)))
+                            .child(div().flex_1().flex().flex_col().gap_1().child("Tokens per paragraph").child(Input::new(&self.segment_tokens).disabled(form_disabled))),
+                    )
+                    .child(
+                        div().flex().gap_2()
+                            .child(div().flex_1().flex().flex_col().gap_1().child("Review concurrency").child(Input::new(&self.review_concurrency).disabled(form_disabled)))
+                            .child(div().flex_1().flex().flex_col().gap_1().child("PDF parser").child(Select::new(&pdf_select).disabled(form_disabled))),
+                    ),
+            )
+            .child(
+                div().flex().flex_col().gap_2().child(
+                    div().text_lg().font_weight(FontWeight::BOLD).child("MinerU PDF parsing"),
+                ).child(
+                    div().flex().flex_col().gap_1()
+                        .child(format!("MinerU API key{}", if mineru_available { " (saved)" } else { " (not set)" }))
+                        .child(Input::new(&self.mineru_input).disabled(self.mineru_saving))
+                        .child(div().text_sm().text_color(palette.muted_foreground).child(
+                            if self.mineru_saving { "Saving…" } else { "Saved automatically after you stop typing — independent of Save below." },
+                        )),
+                ),
+            )
+    }
+
+    fn render_advanced_tab(&mut self, palette: &theme::Palette, cx: &mut Context<Self>) -> Div {
+        // Raw YAML draft: the editor fills the tab down to the footer and
+        // scrolls internally; revision note + dirty hint stay below it.
+        let mut body = div().flex().flex_col().flex_1().min_h_0().gap_2()
+            .child(div().text_lg().font_weight(FontWeight::BOLD).child("Advanced"))
+            .child(
+                div().flex().flex_col().flex_1().min_h_0().gap_1()
+                    .child("Advanced YAML configuration")
+                    .child(Editor::new(&self.yaml).flex_1().min_h_0()),
+            )
+            .child(
+                div().text_xs().text_color(palette.muted_foreground).child(format!(
+                    "Draft revision {} — Validate applies YAML edits to the form; Save writes them to the backend.",
+                    self.revision
+                )),
+            );
+        if self.yaml_dirty {
+            body = body.child(
+                div().flex().gap_2().items_center()
+                    .child(
+                        div().text_sm().text_color(palette.muted_foreground).flex_1()
+                            .child("Advanced YAML has unvalidated changes. Validate it to update the form."),
+                    )
+                    .child(
+                        Button::new("validate-yaml")
+                            .label("Validate")
+                            .disabled(!self.loaded || self.op.is_some() || !self.editing_ids.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| this.do_validate(cx))),
+                    ),
+            );
+        }
+        body
+    }
+
+    fn render_action_bar(
+        &mut self,
+        palette: &theme::Palette,
+        op_busy: bool,
+        dirty: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let save_label = if op_busy { "Saving…" } else { "Save configuration" };
+        div()
+            .flex()
+            .gap_2()
+            .items_center()
+                    .child(
+                        Button::new("restore")
+                            .ghost()
+                            .label("Restore defaults")
+                            .disabled(self.loaded == false || op_busy)
+                            .on_click(cx.listener(|this, _, _, cx| this.do_restore(cx))),
+                    )
+                    .child(
+                        Button::new("validate")
+                            .label("Validate configuration")
+                            .disabled(self.loaded == false || op_busy || !self.editing_ids.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| this.do_validate(cx))),
+                    )
+                    .child(
+                        Button::new("save")
+                            .label(save_label)
+                            .primary()
+                            .disabled(self.loaded == false || op_busy || !self.editing_ids.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| this.do_save(cx))),
+                    )
+                    .child(
+                        div().text_sm().text_color(palette.muted_foreground).child(
+                            if !self.editing_ids.is_empty() {
+                                "Apply or discard the ID edits before saving."
+                            } else if dirty {
+                                "Unsaved changes"
+                            } else {
+                                ""
+                            },
+                        ),
+                    )
     }
 }
 
@@ -1540,519 +2460,116 @@ impl Render for GlobalSettingsView {
         let dirty = self.dirty();
         let config_saved = self.config_saved();
 
-        // Scroll region owns overflow; flex_1 + min_h_0 lets it shrink in
-        // the app-shell column.
-        let mut col = div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .gap_3()
-            .p_6()
-            .overflow_y_scrollbar()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Settings"));
+        // Shell: pinned header (title + banners + tabs), scrolling tab body,
+        // pinned footer (action bar). Only the active tab builds elements.
+        let mut col = div().flex().flex_col().h_full().min_h_0().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .px_6()
+                .pt_6()
+                .child(div().text_xl().font_weight(FontWeight::BOLD).child("Settings")),
+        );
 
         if let Some(err) = &self.error {
             col = col.child(
-                div()
-                    .p_3()
-                    .rounded_md()
-                    .bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
+                div().px_6().child(
+                    div()
+                        .p_3()
+                        .rounded_md()
+                        .bg(palette.destructive)
+                        .text_color(palette.destructive_foreground)
+                        .child(format!("Error: {err}")),
+                ),
             );
         }
         if let Some(notice) = &self.notice {
             col = col.child(
-                div()
-                    .p_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(palette.border)
-                    .child(notice.clone()),
-            );
-        }
-        if self.loading && !self.loaded {
-            col = col.child(
-                div().text_sm().text_color(palette.muted_foreground).child("Loading…"),
-            );
-            return col;
-        }
-
-        // -- General / language --
-        col = col.child(
-            div().flex().flex_col().gap_2().child(
-                div().text_lg().font_weight(FontWeight::BOLD).child("General"),
-            ).child(
-                div().flex().flex_col().gap_1().child("Interface language").child(
-                    Select::new(self.lang_select.as_ref().unwrap()),
-                ),
-            ),
-        );
-        col = col.child(
-            div().flex().flex_col().gap_2().child(
-                div().text_lg().font_weight(FontWeight::BOLD).child("Theme"),
-            ).child(
-                div().flex().flex_col().gap_1().child("Mode").child(
-                    Select::new(self.theme_mode_select.as_ref().unwrap()),
-                ),
-            ).child(
-                div().flex().flex_col().gap_1().child("Accent").child(
-                    Select::new(self.theme_accent_select.as_ref().unwrap()),
-                ),
-            ),
-        );
-
-        // -- Providers & models --
-        {
-            let mut body = div().flex().flex_col().gap_2().child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_lg().font_weight(FontWeight::BOLD).child("Providers & models"))
-                    .child(
-                        Button::new("add-provider")
-                            .label("Add API connection")
-                            .disabled(form_disabled)
-                            .on_click(cx.listener(|this, _, _, cx| this.add_entry("providers", cx))),
-                    ),
-            );
-            for (id, provider) in self.providers() {
-                let refs = registry_references(&self.effective, "providers", &id);
-                let kind = provider.get("kind").and_then(|v| v.as_str()).unwrap_or("openai-compatible").to_string();
-                let mut kind_opts = vec![kind.clone()];
-                for k in &self.provider_kinds {
-                    if Some(k) != Some(&kind) {
-                        kind_opts.push(k.clone());
-                    }
-                }
-                let kind_select = self.ensure_select(&format!("kind:{id}"), kind_opts, &kind, window, cx);
-                let base_url = provider.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let api_key_env = provider.get("api_key_env").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let timeout = provider.get("timeout").and_then(|v| v.as_i64()).unwrap_or(600).to_string();
-                let url_input = self.text_input(&format!("p:{id}:base_url"), base_url, window, cx);
-                let env_input = self.text_input(&format!("p:{id}:api_key_env"), api_key_env, window, cx);
-                let timeout_input = self.text_input(&format!("p:{id}:timeout"), timeout, window, cx);
-                let cred = self.cred_input(&id, window, cx);
-                let rename = self.rename_input("providers", &id, window, cx);
-                let cred_available = self
-                    .cred_statuses
-                    .get(&id)
-                    .and_then(|s| s.get("available"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let cred_mode = self
-                    .cred_statuses
-                    .get(&id)
-                    .and_then(|s| s.get("mode"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("environment")
-                    .to_string();
-                let cred_pending = self.cred_drafts.get(&id).map(|v| !v.trim().is_empty()).unwrap_or(false);
-                let can_delete = refs.is_empty();
-                let id_clone = id.clone();
-                let mut card = div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(palette.border)
-                    .child(
-                        div().flex().gap_2().items_center()
-                            .child(div().flex_1().flex().flex_col().gap_1().child("Connection ID").child(Input::new(&rename).disabled(form_disabled)))
-                            .child(
-                                Button::new(format!("del-provider-{id}"))
-                                    .label("Delete")
-                                    .disabled(form_disabled || !can_delete)
-                                    .on_click(cx.listener(move |this, _, _, cx| this.remove_entry("providers", &id_clone, cx))),
-                            ),
-                    );
-                if !can_delete {
-                    card = card.child(
-                        div().text_sm().text_color(palette.muted_foreground)
-                            .child(format!("Used by: {}", refs.join(", "))),
-                    );
-                }
-                card = card
-                    .child(
-                        div().flex().flex_col().gap_1().child("API provider").child(
-                            Select::new(&kind_select).disabled(form_disabled),
-                        ),
-                    )
-                    .child(
-                        div().flex().flex_col().gap_1()
-                            .child("API base URL (leave blank for the provider default URL)")
-                            .child(Input::new(&url_input).disabled(form_disabled)),
-                    )
-                    .child(
-                        div().flex().flex_col().gap_1()
-                            .child("API key environment variable (leave blank for the provider default variable)")
-                            .child(Input::new(&env_input).disabled(form_disabled)),
-                    )
-                    .child(
-                        div().flex().flex_col().gap_1()
-                            .child("Request timeout (seconds)")
-                            .child(Input::new(&timeout_input).disabled(form_disabled)),
-                    )
-                    .child(
-                        div().flex().flex_col().gap_1()
-                            .child(format!(
-                                "API key{}",
-                                if cred_available { format!(" (saved via {cred_mode})") } else { " (not set)".to_string() }
-                            ))
-                            .child(Input::new(&cred).disabled(form_disabled))
-                            .child(
-                                div().text_sm().text_color(palette.muted_foreground).child(
-                                    if cred_pending {
-                                        "Unsaved key — it is written after the configuration saves."
-                                    } else {
-                                        "Saved keys stay hidden; typing a key stages it for the next save."
-                                    },
-                                ),
-                            ),
-                    );
-                body = body.child(card);
-            }
-            // Models
-            {
-                let mut mbody = div().flex().flex_col().gap_2().child(
+                div().px_6().child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(div().text_lg().font_weight(FontWeight::BOLD).child("Models"))
-                        .child(
-                            Button::new("add-model")
-                                .label("Add model")
-                                .disabled(form_disabled || self.providers().is_empty())
-                                .on_click(cx.listener(|this, _, _, cx| this.add_entry("models", cx))),
-                        ),
-                );
-                let provider_ids: Vec<String> = self.providers().into_iter().map(|(id, _)| id).collect();
-                for (id, model) in self.models() {
-                    let conn = model.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let name = model.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let conn_select = self.ensure_select(&format!("conn:{id}"), provider_ids.clone(), &conn, window, cx);
-                    let name_input = self.text_input(&format!("m:{id}:name"), name, window, cx);
-                    let rename = self.rename_input("models", &id, window, cx);
-                    let refs = registry_references(&self.effective, "models", &id);
-                    let can_delete = refs.is_empty();
-                    let id_clone = id.clone();
-                    let id_fetch = id.clone();
-                    let mut card = div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
                         .p_3()
                         .rounded_md()
                         .border_1()
                         .border_color(palette.border)
-                        .child(
-                            div().flex().gap_2().items_center()
-                                .child(div().flex_1().flex().flex_col().gap_1().child("Model ID").child(Input::new(&rename).disabled(form_disabled)))
-                                .child(
-                                    Button::new(format!("del-model-{id}"))
-                                        .label("Delete")
-                                        .disabled(form_disabled || !can_delete)
-                                        .on_click(cx.listener(move |this, _, _, cx| this.remove_entry("models", &id_clone, cx))),
-                                ),
-                        );
-                    if !can_delete {
-                        card = card.child(
-                            div().text_sm().text_color(palette.muted_foreground)
-                                .child(format!("Used by: {}", refs.join(", "))),
-                        );
-                    }
-                    card = card
-                        .child(
-                            div().flex().flex_col().gap_1().child("API connection").child(
-                                Select::new(&conn_select).disabled(form_disabled),
-                            ),
-                        )
-                        .child(
-                            div().flex().flex_col().gap_1().child("Model name").child(Input::new(&name_input).disabled(form_disabled)),
-                        );
-                    // Suggestions (mirrors ModelNameField fetch).
-                    if self.fetching_models.contains(&id) {
-                        card = card.child(div().text_sm().text_color(palette.muted_foreground).child("Loading model names…"));
-                    } else if let Some(names) = self.suggestions.get(&id) {
-                        if names.is_empty() {
-                            card = card.child(div().text_sm().text_color(palette.muted_foreground).child("No models returned. Enter the name."));
-                        } else {
-                            let mut list = div().flex().flex_col().gap_1();
-                            for n in names.iter().take(20) {
-                                list = list.child(div().text_sm().child(n.clone()));
-                            }
-                            card = card.child(list);
-                        }
-                    } else if let Some(err) = self.suggestion_error.get(&id) {
-                        card = card.child(div().text_sm().text_color(palette.muted_foreground).child(err.clone()));
-                    }
-                    card = card.child(
-                        Button::new(format!("fetch-models-{id}"))
-                            .label("Fetch model names")
-                            .disabled(form_disabled)
-                            .on_click(cx.listener(move |this, _, _, cx| this.fetch_suggestions(&id_fetch, cx))),
-                    );
-                    mbody = mbody.child(card);
-                }
-                body = body.child(mbody);
-            }
-            // Connectivity (mirrors ModelConnectivity; saved-only gate).
-            {
-                let mut cbody = div().flex().flex_col().gap_2().child(
-                    div().flex().gap_2().items_center().child(
-                        Button::new("ping")
-                            .label(if self.pinging { "Testing…" } else { "Test connection" })
-                            .disabled(form_disabled || self.pinging || !config_saved || dirty)
-                            .on_click(cx.listener(|this, _, _, cx| this.do_ping(cx))),
-                    ).child(
-                        div().text_sm().text_color(palette.muted_foreground).child(
-                            if !config_saved || dirty {
-                                "Save the configuration before testing the connection."
-                            } else {
-                                ""
-                            },
-                        ),
-                    ),
-                );
-                if let Some(err) = &self.ping_error {
-                    cbody = cbody.child(
-                        div().p_3().rounded_md().bg(palette.destructive).text_color(palette.destructive_foreground).child(format!("Error: {err}")),
-                    );
-                }
-                if let Some(results) = &self.ping_results {
-                    if results.is_empty() {
-                        cbody = cbody.child(div().text_sm().child("No models are configured."));
-                    } else {
-                        let failed = results.iter().filter(|r| !r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)).count();
-                        cbody = cbody.child(div().text_sm().child(
-                            if failed == 0 {
-                                format!("All {} models are reachable.", results.len())
-                            } else {
-                                format!("{failed} of {} models are unreachable.", results.len())
-                            },
-                        ));
-                        for r in results {
-                            let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                            let profile = r.get("profile").and_then(|v| v.as_str()).unwrap_or("?");
-                            let model = r.get("model").and_then(|v| v.as_str()).unwrap_or("");
-                            let conn = r.get("connection").and_then(|v| v.as_str()).unwrap_or("?");
-                            let prov = r.get("provider").and_then(|v| v.as_str()).unwrap_or("?");
-                            let latency = r.get("latency_ms").and_then(|v| v.as_i64()).map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
-                            let category = r.get("category").and_then(|v| v.as_str()).unwrap_or("");
-                            let message = r.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                            let detail = {
-                                let base = category_message(category);
-                                let text = if base == "Probe failed." && !message.is_empty() { message } else { base };
-                                match r.get("status_code").and_then(|v| v.as_i64()) {
-                                    Some(code) => format!("{text} (HTTP {code})"),
-                                    None => text.to_string(),
-                                }
-                            };
-                            cbody = cbody.child(
-                                div().flex().flex_col().gap_1().p_2().rounded_md().border_1().border_color(palette.border)
-                                    .child(div().text_sm().child(format!("{} · {model} ({conn} / {prov})", profile)))
-                                    .child(div().text_sm().child(format!("{} · {latency} · {detail}", if ok { "Connected" } else { "Failed" }))),
-                            );
-                        }
-                    }
-                }
-                body = body.child(cbody);
-            }
-            col = col.child(body);
-        }
-
-        // -- Default models (tiers + per-operation routes) --
-        {
-            let mut body = div().flex().flex_col().gap_2().child(
-                div().text_lg().font_weight(FontWeight::BOLD).child("Default models"),
+                        .child(notice.clone()),
+                ),
             );
-            let model_ids: Vec<String> = self.models().into_iter().map(|(id, _)| id).collect();
-            {
-                let mut tiers = div().flex().gap_2();
-                for (id, label) in TIERS {
-                    let current = self.tier_values.get(*id).cloned().unwrap_or_default();
-                    let mut opts = Vec::new();
-                    if !current.is_empty() && !model_ids.contains(&current) {
-                        opts.push(current.clone());
-                    }
-                    opts.extend(model_ids.clone());
-                    let select = self.ensure_select(&format!("tier:{id}"), opts, &current, window, cx);
-                    tiers = tiers.child(
-                        div().flex_1().flex().flex_col().gap_1().child(*label).child(
-                            Select::new(&select).disabled(form_disabled),
-                        ),
-                    );
-                }
-                body = body.child(tiers);
-            }
-            {
-                let mut ops = div().flex().flex_col().gap_2().child(
-                    div().text_sm().font_medium().child("Models by operation"),
-                );
-                for op in self.operations.clone() {
-                    let oid = op.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    if oid.is_empty() {
-                        continue;
-                    }
-                    let desc = op.get("description").and_then(|v| v.as_str()).unwrap_or(&oid).to_string();
-                    let tier_default = op.get("tier").and_then(|v| v.as_str()).unwrap_or("strong");
-                    let current = self.op_values.get(&oid).cloned().unwrap_or_else(|| format!("tier:{tier_default}"));
-                    let mut opts: Vec<String> = TIERS.iter().map(|(t, _)| format!("tier:{t}")).collect();
-                    for m in &model_ids {
-                        if !opts.contains(m) {
-                            opts.push(m.clone());
-                        }
-                    }
-                    if !opts.contains(&current) {
-                        opts.push(current.clone());
-                    }
-                    let select = self.ensure_select(&format!("op:{oid}"), opts, &current, window, cx);
-                    let route = section(&llm(&self.effective), "routes");
-                    let fallbacks: Vec<String> = route
-                        .get(&oid)
-                        .and_then(|r| r.get("fallbacks"))
-                        .and_then(|v| v.as_array())
-                        .map(|a| a.iter().filter_map(|f| f.as_str().map(|s| s.to_string())).collect())
-                        .unwrap_or_default();
-                    ops = ops.child(
-                        div().flex().flex_col().gap_1().p_2().rounded_md().border_1().border_color(palette.border)
-                            .child(div().text_sm().child(desc))
-                            .child(Select::new(&select).disabled(form_disabled))
-                            .child(div().text_sm().text_color(palette.muted_foreground).child(
-                                if fallbacks.is_empty() { "Fallback models: none".to_string() } else { format!("Fallback models: {}", fallbacks.join(", ")) },
-                            )),
-                    );
-                }
-                body = body.child(ops);
-            }
-            col = col.child(body);
+        }
+        if self.loading && !self.loaded {
+            col = col.child(
+                div().px_6().pb_6().child(
+                    div().text_sm().text_color(palette.muted_foreground).child("Loading…"),
+                ),
+            );
+            return col;
         }
 
-        // -- Workflow (global scope + pdf; no translation_mode) --
-        {
-            let pipeline_book = get_bool(&self.effective, "pipeline", "book_understanding");
-            let pipeline_polish = get_bool(&self.effective, "pipeline", "polish");
-            let pipeline_review = get_bool(&self.effective, "pipeline", "review");
-            let pipeline_autofix = get_bool(&self.effective, "pipeline", "review_autofix");
-            let annotation = get_bool(&self.effective, "pipeline", "annotation_alignment");
-            let pdf_current = self.pdf_backend.clone();
-            let pdf_select = self.ensure_select("pdf_backend", vec!["mineru".to_string(), "babeldoc".to_string()], &pdf_current, window, cx);
+        // Workspace tabs (Glossary pattern): General default; dirty tabs get
+        // a dot prefix. Switching is render-only, no backend fetch.
+        let tab_index = SettingsTab::ALL
+            .iter()
+            .position(|(t, _)| *t == self.tab)
+            .unwrap_or(0);
+        let mut tabbar = TabBar::new("settings-tabs")
+            .underline()
+            .selected_index(tab_index)
+            .on_click(cx.listener(|this, index: &usize, _, cx| {
+                if let Some((tab, _)) = SettingsTab::ALL.get(*index) {
+                    this.tab = *tab;
+                    cx.notify();
+                }
+            }));
+        for (tab, label) in SettingsTab::ALL {
+            let mut t = Tab::new();
+            if self.tab_dirty(*tab) {
+                t = t.label(format!("• {label}")).text_color(palette.primary);
+            } else {
+                t = t.label(*label);
+            }
+            tabbar = tabbar.child(t);
+        }
+        col = col.child(div().px_6().child(tabbar));
+
+        // Scrolling body: only the active tab builds elements.
+        let tab_body = match self.tab {
+            SettingsTab::General => self.render_general_tab(&palette),
+            SettingsTab::Providers => {
+                self.render_providers_tab(&palette, form_disabled, dirty, config_saved, window, cx)
+            }
+            SettingsTab::Models => {
+                self.render_models_tab(&palette, form_disabled, window, cx)
+            }
+            SettingsTab::Routing => {
+                self.render_routing_tab(&palette, form_disabled, window, cx)
+            }
+            SettingsTab::Workflow => {
+                self.render_workflow_tab(&palette, form_disabled, window, cx)
+            }
+            SettingsTab::Advanced => self.render_advanced_tab(&palette, cx),
+        };
+        // Advanced fills the tab (the code editor scrolls internally), all
+        // other tabs scroll as a whole.
+        if self.tab == SettingsTab::Advanced {
             col = col.child(
-                div().flex().flex_col().gap_2().child(
-                    div().text_lg().font_weight(FontWeight::BOLD).child("Workflow"),
-                ).child(
-                    Checkbox::new("wf-book").label("Book understanding").checked(pipeline_book).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("book_understanding", *checked, cx))),
-                ).child(
-                    Checkbox::new("wf-polish").label("Polishing").checked(pipeline_polish).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("polish", *checked, cx))),
-                ).child(
-                    Checkbox::new("wf-review").label("Whole-book review").checked(pipeline_review).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("review", *checked, cx))),
-                ).child(
-                    Checkbox::new("wf-autofix").label("Apply autofixes to the saved translation after review").checked(pipeline_autofix).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("review_autofix", *checked, cx))),
-                ).child(
-                    div().text_sm().font_medium().child("Segmentation and performance"),
-                ).child(
-                    Checkbox::new("wf-align").label("Paragraph annotation alignment").checked(annotation).on_change(cx.listener(|this, checked: &bool, _, cx| this.toggle_pipeline("annotation_alignment", *checked, cx))),
-                ).child(
-                    div().flex().gap_2()
-                        .child(div().flex_1().flex().flex_col().gap_1().child("Tokens per batch").child(Input::new(&self.batch_tokens).disabled(form_disabled)))
-                        .child(div().flex_1().flex().flex_col().gap_1().child("Tokens per paragraph").child(Input::new(&self.segment_tokens).disabled(form_disabled))),
-                ).child(
-                    div().flex().gap_2()
-                        .child(div().flex_1().flex().flex_col().gap_1().child("Review concurrency").child(Input::new(&self.review_concurrency).disabled(form_disabled)))
-                        .child(div().flex_1().flex().flex_col().gap_1().child("PDF parser").child(Select::new(&pdf_select).disabled(form_disabled))),
+                div().flex().flex_col().flex_1().min_h_0().p_6().child(tab_body),
+            );
+        } else {
+            col = col.child(
+                div().id("settings-tab-scroll").overflow_y_scroll().flex().flex_col().flex_1().min_h_0().child(
+                    div().flex().flex_col().gap_3().p_6().child(tab_body),
                 ),
             );
         }
 
-        // -- MinerU --
-        {
-            let mineru_available = self
-                .mineru_status
-                .get("available")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            col = col.child(
-                div().flex().flex_col().gap_2().child(
-                    div().text_lg().font_weight(FontWeight::BOLD).child("MinerU PDF parsing"),
-                ).child(
-                    div().flex().flex_col().gap_1()
-                        .child(format!("MinerU API key{}", if mineru_available { " (saved)" } else { " (not set)" }))
-                        .child(Input::new(&self.mineru_input).disabled(self.mineru_saving))
-                        .child(div().text_sm().text_color(palette.muted_foreground).child(
-                            if self.mineru_saving { "Saving…" } else { "Saved automatically after you stop typing." },
-                        )),
-                ),
-            );
-        }
-
-        // -- Advanced YAML --
-        {
-            col = col.child(
-                div().flex().flex_col().gap_2().child(
-                    div().text_lg().font_weight(FontWeight::BOLD).child("Advanced"),
-                ).child(
-                    div().flex().flex_col().gap_1()
-                        .child("Advanced YAML configuration")
-                        .child(Textarea::new(&self.yaml)),
-                ),
-            );
-            if self.yaml_dirty {
-                col = col.child(
-                    div().text_sm().text_color(palette.muted_foreground)
-                        .child("Advanced YAML has unvalidated changes. Validate it to update the form."),
-                );
-            }
-        }
-
-        // -- Action bar --
-        {
-            let save_label = if op_busy { "Saving…" } else { "Save configuration" };
-            col = col.child(
-                div().flex().gap_2().items_center()
-                    .child(
-                        Button::new("restore")
-                            .ghost()
-                            .label("Restore defaults")
-                            .disabled(self.loaded == false || op_busy)
-                            .on_click(cx.listener(|this, _, _, cx| this.do_restore(cx))),
-                    )
-                    .child(
-                        Button::new("validate")
-                            .label("Validate configuration")
-                            .disabled(self.loaded == false || op_busy || !self.editing_ids.is_empty())
-                            .on_click(cx.listener(|this, _, _, cx| this.do_validate(cx))),
-                    )
-                    .child(
-                        Button::new("save")
-                            .label(save_label)
-                            .primary()
-                            .disabled(self.loaded == false || op_busy || !self.editing_ids.is_empty())
-                            .on_click(cx.listener(|this, _, _, cx| this.do_save(cx))),
-                    )
-                    .child(
-                        div().text_sm().text_color(palette.muted_foreground).child(
-                            if !self.editing_ids.is_empty() {
-                                "Apply or discard the ID edits before saving."
-                            } else if dirty {
-                                "Unsaved changes"
-                            } else {
-                                ""
-                            },
-                        ),
-                    ),
-            );
-        }
-
-        // -- Updater (not ported) --
+        // Pinned footer: Save/Validate/Restore always visible.
         col = col.child(
-            div().flex().flex_col().gap_1().p_3().rounded_md().border_1().border_color(palette.border)
-                .child(div().text_sm().font_medium().child("App updates"))
-                .child(div().text_sm().text_color(palette.muted_foreground).child("The Tauri auto-updater section is not ported to the native app yet.")),
+            div()
+                .px_6()
+                .py_3()
+                .border_t_1()
+                .border_color(palette.border)
+                .child(self.render_action_bar(&palette, op_busy, dirty, cx)),
         );
 
         col

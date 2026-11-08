@@ -6,7 +6,7 @@
 //! Zed-inspired extensions (all additive — [`Palette::light`]/[`Palette::dark`],
 //! [`space`] and [`radius`] keep stable signatures):
 //! - [`Palette`] carries semantic roles: selection, hover wash, focus ring,
-//!   badge tones (success/warning/info + on-fill foregrounds), a [`ChartPalette`],
+//!   badge tones (success/warning/info + on-fill foregrounds),
 //!   hairline [`Palette::separator`], modal [`Palette::overlay`] scrim, and an
 //!   accent-tinted [`Palette::accent_soft`] wash for active nav/selected rows.
 //! - [`text`] holds the typography scale, [`icon`] the icon sizes,
@@ -76,50 +76,6 @@ pub struct Palette {
     pub overlay: Hsla,
     /// Soft accent wash for active nav items / toggled controls.
     pub accent_soft: Hsla,
-    /// Categorical series colors for charts/ledgers.
-    pub chart: ChartPalette,
-}
-
-/// Categorical series colors for progress/report charts.
-///
-/// Index wraps (`get(i)`), so any series count works. Dark variants are
-/// brightened ~10-15 lightness points so thin strokes read on near-black.
-#[derive(Debug, Clone, Copy)]
-pub struct ChartPalette {
-    pub series: [Hsla; 6],
-}
-
-impl ChartPalette {
-    fn light() -> Self {
-        Self {
-            series: [
-                hsl(217.0, 0.91, 0.60), // blue
-                hsl(142.0, 0.71, 0.45), // green
-                hsl(32.0, 0.95, 0.48),  // amber
-                hsl(262.0, 0.83, 0.58), // violet
-                hsl(346.0, 0.77, 0.55), // rose
-                hsl(173.0, 0.80, 0.40), // teal
-            ],
-        }
-    }
-
-    fn dark() -> Self {
-        Self {
-            series: [
-                hsl(213.0, 0.94, 0.68), // blue
-                hsl(142.0, 0.69, 0.58), // green
-                hsl(38.0, 0.95, 0.62),  // amber
-                hsl(258.0, 0.90, 0.72), // violet
-                hsl(350.0, 0.85, 0.68), // rose
-                hsl(172.0, 0.75, 0.55), // teal
-            ],
-        }
-    }
-
-    /// Series color with wrapping index.
-    pub fn get(&self, index: usize) -> Hsla {
-        self.series[index % self.series.len()]
-    }
 }
 
 impl Palette {
@@ -155,7 +111,6 @@ impl Palette {
             separator: hsl(240.0, 0.048, 0.92),
             overlay: hsla_deg(0.0, 0.0, 0.0, 0.5),
             accent_soft: hsl(214.0, 0.95, 0.93),
-            chart: ChartPalette::light(),
         }
     }
 
@@ -209,7 +164,6 @@ impl Palette {
             separator: hsl(240.0, 0.037, 0.12),
             overlay: hsla_deg(0.0, 0.0, 0.0, 0.6),
             accent_soft: hsla_deg(217.0, 0.90, 0.65, 0.16),
-            chart: ChartPalette::dark(),
         }
     }
 
@@ -237,9 +191,26 @@ impl Palette {
         palette
     }
     /// Noctalia-derived palette (reads ~/.config/noctalia/palettes/*.json;
-    /// falls back to built-in dark when missing/unparsable).
+    /// falls back to built-in dark when missing/unparsable). Result is
+    /// cached by source mtime — see `NOCTALIA_CACHE`.
     pub fn noctalia() -> Self {
-        load_noctalia_palette().unwrap_or_else(Self::dark)
+        let path = noctalia_palette_path();
+        let mtime = path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        if let Ok(cache) = NOCTALIA_CACHE.lock() {
+            if let (Some(palette), cached_mtime) = (cache.0, cache.1) {
+                if cached_mtime == mtime && mtime.is_some() {
+                    return palette;
+                }
+            }
+        }
+        let palette = load_noctalia_palette().unwrap_or_else(Self::dark);
+        if let Ok(mut cache) = NOCTALIA_CACHE.lock() {
+            *cache = (Some(palette), mtime);
+        }
+        palette
     }
 }
 
@@ -428,6 +399,12 @@ pub fn palette_for(choice: &ThemeChoice, cx: &gpui_kit::App) -> Palette {
 // small global instead of threading a palette through every render path.
 static THEME_CHOICE: LazyLock<Mutex<ThemeChoice>> = LazyLock::new(|| Mutex::new(load_choice()));
 static SYSTEM_DARK: AtomicBool = AtomicBool::new(false);
+/// Cached Noctalia palette + source mtime. `current_palette()` runs per
+/// view per render — re-reading + parsing the JSON each time would be a
+/// file read per frame. The mtime check is one stat call; palette edits
+/// (or palette switches) still apply on the next render.
+static NOCTALIA_CACHE: LazyLock<Mutex<(Option<Palette>, Option<std::time::SystemTime>)>> =
+    LazyLock::new(|| Mutex::new((None, None)));
 
 fn theme_choice_cell() -> &'static Mutex<ThemeChoice> {
     &THEME_CHOICE
@@ -456,11 +433,31 @@ pub fn current_palette() -> Palette {
 
 // ---------- Noctalia palette loading ----------
 #[derive(Deserialize, Default)]
+struct NoctaliaTermColors {
+    #[serde(default)]
+    black: Option<String>,
+    #[serde(default)]
+    red: Option<String>,
+    #[serde(default)]
+    green: Option<String>,
+    #[serde(default)]
+    yellow: Option<String>,
+    #[serde(default)]
+    blue: Option<String>,
+    #[serde(default)]
+    magenta: Option<String>,
+    #[serde(default)]
+    cyan: Option<String>,
+    #[serde(default)]
+    white: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
 struct NoctaliaTerminal {
     #[serde(default)]
-    normal: Vec<String>,
+    normal: NoctaliaTermColors,
     #[serde(default)]
-    bright: Vec<String>,
+    bright: NoctaliaTermColors,
 }
 
 #[derive(Deserialize, Default)]
@@ -597,34 +594,33 @@ pub fn load_noctalia_palette() -> Option<Palette> {
         .as_deref()
         .and_then(hex_to_hsla)
         .unwrap_or(on_surface);
-
-    // terminal colors for badge tones / chart series
+    // Terminal colors for badge tones (named fields; every slot optional).
     let term = d.terminal.as_ref();
-    let normal = term.map(|t| t.normal.as_slice()).unwrap_or(&[]);
-    let bright = term.map(|t| t.bright.as_slice()).unwrap_or(&[]);
-    let tn = |i: usize, fallback: Hsla| -> Hsla {
-        normal.get(i).and_then(|s| hex_to_hsla(s)).unwrap_or(fallback)
+    let normal = term.map(|t| &t.normal);
+    let tn = |f: fn(&NoctaliaTermColors) -> &Option<String>, fallback: Hsla| -> Hsla {
+        normal
+            .and_then(|n| f(n).as_deref())
+            .and_then(hex_to_hsla)
+            .unwrap_or(fallback)
     };
-    let tb = |i: usize, fallback: Hsla| -> Hsla {
-        bright.get(i).and_then(|s| hex_to_hsla(s)).unwrap_or(fallback)
-    };
-    // conventional terminal order: black, red, green, yellow, blue, magenta, cyan, white
-    let success = tn(2, hsl(142.0, 0.7, 0.45));
-    let warning = tn(3, hsl(45.0, 0.9, 0.5));
-    let info = tn(4, hsl(217.0, 0.9, 0.6));
-    let err_chart = tn(1, error);
+    let success = tn(|n| &n.green, hsl(142.0, 0.7, 0.45));
+    let warning = tn(|n| &n.yellow, hsl(45.0, 0.9, 0.5));
+    let info = tn(|n| &n.blue, hsl(217.0, 0.9, 0.6));
+    let err_term = tn(|n| &n.red, error);
 
-    let chart = ChartPalette {
-        series: [
-            info,
-            success,
-            warning,
-            tertiary,
-            err_chart,
-            tb(6, hsl(173.0, 0.8, 0.4)),
-        ],
+    // Haven mapping notes: the terminal tones are muted by design (this is
+    // what the terminal looks like system-wide), so status dots/badges read
+    // quieter than the built-in dark palette — intentional. `mOutline` is
+    // too bright for hairlines, so borders use a darkened blend toward the
+    // surface; the separator goes one step subtler still.
+    let border = Hsla {
+        l: outline.l * 0.45 + surface.l * 0.55,
+        ..outline
     };
-
+    let separator = Hsla {
+        l: outline.l * 0.28 + surface.l * 0.72,
+        ..outline
+    };
     Some(Palette {
         background: surface,
         foreground: on_surface,
@@ -638,24 +634,23 @@ pub fn load_noctalia_palette() -> Option<Palette> {
         muted_foreground: on_surface_variant,
         accent: secondary,
         accent_foreground: on_secondary,
-        destructive: error,
+        destructive: err_term,
         destructive_foreground: on_error,
-        border: outline,
-        input: outline,
+        border,
+        input: border,
         ring: primary,
         selection: hover,
         hover,
         focus_ring: primary,
         success,
-        success_foreground: on_surface,
+        success_foreground: surface,
         warning,
-        warning_foreground: on_surface,
+        warning_foreground: surface,
         info,
-        info_foreground: on_surface,
-        separator: outline,
+        info_foreground: surface,
+        separator,
         overlay: hex_to_hsla(d.m_shadow.as_deref().unwrap_or("#000000")).unwrap_or(hsl(0.0, 0.0, 0.0)),
         accent_soft: hover,
-        chart,
     })
 }
 /// A sized + weighted text token from the typography scale.
@@ -786,6 +781,29 @@ pub mod radius {
 mod tests {
     use super::*;
 
+    /// Haven.json must parse: terminal colors are objects with named slots,
+    /// not arrays (regression: object-vs-array mismatch silently fell back
+    /// to the built-in dark palette).
+    #[test]
+    fn noctalia_terminal_objects_parse() {
+        let raw = serde_json::json!({
+            "dark": {
+                "mPrimary": "#97a6bb",
+                "mSurface": "#070e15",
+                "mOnSurface": "#e9efeb",
+                "terminal": {
+                    "normal": {"black": "#050b10", "red": "#857960", "green": "#82967f", "yellow": "#96937b", "blue": "#97a6bb", "magenta": "#6c7b91", "cyan": "#83a2a3", "white": "#eff3ef"},
+                    "bright": {"black": "#62676c", "red": "#bfae87", "green": "#a4b89b", "yellow": "#bbb999", "blue": "#bbcce7", "magenta": "#8e9fbb", "cyan": "#a5c9ca", "white": "#f3f7f3"}
+                }
+            }
+        });
+        let parsed: NoctaliaFile = serde_json::from_value(raw).expect("Haven shape must parse");
+        let d = parsed.dark.expect("dark section");
+        let t = d.terminal.expect("terminal section");
+        assert_eq!(t.normal.green.as_deref(), Some("#82967f"));
+        assert_eq!(t.bright.blue.as_deref(), Some("#bbcce7"));
+    }
+
     #[test]
     fn accent_overrides_primary_and_wash() {
         let base = Palette::dark();
@@ -831,14 +849,6 @@ mod tests {
     }
 
     #[test]
-    fn chart_index_wraps() {
-        let chart = ChartPalette::dark();
-        assert_eq!(chart.get(0), chart.series[0]);
-        assert_eq!(chart.get(6), chart.series[0]);
-        assert_eq!(chart.get(7), chart.series[1]);
-    }
-
-    #[test]
     fn choice_persistence_round_trip() {
         let key = "WENYI_CONFIG_DIR";
         let prev = env::var_os(key);
@@ -854,3 +864,4 @@ mod tests {
         assert_eq!(result.unwrap(), choice);
     }
 }
+

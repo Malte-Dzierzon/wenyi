@@ -41,3 +41,29 @@ once-only usage accounting remain contracts across storage backends. See the
 [repository guide](../AGENTS.md) for the full constraints and required verification.
 
 `i18n/policy/` provides the pure typed language-operation registry and deterministic resolver. Profiles keep source and target roles separate; plans freeze the consumed prompt resources and selected export capabilities. Agents consume prompt plans, export adapters execute text and writer operations, and pipeline services persist phase identities through Storage. CLI and Web execution share this resolver; only read-only developer CLI diagnostics expose its plans. Policy bindings and options are defined in source, without YAML switches. Semantic checkpoints and export snapshots have separate identities, so layout changes do not invalidate paid translation. See [built-in language policies](configuration.md#built-in-language-policies) for supported behavior and developer diagnostics.
+
+## Parallel chapter workers (custom fork)
+
+Locks, from coarse to fine:
+
+| Lock | Scope | Held by |
+|---|---|---|
+| `.run.lock` | Whole project | Book-wide jobs (`translation`, `prepare`, `review`), brief book ops (terminal status, reports) |
+| `.chapter-<ci>.lock` | One chapter | `chapter_translation` workers and their admission (`project_write(chapter=…)`) |
+| `state_lock()` | One short DB transaction | Every read-modify-write (`save_chapter`, `flush_usage`, `record_timing`, …); reentrant via savepoints |
+
+Rules:
+
+- The active-jobs table is the authoritative conflict oracle (`admit_job`,
+  checked atomically in the admission transaction). File locks only guard
+  against worker races, never decide admission.
+- Chapter jobs on different chapters run concurrently (3 workflow lanes in
+  `LocalRuntime`). Same chapter twice, or a book job while any chapter job
+  is active, is rejected with 409.
+- `project_write(chapter=N)` must NOT probe `.run.lock`: brief book
+  operations hold it and would wrongly reject chapter starts.
+- Usage/timing merges run inside `state_lock` so parallel workers cannot
+  lose each other's increments (regression test:
+  `test_parallel_flush_usage_keeps_all_deltas`).
+- Terminal project status is set only when no sibling job is still
+  `queued`/`running` (`_record_terminal_status`).

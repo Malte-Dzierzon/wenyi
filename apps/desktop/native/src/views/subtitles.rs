@@ -86,9 +86,10 @@ impl SubtitlesView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let list = block_on(client.get_subtitles(&pid))?;
-                    let project = block_on(client.get_project(&pid))?;
-                    Ok::<_, crate::client::Error>((list, project.project.status))
+                    let (list, project) = block_on(async {
+                        tokio::join!(client.get_subtitles(&pid), client.get_project(&pid),)
+                    });
+                    Ok::<_, crate::client::Error>((list?, project?.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut SubtitlesView, cx| {

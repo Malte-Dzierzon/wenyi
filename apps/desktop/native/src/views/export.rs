@@ -151,13 +151,17 @@ impl ExportView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let config = block_on(client.get_config(&pid));
-                    let project = block_on(client.get_project(&pid));
-                    let caps = block_on(client.capabilities());
-                    let caps_raw =
-                        block_on(client.get::<serde_json::Value>("/capabilities"));
-                    let exports = block_on(client.list_exports(&pid));
-                    (config, project, caps, caps_raw, exports)
+                    // Independent reads run concurrently; wall time is the
+                    // slowest call (~600ms), not the sum.
+                    block_on(async {
+                        tokio::join!(
+                            client.get_config(&pid),
+                            client.get_project(&pid),
+                            client.capabilities(),
+                            client.capabilities_raw(),
+                            client.list_exports(&pid),
+                        )
+                    })
                 })
                 .await;
             _ = this.update(cx, |view: &mut ExportView, cx| {

@@ -6,6 +6,8 @@
 
 use serde::de::DeserializeOwned;
 use std::future::Future;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Shared Tokio runtime for reqwest I/O. GPUI's executors are not Tokio
 /// runtimes, so every client call below runs inside `block_on`. Callers must
@@ -23,11 +25,52 @@ static RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> =
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     RUNTIME.block_on(fut)
 }
+/// TTL for project-scoped GET caches (`get_project`, `list_chapters`).
+/// Mirrors the React `staleTime: 5_000` (`main.tsx`): remounts within the
+/// window reuse data instead of refetching ~600ms responses.
+const PROJECT_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// One cached value with its fetch time.
+#[derive(Debug, Clone)]
+struct Cached<T> {
+    fetched_at: Instant,
+    value: T,
+}
+
+impl<T> Cached<T> {
+    fn fresh(value: T) -> Self {
+        Self {
+            fetched_at: Instant::now(),
+            value,
+        }
+    }
+
+    fn get(&self, ttl: Duration) -> Option<&T> {
+        (self.fetched_at.elapsed() < ttl).then_some(&self.value)
+    }
+}
+
+/// Shared response cache behind [`Client`]. All `Client` clones (one per
+/// view) point at the same store, so navigating between screens reuses
+/// data instead of refetching. Entries are only read/written off the UI
+/// thread (inside `background_spawn`); the mutex is never held across
+/// `.await`.
+#[derive(Debug, Default)]
+struct CacheStore {
+    projects: std::collections::HashMap<String, Cached<ProjectDetail>>,
+    chapters: std::collections::HashMap<String, Cached<Vec<ChapterSummary>>>,
+    /// `GET /projects` list; same 5s TTL (dashboard re-entry).
+    project_list: Option<Cached<Vec<Project>>>,
+    /// `/capabilities` is static per sidecar lifetime; no TTL.
+    capabilities: Option<Capabilities>,
+    capabilities_raw: Option<serde_json::Value>,
+}
 #[derive(Debug, Clone)]
 pub struct Client {
     inner: reqwest::Client,
     pub api_base: String,
     pub token: String,
+    cache: Arc<Mutex<CacheStore>>,
 }
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -43,7 +86,26 @@ impl Client {
             inner: reqwest::Client::new(),
             api_base: api_base.trim_end_matches('/').to_string(),
             token,
+            cache: Arc::new(Mutex::new(CacheStore::default())),
         }
+    }
+
+    /// Drop all cached entries for `pid`. Called automatically after any
+    /// successful mutation; views can also call it explicitly.
+    pub fn invalidate_project(&self, pid: &str) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.projects.remove(pid);
+            cache.chapters.remove(pid);
+            // Project mutations (create/delete/status) also change the list.
+            cache.project_list = None;
+        }
+    }
+
+    /// PID from a `/projects/{pid}[...]` path, if present.
+    fn pid_from_path(path: &str) -> Option<&str> {
+        let rest = path.strip_prefix("/projects/")?;
+        let end = rest.find('/').unwrap_or(rest.len());
+        (!rest[..end].is_empty()).then_some(&rest[..end])
     }
 
     async fn request<T: DeserializeOwned>(
@@ -54,7 +116,7 @@ impl Client {
     ) -> Result<T, Error> {
         let mut req = self
             .inner
-            .request(method, format!("{}{}", self.api_base, path))
+            .request(method.clone(), format!("{}{}", self.api_base, path))
             .bearer_auth(&self.token);
         if let Some(body) = body {
             req = req.json(&body);
@@ -68,6 +130,16 @@ impl Client {
                 status: status.as_u16(),
                 detail: detail.chars().take(300).collect(),
             });
+        }
+        // Any successful mutation invalidates cached reads, so the next
+        // `get_project`/`list_chapters`/`list_projects` refetches (Fix 1/4).
+        if method != reqwest::Method::GET {
+            if let Some(pid) = Self::pid_from_path(path) {
+                self.invalidate_project(pid);
+            } else if path == "/projects" {
+                // Create on the collection path (no pid in URL).
+                self.invalidate_project("");
+            }
         }
         Ok(resp.json().await?)
     }
@@ -91,8 +163,18 @@ impl Client {
     // -- Dashboard ops (doc 18 §2 screen 1) --
 
     /// `GET /projects` — mirrors `api.listProjects`.
+    /// Cached 5s across views (dashboard re-entry skips the ~20ms refetch).
     pub async fn list_projects(&self) -> Result<Vec<Project>, Error> {
-        self.get("/projects").await
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(hit) = cache.project_list.as_ref().and_then(|c| c.get(PROJECT_CACHE_TTL)) {
+                return Ok(hit.clone());
+            }
+        }
+        let list: Vec<Project> = self.get("/projects").await?;
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.project_list = Some(Cached::fresh(list.clone()));
+        }
+        Ok(list)
     }
 
     /// `DELETE /projects/{pid}` — mirrors `api.deleteProject`.
@@ -108,13 +190,49 @@ impl Client {
     // -- Create project ops (doc 18 §2 screen 2) --
 
     /// `GET /capabilities` — mirrors `api.capabilities`.
+    /// Static per sidecar lifetime; fetched once per session.
     pub async fn capabilities(&self) -> Result<Capabilities, Error> {
-        self.get("/capabilities").await
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(caps) = cache.capabilities.clone() {
+                return Ok(caps);
+            }
+        }
+        let caps: Capabilities = self.get("/capabilities").await?;
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.capabilities = Some(caps.clone());
+        }
+        Ok(caps)
+    }
+
+    /// Raw `/capabilities` document (carries `operations[]` the typed form
+    /// drops). Same session cache as [`Self::capabilities`].
+    pub async fn capabilities_raw(&self) -> Result<serde_json::Value, Error> {
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(raw) = cache.capabilities_raw.clone() {
+                return Ok(raw);
+            }
+        }
+        let raw: serde_json::Value = self.get("/capabilities").await?;
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.capabilities_raw = Some(raw.clone());
+        }
+        Ok(raw)
     }
 
     /// `GET /projects/{pid}` — mirrors `api.getProject`.
+    /// ~600ms response; cached 5s across all views (see [`PROJECT_CACHE_TTL`]).
+    /// Mutations must call [`Self::invalidate_project`].
     pub async fn get_project(&self, pid: &str) -> Result<ProjectDetail, Error> {
-        self.get(&format!("/projects/{pid}")).await
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(hit) = cache.projects.get(pid).and_then(|c| c.get(PROJECT_CACHE_TTL)) {
+                return Ok(hit.clone());
+            }
+        }
+        let detail: ProjectDetail = self.get(&format!("/projects/{pid}")).await?;
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.projects.insert(pid.to_string(), Cached::fresh(detail.clone()));
+        }
+        Ok(detail)
     }
 
     /// `GET /projects/{pid}/preview` — mirrors `api.getPreview`.
@@ -168,8 +286,18 @@ impl Client {
     // -- Progress screen ops (doc 18 §2 screen 3) --
 
     /// `GET /projects/{pid}/chapters` — mirrors `api.listChapters`.
+    /// ~500ms response; same 5s cross-view cache as [`Self::get_project`].
     pub async fn list_chapters(&self, pid: &str) -> Result<Vec<ChapterSummary>, Error> {
-        self.get(&format!("/projects/{pid}/chapters")).await
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(hit) = cache.chapters.get(pid).and_then(|c| c.get(PROJECT_CACHE_TTL)) {
+                return Ok(hit.clone());
+            }
+        }
+        let list: Vec<ChapterSummary> = self.get(&format!("/projects/{pid}/chapters")).await?;
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.chapters.insert(pid.to_string(), Cached::fresh(list.clone()));
+        }
+        Ok(list)
     }
 
     /// `GET /projects/{pid}/stats` — mirrors `api.getStats`.
@@ -182,9 +310,10 @@ impl Client {
         self.get(&format!("/projects/{pid}/workflow")).await
     }
 
-    /// `GET /projects/{pid}/report` — mirrors `api.getReport`.
+    /// `GET /projects/{pid}/report?summary_only=1` — the overview renders only
+    /// the five summary counts; the full report loads every done chapter body.
     pub async fn get_report(&self, pid: &str) -> Result<serde_json::Value, Error> {
-        self.get(&format!("/projects/{pid}/report")).await
+        self.get(&format!("/projects/{pid}/report?summary_only=1")).await
     }
 
     /// `POST /projects/{pid}/report` — mirrors `api.regenerateReport`.
@@ -260,6 +389,21 @@ impl Client {
     /// `GET …/glossary/conflicts` — mirrors `api.listConflicts`.
     pub async fn list_conflicts(&self, pid: &str) -> Result<Vec<TermConflict>, Error> {
         self.get(&format!("/projects/{pid}/glossary/conflicts")).await
+    }
+
+    /// `GET …/glossary/curator/status` — background curator state.
+    pub async fn curator_status(&self, pid: &str) -> Result<serde_json::Value, Error> {
+        self.get(&format!("/projects/{pid}/glossary/curator/status")).await
+    }
+
+    /// `POST …/glossary/curator/start` — enqueue one curator pass.
+    pub async fn curator_start(&self, pid: &str) -> Result<serde_json::Value, Error> {
+        self.post(&format!("/projects/{pid}/glossary/curator/start"), serde_json::json!({})).await
+    }
+
+    /// `POST …/glossary/curator/stop` — stop a running pass after its term.
+    pub async fn curator_stop(&self, pid: &str) -> Result<serde_json::Value, Error> {
+        self.post(&format!("/projects/{pid}/glossary/curator/stop"), serde_json::json!({})).await
     }
 
     /// `POST …/glossary/conflicts/{cid}/resolve` — mirrors `api.resolveConflict`.
@@ -835,6 +979,8 @@ pub struct WorkflowOut {
     #[serde(default)]
     pub stages: Vec<WorkflowStage>,
     pub progress: Option<serde_json::Value>,
+    #[serde(default)]
+    pub running_chapters: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
@@ -867,8 +1013,9 @@ pub struct GlossaryTerm {
     pub note: String,
     #[serde(default)]
     pub status: String,
+    #[serde(default)]
+    pub mentions: i64,
 }
-
 /// `TermIn` — mirrors `schemas.py` (add/update body).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TermIn {

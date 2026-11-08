@@ -7,12 +7,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Sidebar sizing bounds (px) — mirrors the web shell (`md:w-60` expanded,
-/// `md:w-16` collapsed) plus drag limits.
+/// Sidebar sizing bounds (px) — mirrors the web shell (`md:w-60` expanded)
+/// plus drag limits. Collapsed width matches the kit icon rail (48px).
 pub const EXPANDED_DEFAULT: f32 = 240.0;
 pub const EXPANDED_MIN: f32 = 180.0;
 pub const EXPANDED_MAX: f32 = 420.0;
-pub const COLLAPSED_WIDTH: f32 = 64.0;
+pub const COLLAPSED_WIDTH: f32 = 48.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidebarPrefs {

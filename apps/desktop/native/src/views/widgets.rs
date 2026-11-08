@@ -6,10 +6,10 @@
 //! recorded time), usage breakdown (stacked token bars per stage/model/
 //! provider), and run history (duration bars with status).
 //!
-//! Charts use the `gpui-component` chart module (`BarChart::new` /
-//! `LineChart::new`, kit verdict: ACCEPTED — same workspace dependency,
-//! `gpui-kit = "0.8"` → `gpui_kit::component::chart`) with theme-aware
-//! colors from [`theme::Palette`]. Empty states render text ("No usage yet"
+//! Charts use the `gpui-component` chart module (`LineChart::new`, kit
+//! verdict: ACCEPTED — same workspace dependency, `gpui-kit = "0.8"` →
+//! `gpui_kit::component::chart`) with theme-aware colors from
+//! [`theme::Palette`]. Empty states render text ("No usage yet"
 //! / "No runs yet") instead of empty charts.
 //!
 //! # Metric → JSON path map (all paths read defensively; missing → "—")
@@ -40,7 +40,8 @@
 //! (`progressInterval`: 2.5s connected / 5s report while busy), so
 //! `timing.total_seconds` from the ledger is already fresh — no local clock.
 
-use gpui_kit::component::chart::{BarChart, LineChart};
+use gpui_kit::component::chart::{LineChart, PieChart};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::*;
 
 use crate::theme;
@@ -199,6 +200,8 @@ pub struct UsageMetrics {
     pub cache_rate: Option<f64>,
     /// `timing.total_seconds`
     pub total_seconds: Option<f64>,
+    /// `total_tokens / total_seconds` (None when either is missing or zero)
+    pub tokens_per_second: Option<f64>,
 }
 
 impl UsageMetrics {
@@ -215,7 +218,16 @@ impl UsageMetrics {
             )
         });
         let total_seconds = stats.timing.get("total_seconds").and_then(num);
-        Self { total_tokens, calls, cache_rate, total_seconds }
+        // True output rate over timed calls only: historical tokens lack
+        // wall-clock time, so dividing them by fresh milliseconds would
+        // inflate the rate by orders of magnitude.
+        let timed_ms = totals.and_then(|t| int(t.get("completion_ms").unwrap_or(&missing)));
+        let timed_tokens = totals.and_then(|t| int(t.get("timed_completion_tokens").unwrap_or(&missing)));
+        let tokens_per_second = match (timed_tokens, timed_ms) {
+            (Some(t), Some(ms)) if ms > 0 => Some(t as f64 / (ms as f64 / 1000.0)),
+            _ => None,
+        };
+        Self { total_tokens, calls, cache_rate, total_seconds, tokens_per_second }
     }
 }
 
@@ -399,9 +411,10 @@ fn metric_card(label: &str, value: &str, dot: Hsla, palette: &theme::Palette) ->
 }
 
 /// Headline metric row: cumulative tokens / requests / cache hit rate /
-/// recorded time (mirrors the `metrics` grid in Accounting.tsx).
+/// recorded time / avg tokens per second.
 pub fn metric_cards(metrics: &UsageMetrics, palette: &theme::Palette) -> impl IntoElement {
     let rate = metrics.cache_rate.map(|r| format!("{:.1}%", r * 100.0)).unwrap_or_else(|| "—".into());
+    let tps = metrics.tokens_per_second.map(|t| format!("{:.0} t/s", t)).unwrap_or_else(|| "—".into());
     div()
         .flex()
         .flex_row()
@@ -414,6 +427,7 @@ pub fn metric_cards(metrics: &UsageMetrics, palette: &theme::Palette) -> impl In
         .child(metric_card("Model requests", &format_count(metrics.calls), palette.accent_foreground, palette))
         .child(metric_card("Cache hit rate", &rate, palette.secondary_foreground, palette))
         .child(metric_card("Recorded time", &format_duration(metrics.total_seconds), palette.card_foreground, palette))
+        .child(metric_card("Avg tokens/s", &tps, palette.success, palette))
 }
 
 /// Segmented legend entry under a usage bar.
@@ -469,9 +483,10 @@ fn usage_bar(row: &UsageRow, maximum: f64, palette: &theme::Palette) -> impl Int
     bar
 }
 
-/// Usage breakdown rows: per-row stacked bars + legend + calls/hit-rate.
-/// The group tab strip lives in `progress.rs` (needs `cx.listener`);
-/// empty → "No usage yet" (mirrors `accounting.noBreakdown`).
+/// Usage breakdown rows: label + stacked token bar + totals (tokens, calls,
+/// cache hit-rate), with a segment legend on top. Shows the top 8 rows by
+/// tokens (mirrors the source cap).
+/// The group tab strip lives in `progress.rs` (needs `cx.listener`).
 pub fn usage_rows(usage: &serde_json::Value, group: UsageGroup, palette: &theme::Palette) -> impl IntoElement {
     let rows = usage_rows_for_group(usage, group);
     let maximum = rows.iter().map(|(_, r)| r.total).fold(1.0_f64, f64::max);
@@ -487,28 +502,248 @@ pub fn usage_rows(usage: &serde_json::Value, group: UsageGroup, palette: &theme:
         );
     }
     for (_, row) in rows.iter().take(8) {
-        let label = row.label.clone();
-        list = list.child(div().child(label));
+        let rate = cache_rate(Some(row.cache_hit), Some(row.cache_miss), Some(row.prompt))
+            .map(|r| format!("{:.0}% cached", r * 100.0))
+            .unwrap_or_default();
+        list = list.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .justify_between()
+                        .gap_2()
+                        .text_sm()
+                        .child(div().font_weight(FontWeight::MEDIUM).child(row.label.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(palette.muted_foreground)
+                                .child(format!(
+                                    "{} tokens · {} calls{}",
+                                    format_count(Some(row.total as u64)),
+                                    format_count(Some(row.calls)),
+                                    if rate.is_empty() { String::new() } else { format!(" · {rate}") },
+                                )),
+                        ),
+                )
+                .child(usage_bar(row, maximum, palette)),
+        );
     }
     div()
         .flex()
         .flex_col()
         .gap_3()
         .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage breakdown"))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap_3()
+                .child(legend_dot(palette.success, "Cached input".into(), palette))
+                .child(legend_dot(palette.info, "Uncached input".into(), palette))
+                .child(legend_dot(palette.muted_foreground, "Other input".into(), palette))
+                .child(legend_dot(palette.warning, "Output".into(), palette))
+                .child(legend_dot(palette.secondary_foreground, "Other".into(), palette)),
+        )
         .child(list)
 }
 
 #[derive(Clone)]
-struct RunDatum {
+struct ShareDatum {
     label: SharedString,
-    seconds: f64,
+    total: f64,
     color: Hsla,
 }
 
-/// Run-history chart: kit `BarChart` (elapsed seconds per run, theme-aware
-/// fill) above a run list with duration bars and status; shows the 3 most
-/// recent runs (like `showAll` default in RunTimeChart.tsx). Empty →
-/// "No runs yet" (mirrors `accounting.noRuns`).
+/// Distinct categorical palette for share charts (stable order, Light-safe).
+fn share_colors(palette: &theme::Palette) -> [Hsla; 8] {
+    [
+        palette.primary,
+        palette.success,
+        palette.warning,
+        palette.info,
+        palette.destructive,
+        palette.accent_foreground,
+        palette.muted_foreground,
+        palette.secondary_foreground,
+    ]
+}
+
+/// Model share donut: each model slice sized by total tokens, with a legend
+/// carrying exact values. Answers "which model did the work" at a glance.
+/// Empty → "No usage yet".
+pub fn usage_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl IntoElement {
+    let rows = usage_rows_for_group(usage, UsageGroup::ByModel);
+    let colors = share_colors(palette);
+    let mut legend = div().flex().flex_col().gap_1();
+    if rows.is_empty() {
+        legend = legend.child(
+            div().text_sm().text_color(palette.muted_foreground).child("No usage yet"),
+        );
+    }
+    let data: Vec<ShareDatum> = rows
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(i, (_, r))| ShareDatum {
+            label: r.label.clone().into(),
+            total: r.total,
+            color: colors[i % colors.len()],
+        })
+        .collect();
+    for d in &data {
+        legend = legend.child(
+            div()
+                .flex()
+                .items_baseline()
+                .justify_between()
+                .gap_2()
+                .text_sm()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .min_w_0()
+                        .child(div().w(px(10.0)).h(px(10.0)).rounded_sm().bg(d.color).flex_none())
+                        .child(div().truncate().child(d.label.clone())),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(palette.muted_foreground)
+                        .child(format_count(Some(d.total as u64))),
+                ),
+        );
+    }
+    let total: f64 = rows.iter().map(|(_, r)| r.total).sum();
+    let chart = PieChart::new(data)
+        .id("usage-model-donut")
+        .value(|d| d.total.max(0.0) as f32)
+        .color(|d| d.color)
+        // Radii are absolute pixels (outer resolves to height * 0.4 = 104).
+        .inner_radius(62.0)
+        .pad_angle(0.03)
+        .appear(false);
+    // Vertical stack: donut on top (centered), legend below at full width
+    // so long model names stay readable instead of truncating.
+    div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage by model"))
+        .child(
+            div()
+                .flex()
+                .justify_center()
+                .child(div().w(px(260.0)).h(px(260.0)).flex_none().child(chart)),
+        )
+        .child(legend)
+        .child(
+            div().text_xs().text_color(palette.muted_foreground).child(format!(
+                "{} tokens across {} models",
+                format_count(Some(total as u64)),
+                rows.len()
+            )),
+        )
+}
+
+/// Provider share donut: same polished ring as [`usage_donut`] but over the
+/// provider ledger. With 2–3 providers a donut fills the panel and reads
+/// better than near-empty ranking bars. Empty → "No usage yet".
+pub fn usage_provider_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl IntoElement {
+    let rows = usage_rows_for_group(usage, UsageGroup::ByProvider);
+    let colors = share_colors(palette);
+    let mut legend = div().flex().flex_col().gap_2();
+    if rows.is_empty() {
+        legend = legend.child(
+            div().text_sm().text_color(palette.muted_foreground).child("No usage yet"),
+        );
+    }
+    let data: Vec<ShareDatum> = rows
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(i, (_, r))| ShareDatum {
+            label: r.label.clone().into(),
+            total: r.total,
+            color: colors[i % colors.len()],
+        })
+        .collect();
+    let total: f64 = rows.iter().map(|(_, r)| r.total).sum();
+    for d in &data {
+        let pct = if total > 0.0 { d.total / total * 100.0 } else { 0.0 };
+        legend = legend.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .text_sm()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .min_w_0()
+                                .child(div().w(px(10.0)).h(px(10.0)).rounded_sm().bg(d.color).flex_none())
+                                .child(div().truncate().font_weight(FontWeight::MEDIUM).child(d.label.clone())),
+                        )
+                        .child(
+                            div().text_sm().font_weight(FontWeight::SEMIBOLD).child(format!("{pct:.1}%")),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(palette.muted_foreground)
+                        .child(format!("{} tokens", format_count(Some(d.total as u64)))),
+                ),
+        );
+    }
+    let chart = PieChart::new(data)
+        .id("usage-provider-donut")
+        .value(|d| d.total.max(0.0) as f32)
+        .color(|d| d.color)
+        // Radii are absolute pixels (outer resolves to height * 0.4 = 104).
+        .inner_radius(62.0)
+        .pad_angle(0.03)
+        .appear(false);
+    div()
+        // Vertical stack like `usage_donut`: ring on top, full-width legend below.
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage by provider"))
+        .child(
+            div()
+                .flex()
+                .justify_center()
+                .child(div().w(px(260.0)).h(px(260.0)).flex_none().child(chart)),
+        )
+        .child(legend)
+        .child(
+            div().text_xs().text_color(palette.muted_foreground).child(format!(
+                "{} tokens across {} providers",
+                format_count(Some(total as u64)),
+                rows.len()
+            )),
+        )
+}
+
+/// Run-history list in a fixed-height box with internal scroll (same pattern
+/// as the chapter panel): all runs render, the box never grows, the page
+/// layout never shifts. Empty → "No runs yet".
 pub fn run_chart(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement {
     let section = div().flex().flex_col().gap_2().child(
         div()
@@ -533,29 +768,9 @@ pub fn run_chart(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement 
                 .child("No runs yet"),
         );
     }
-    let data: Vec<RunDatum> = runs
-        .iter()
-        .take(8)
-        .map(|r| {
-            let color = match r.status.as_str() {
-                "completed" | "done" | "ok" => palette.success,
-                "failed" | "error" => palette.destructive,
-                "running" => palette.info,
-                _ => palette.muted_foreground,
-            };
-            RunDatum { label: operation_label(&r.operation).into(), seconds: r.seconds, color }
-        })
-        .collect();
-    let chart = BarChart::new(data)
-        .id("progress-run-chart")
-        .band(|d| d.label.clone())
-        .value(|d| (d.seconds.max(0.0)) as f32)
-        .fill(|d, _, _, _| d.color)
-        .label_axis(false)
-        .appear(false);
     let maximum = runs.iter().map(|r| r.seconds).fold(1.0_f64, f64::max);
     let mut list = div().flex().flex_col().gap_2();
-    for run in runs.iter().take(3) {
+    for run in runs.iter() {
         let frac = ((run.seconds / maximum).clamp(0.0, 1.0)) as f32;
         let op = operation_label(&run.operation);
         let tone = match run.status.as_str() {
@@ -602,17 +817,9 @@ pub fn run_chart(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement 
                 ),
         );
     }
-    if runs.len() > 3 {
-        list = list.child(
-            div()
-                .text_xs()
-                .text_color(palette.muted_foreground)
-                .child(format!("Showing 3 of {} runs", runs.len())),
-        );
-    }
-    section
-        .child(div().h(px(160.0)).child(chart))
-        .child(list)
+    // Fixed height like the chapter panel: the box never grows, extra rows
+    // scroll inside (max_h would still grow the page with many rows).
+    section.child(div().h(px(320.0)).overflow_y_scrollbar().child(list))
 }
 
 #[derive(Clone)]
@@ -621,24 +828,30 @@ struct TimeDatum {
     seconds: f64,
 }
 
-/// Usage-over-time chart: kit `LineChart` over per-run elapsed seconds
-/// (oldest → newest, up to 12 runs). The usage ledger has no per-timestamp
-/// token series, so each run is one point — real `timing.runs` data,
-/// no invented data. Empty → text.
-pub fn usage_over_time_chart(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement {
+/// Compact over-time strip: per-run elapsed-seconds line in a short band
+/// with thinned ticks — trend context without page dominance. The usage
+/// ledger has no per-timestamp token series, so each run is one point.
+pub fn usage_over_time_compact(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement {
     let section = div()
         .flex()
         .flex_col()
-        .gap_2()
-        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage over time"));
+        .gap_1()
+        .child(
+            div()
+                .flex()
+                .items_baseline()
+                .justify_between()
+                .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Run durations"))
+                .child(
+                    div().text_xs().text_color(palette.muted_foreground).child(format!(
+                        "{} runs",
+                        runs.len()
+                    )),
+                ),
+        );
     if runs.is_empty() {
         return section.child(
-            div()
-                .py_4()
-                .text_center()
-                .text_sm()
-                .text_color(palette.muted_foreground)
-                .child("No data yet"),
+            div().text_sm().text_color(palette.muted_foreground).child("No data yet"),
         );
     }
     let data: Vec<TimeDatum> = runs
@@ -648,16 +861,15 @@ pub fn usage_over_time_chart(runs: &[RunRow], palette: &theme::Palette) -> impl 
         .rev()
         .map(|r| TimeDatum { label: short_time(&r.started_at).into(), seconds: r.seconds })
         .collect();
-    let stroke = palette.primary;
     let chart = LineChart::new(data)
-        .id("progress-usage-time-chart")
+        .id("progress-usage-time-compact")
         .x(|d| d.label.clone())
         .y(|d| d.seconds as f32)
-        .stroke(stroke)
-        .dot()
+        .stroke(palette.primary)
         .grid(false)
+        .x_tick_count(4)
         .appear(false);
-    section.child(div().h(px(140.0)).child(chart))
+    section.child(div().h(px(80.0)).child(chart))
 }
 
 #[cfg(test)]

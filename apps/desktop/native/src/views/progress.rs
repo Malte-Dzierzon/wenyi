@@ -14,9 +14,12 @@
 //! Read-contents link (`on_open_contents`, App-wired → Contents screen)
 //! mirrors the React contents link for book projects with chapters.
 
+use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::link::Link;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{Disableable, StyledExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -47,14 +50,25 @@ struct Snapshot {
 }
 
 fn load(client: &Client, pid: &str) -> Result<Snapshot, crate::client::Error> {
-    let detail = block_on(client.get_project(pid))?;
+    // Independent reads run concurrently (one runtime hop); wall time is
+    // the slowest call (~600ms), not the sum (~1.4s).
+    let (detail, chapters, stats, workflow, report) = block_on(async {
+        tokio::join!(
+            client.get_project(pid),
+            client.list_chapters(pid),
+            client.get_stats(pid),
+            client.get_workflow(pid),
+            client.get_report(pid),
+        )
+    });
+    let detail = detail?;
     let project = detail.project;
     let project_total_words = detail.total_word_count;
     let stats_running = is_project_busy(&project.status);
-    let chapters = block_on(client.list_chapters(pid)).unwrap_or_default();
-    let stats = block_on(client.get_stats(pid)).ok();
-    let workflow = block_on(client.get_workflow(pid)).ok();
-    let (report, report_error) = match block_on(client.get_report(pid)) {
+    let chapters = chapters.unwrap_or_default();
+    let stats = stats.ok();
+    let workflow = workflow.ok();
+    let (report, report_error) = match report {
         Ok(report) => (Some(report), None),
         Err(err) => (None, Some(err.to_string())),
     };
@@ -270,6 +284,190 @@ impl ProgressView {
             _ => "not reviewed".into(),
         }
     }
+
+    /// Chapters panel for the stats-grid side column: compact rows (title +
+    /// words + status pill + per-chapter translate) in a fixed-height scroll
+    /// container, so long chapter lists never extend the page. The full
+    /// 6-column table doesn't fit half width — rows stack like the
+    /// proofreading chapter list. The translate button only shows for
+    /// chapters that are not done (mirrors the source condition).
+    fn chapter_panel(
+        &self,
+        chapters: &[ChapterSummary],
+        busy: bool,
+        palette: &theme::Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let mut list = div().flex().flex_col();
+        if chapters.is_empty() {
+            list = list.child(
+                div()
+                    .p_8()
+                    .text_center()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
+                    .child("No chapters yet."),
+            );
+        }
+        let last = chapters.len().saturating_sub(1);
+        for (i, ch) in chapters.iter().enumerate() {
+            let ci = ch.index;
+            let translating = self.translating_chapter == Some(ci);
+            let mut row = div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .py_2()
+                .text_sm()
+                .when(i != last, |this| {
+                    this.border_b_1().border_color(palette.border)
+                })
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .truncate()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(format!("#{} {}", ch.index, ch.title)),
+                        )
+                        .child(
+                            div().text_xs().text_color(palette.muted_foreground).child(format!(
+                                "{}/{} words · {}",
+                                ch.target_word_count,
+                                ch.word_count,
+                                Self::review_badge(ch),
+                            )),
+                        ),
+                )
+                .child(
+                    div()
+                        .px_2()
+                        .rounded_sm()
+                        .bg(palette.muted)
+                        .text_xs()
+                        .flex_none()
+                        .child(ch.status.clone()),
+                );
+            if ch.status != "done" {
+                row = row.child(
+                    Button::new(format!("translate-ch-{ci}"))
+                        .label(if translating { "…" } else { "Translate" })
+                        .disabled(busy || translating)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.translate_chapter(ci, cx);
+                        })),
+                );
+            }
+            list = list.child(row);
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Chapters"))
+            .child(div().h(px(320.0)).overflow_y_scrollbar().child(list))
+    }
+
+    /// Workflow section for the stats-grid side panel: kind + status header,
+    /// then one row per stage (number square + label + state pill). No card
+    /// frame — the side panel provides the fill.
+    fn workflow_section(workflow: Option<&WorkflowOut>, palette: &theme::Palette) -> impl IntoElement {
+        let Some(workflow) = workflow else {
+            return div()
+                .text_sm()
+                .text_color(palette.muted_foreground)
+                .child("No workflow yet")
+                .into_any_element();
+        };
+        let last_stage = workflow.stages.len().saturating_sub(1);
+        let mut stages = div().flex().flex_col();
+        for (i, stage) in workflow.stages.iter().enumerate() {
+            stages = stages.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .py_2()
+                    .text_sm()
+                    .when(i != last_stage, |this| {
+                        this.border_b_1().border_color(palette.border)
+                    })
+                    .child(
+                        div()
+                            .w(px(22.0))
+                            .h(px(22.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_sm()
+                            .bg(palette.muted)
+                            .text_xs()
+                            .text_color(palette.muted_foreground)
+                            .flex_none()
+                            .child(format!("{}", i + 1)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(if stage.enabled {
+                                palette.foreground
+                            } else {
+                                palette.muted_foreground
+                            })
+                            .child(stage.label.clone()),
+                    )
+                    .child(
+                        div()
+                            .px_2()
+                            .rounded_sm()
+                            .text_xs()
+                            .flex_none()
+                            .when(stage.enabled, |this| {
+                                this.bg(palette.success.opacity(0.15)).text_color(palette.success)
+                            })
+                            .when(!stage.enabled, |this| {
+                                this.bg(palette.muted).text_color(palette.muted_foreground)
+                            })
+                            .child(if stage.enabled { "on" } else { "off" }),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Current workflow"))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_sm()
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(workflow.kind.clone()))
+                            .child(
+                                div()
+                                    .px_2()
+                                    .rounded_sm()
+                                    .bg(palette.muted)
+                                    .text_xs()
+                                    .child(workflow.status.clone()),
+                            ),
+                    ),
+            )
+            .child(div().h(px(160.0)).overflow_y_scrollbar().child(stages))
+            .into_any_element()
+    }
 }
 
 impl Render for ProgressView {
@@ -354,16 +552,14 @@ impl Render for ProgressView {
             col = col.child(error_box(err, &palette));
         }
 
-        // Overview card: done/total + progress bar + Accounting block
-        // (mirrors the `p-5 space-y-4` Card in ProgressPage).
+        // Overview panel: done/total + progress bar + stats grid. Angular
+        // direction: subtle fill, no border stack.
         let mut overview = div()
             .flex()
             .flex_col()
-            .gap_3()
+            .gap_4()
             .p_4()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.border)
+            .rounded_sm()
             .bg(palette.card)
             .child(
                 div()
@@ -373,18 +569,34 @@ impl Render for ProgressView {
                     .child(div().font_weight(FontWeight::MEDIUM).child("Translation overview"))
                     .child(
                         div()
-                            .px_2()
-                            .rounded_sm()
-                            .bg(palette.muted)
-                            .text_xs()
-                            .child(project.status.clone()),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            // Secondary connection state, de-emphasized next
+                            // to the status (was a standalone row).
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(palette.muted_foreground)
+                                    .child("live · polling"),
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .rounded_sm()
+                                    .bg(palette.muted)
+                                    .text_xs()
+                                    .child(project.status.clone()),
+                            ),
                     ),
             )
             .child(div().text_sm().child(format!("{done} / {total}")))
             .child(Progress::new("overview-progress").value(pct));
 
-        // Stats: metric cards + usage breakdown + run history + usage chart.
-        // Mirrors `Accounting` (value + running props from the stats query).
+        // Stats grid: metric row on top, then a two-column grid — usage
+        // visualization left, run history + workflow right — and a compact
+        // over-time strip below. Sections use spacing + muted fills instead
+        // of boxed cards (angular direction, no border stacks).
         match &snapshot.stats {
             Some(stats) => {
                 let metrics = UsageMetrics::from_stats(stats, snapshot.stats_running);
@@ -397,31 +609,60 @@ impl Render for ProgressView {
                         .child(widgets::metric_cards(&metrics, &palette)),
                 );
                 let group = self.usage_group;
-                let mut tabs = div().flex().flex_row().gap_1().p_1().rounded_md().bg(palette.muted);
-                for g in UsageGroup::ALL {
-                    let active = g == group;
-                    let mut btn = Button::new(format!("usage-group-{}", g.key())).label(g.tab_label());
-                    if active {
-                        btn = btn.primary();
-                    } else {
-                        btn = btn.ghost();
+                let selected = UsageGroup::ALL.iter().position(|g| *g == group).unwrap_or(0);
+                let tabs = TabBar::new("usage-group-tabs")
+                    .segmented()
+                    .selected_index(selected)
+                    .on_click(cx.listener(|this, index: &usize, _, cx| {
+                        if let Some(g) = UsageGroup::ALL.get(*index) {
+                            this.usage_group = *g;
+                            cx.notify();
+                        }
+                    }))
+                    .child(Tab::new().label(UsageGroup::ByStage.tab_label()))
+                    .child(Tab::new().label(UsageGroup::ByModel.tab_label()))
+                    .child(Tab::new().label(UsageGroup::ByProvider.tab_label()));
+                let usage_viz = match group {
+                    UsageGroup::ByStage => {
+                        widgets::usage_rows(&stats.usage, group, &palette).into_any_element()
                     }
-                    tabs = tabs.child(btn.on_click(cx.listener(move |this, _, _, cx| {
-                        this.usage_group = g;
-                        cx.notify();
-                    })));
-                }
-                overview = overview.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(tabs)
-                        .child(widgets::usage_rows(&stats.usage, group, &palette)),
-                );
+                    UsageGroup::ByModel => {
+                        widgets::usage_donut(&stats.usage, &palette).into_any_element()
+                    }
+                    UsageGroup::ByProvider => {
+                        widgets::usage_provider_donut(&stats.usage, &palette).into_any_element()
+                    }
+                };
                 let runs = widgets::timing_runs(&stats.timing);
-                overview = overview.child(widgets::run_chart(&runs, &palette));
-                overview = overview.child(widgets::usage_over_time_chart(&runs, &palette));
+                let usage_panel = div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_4()
+                    .rounded_sm()
+                    .bg(palette.muted.opacity(0.35))
+                    .child(tabs)
+                    // Center the visualization in the leftover panel height
+                    // (the panel stretches to the side panel; tall content
+                    // like stage bars is unaffected).
+                    .child(div().flex_1().flex().flex_col().justify_center().child(usage_viz));
+                let side_panel = div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .p_4()
+                    .rounded_sm()
+                    .bg(palette.muted.opacity(0.35))
+                    .child(widgets::run_chart(&runs, &palette))
+                    .child(self.chapter_panel(&snapshot.chapters, busy, &palette, cx));
+                overview = overview.child(
+                    div().flex().gap_3().child(usage_panel).child(side_panel),
+                );
+                overview = overview.child(widgets::usage_over_time_compact(&runs, &palette));
             }
             None => {
                 overview = overview.child(
@@ -431,148 +672,81 @@ impl Render for ProgressView {
         }
         col = col.child(overview);
 
-        // Workflow panel (mirrors WorkflowPanel stage list; live label via poll).
-        if let Some(workflow) = &snapshot.workflow {
-            let mut stages = div().flex().flex_col().gap_1();
-            for (i, stage) in workflow.stages.iter().enumerate() {
-                let label = if stage.enabled {
-                    format!("{} · {} — enabled", i + 1, stage.label)
-                } else {
-                    format!("{} · {} — disabled", i + 1, stage.label)
-                };
-                stages = stages.child(
-                    div()
-                        .text_sm()
-                        .text_color(if stage.enabled { palette.foreground } else { palette.muted_foreground })
-                        .child(format!("{} {}", if stage.enabled { "●" } else { "○" }, label)),
-                );
-            }
-            col = col.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(palette.border)
-                    .bg(palette.card)
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Current workflow"))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .text_sm()
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(workflow.kind.clone()))
-                            .child(
-                                div()
-                                    .px_2()
-                                    .rounded_sm()
-                                    .bg(palette.muted)
-                                    .text_xs()
-                                    .child(workflow.status.clone()),
-                            ),
-                    )
-                    .child(stages),
-            );
-        }
-
-        // Connection label (polling until WS lands).
-        col = col.child(
-            div().text_xs().text_color(palette.muted_foreground).child("Progress: polling"),
-        );
-
         // Read-contents link (book projects with chapters; mirrors React).
         let subtitle = project.fmt.as_deref() == Some("srt");
         if !subtitle && !snapshot.chapters.is_empty() {
             if let Some(cb) = self.on_open_contents.clone() {
                 col = col.child(
-                    Button::new("read-contents")
-                        .label("Read contents source")
+                    Link::new("read-contents")
+                        .child("Read contents source")
                         .on_click(move |_, _, _| cb()),
                 );
             }
         }
 
-        // Chapter table: 5 columns (chapter, source paragraphs→words, status,
-        // review, actions). Mirrors ChapterTable.
-        let mut table = div().flex().flex_col().gap_1();
-        table = table.child(
-            div()
-                .flex()
-                .gap_2()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(palette.muted_foreground)
-                .child(div().w_64().child("Chapter"))
-                .child(div().flex_1().child("Title"))
-                .child(div().w_24().child("Words"))
-                .child(div().w_24().child("Status"))
-                .child(div().w_32().child("Review"))
-                .child(div().w_32().child("")),
+        // Project report disclosure (mirrors the React `Disclosure`): update
+        // button + structured summary, placed before the chapter table like
+        // the source.
+        let mut report_body = div().flex().flex_col().gap_2().child(
+            Button::new("regen-report")
+                .label("Update report")
+                .disabled(self.regen_pending || busy || !project.initialized)
+                .on_click(cx.listener(|this, _, _, cx| this.regenerate(cx))),
         );
-        if snapshot.chapters.is_empty() {
-            table = table.child(
-                div().text_sm().text_color(palette.muted_foreground).child("No chapters yet."),
+        if let Some(report) = &snapshot.report {
+            // Mirror the disclosure body: summary minus usage/timing ledgers
+            // (those render as charts above), one row per key.
+            for (key, text) in report_rows(report) {
+                report_body = report_body.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .gap_4()
+                        .text_xs()
+                        .child(div().text_color(palette.muted_foreground).child(key))
+                        .child(div().flex_1().text_right().child(text)),
+                );
+            }
+        } else if let Some(err) = &snapshot.report_error {
+            // Mirrors the disclosure-scoped ErrorNotice (e.g. 500 before first
+            // translation produces a report).
+            report_body = report_body.child(
+                div().text_xs().text_color(palette.muted_foreground).child(format!(
+                    "No report yet ({err})"
+                )),
             );
         }
-        for ch in &snapshot.chapters {
-            let ci = ch.index;
-            let translating = self.translating_chapter == Some(ci);
-            table = table.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .text_sm()
-                    .child(div().w_64().child(format!("#{}", ch.index)))
-                    .child(div().flex_1().child(ch.title.clone()))
-                    .child(div().w_24().child(format!("{}/{}", ch.target_word_count, ch.word_count)))
-                    .child(div().w_24().child(ch.status.clone()))
-                    .child(div().w_32().text_xs().child(Self::review_badge(ch)))
-                    .child(
-                        Button::new(format!("translate-ch-{ci}"))
-                            .label(if translating { "…" } else { "Translate" })
-                            .disabled(busy || translating)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.translate_chapter(ci, cx);
-                            })),
-                    ),
-            );
-        }
-        col = col.child(table);
+        col = col.child(
+            Accordion::new("project-report").item(|item| {
+                item.title("Project report").child(report_body)
+            }),
+        );
 
-        // Report disclosure + regenerate.
+        // Not-initialized note. The source links to the create screen with a
+        // project prefill the native create screen has no API for, so this
+        // stays a plain note rather than a dead link.
         if !project.initialized {
             col = col.child(
                 div().text_sm().text_color(palette.muted_foreground)
                     .child("Upload a source file to initialize this project."),
             );
         }
+
+        // Current workflow at the bottom (full width): kind + status header
+        // plus the stage list, in a muted panel matching the grid above.
         col = col.child(
-            div().flex().items_center().gap_2().child(
-                Button::new("regen-report")
-                    .label("Update report")
-                    .disabled(self.regen_pending || busy || !project.initialized)
-                    .on_click(cx.listener(|this, _, _, cx| this.regenerate(cx))),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .p_4()
+                .rounded_sm()
+                .bg(palette.muted.opacity(0.35))
+                .child(Self::workflow_section(snapshot.workflow.as_ref(), &palette)),
         );
-        if let Some(report) = &snapshot.report {
-            // Mirror the disclosure body: summary minus usage/timing ledgers
-            // (those render as charts above).
-            col = col.child(
-                div().text_xs().text_color(palette.muted_foreground).child(report_summary(report)),
-            );
-        } else if let Some(err) = &snapshot.report_error {
-            // Mirrors the disclosure-scoped ErrorNotice (e.g. 500 before first
-            // translation produces a report).
-            col = col.child(
-                div().text_xs().text_color(palette.muted_foreground).child(format!(
-                    "No report yet ({err})"
-                )),
-            );
-        }
+
+        // Bottom spacer so the last section scrolls fully into view
+        // instead of clipping at the container edge.
+        col = col.child(div().h(px(24.0)).flex_none());
         col
     }
 }
@@ -587,30 +761,30 @@ fn error_box(err: &str, palette: &theme::Palette) -> impl IntoElement {
 }
 
 /// Report summary minus the usage/timing ledgers (those render as charts
-/// above). Mirrors the `StructuredData` filter in ProgressPage.
-fn report_summary(report: &serde_json::Value) -> String {
-    match report.get("summary") {
-        Some(serde_json::Value::Object(map)) if !map.is_empty() => map
-            .iter()
-            .filter(|(k, _)| *k != "usage" && *k != "timing")
-            .take(8)
-            .map(|(k, v)| format!("{k}: {v}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        Some(_) | None => compact_json(report),
-    }
-}
-
-/// Compact one-line JSON summary (usage/timing ledgers, report).
-fn compact_json(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Object(map) if !map.is_empty() => map
-            .iter()
-            .take(6)
-            .map(|(k, v)| format!("{k}: {v}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        serde_json::Value::Null => "—".into(),
-        other => other.to_string().chars().take(200).collect(),
-    }
+/// above), as key/value rows. Mirrors the `StructuredData` filter.
+fn report_rows(report: &serde_json::Value) -> Vec<(String, String)> {
+    let map = report
+        .get("summary")
+        .and_then(|v| v.as_object())
+        .filter(|m| !m.is_empty())
+        .map(|m| m.iter().collect::<Vec<_>>());
+    let entries = map.unwrap_or_else(|| {
+        report.as_object().map(|m| m.iter().collect()).unwrap_or_default()
+    });
+    entries
+        .into_iter()
+        .filter(|(k, _)| *k != "usage" && *k != "timing")
+        .take(8)
+        .map(|(k, v)| {
+            let text = match v {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Null => "—".into(),
+                other => {
+                    let s = other.to_string();
+                    if s.len() > 120 { format!("{}…", &s[..120]) } else { s }
+                }
+            };
+            (k.clone(), text)
+        })
+        .collect()
 }

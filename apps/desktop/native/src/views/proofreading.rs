@@ -11,9 +11,10 @@
 //! TranslationDiff view.
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Disableable, StyledExt};
+use gpui_kit::component::{Disableable, IndexPath, StyledExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -30,9 +31,17 @@ pub struct ProofreadingView {
     loading_chapters: bool,
     error: Option<String>,
     search: Entity<InputState>,
-    /// Open chapter (ci) + loaded segments.
+    /// Status filter code ("" = all), driven by the filter select.
+    status_filter: String,
+    status_select: Option<Entity<SelectState<Vec<String>>>>,
+    /// Options the select was built with ("" + status codes); rebuilt when
+    /// the chapter statuses change.
+    status_options: Vec<String>,
     open_ci: Option<u32>,
     chapter: Option<ChapterSegments>,
+    /// Virtualized segment list state (variable heights; Glossary uses
+    /// `uniform_list` but paragraph rows vary). Reset when the chapter loads.
+    seg_list: ListState,
     loading_chapter: bool,
     /// Editing segment (si) + tab + state.
     editing_si: Option<u32>,
@@ -62,8 +71,12 @@ impl ProofreadingView {
             loading_chapters: true,
             error: None,
             search,
+            status_filter: String::new(),
+            status_select: None,
+            status_options: Vec::new(),
             open_ci: None,
             chapter: None,
+            seg_list: ListState::new(0, ListAlignment::Top, px(400.0)),
             loading_chapter: false,
             editing_si: None,
             edit_tab: 0,
@@ -97,9 +110,10 @@ impl ProofreadingView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let chapters = block_on(client.list_chapters(&pid))?;
-                    let project = block_on(client.get_project(&pid))?;
-                    Ok::<_, crate::client::Error>((chapters, project.project.status))
+                    let (chapters, project) = block_on(async {
+                        tokio::join!(client.list_chapters(&pid), client.get_project(&pid),)
+                    });
+                    Ok::<_, crate::client::Error>((chapters?, project?.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut ProofreadingView, cx| {
@@ -119,7 +133,6 @@ impl ProofreadingView {
         })
         .detach();
     }
-
     fn open_chapter(&mut self, ci: u32, cx: &mut Context<Self>) {
         let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
             return;
@@ -138,6 +151,7 @@ impl ProofreadingView {
                 view.loading_chapter = false;
                 match result {
                     Ok(chapter) => {
+                        view.seg_list.reset(chapter.segments.len());
                         view.chapter = Some(chapter);
                     }
                     Err(err) => {
@@ -148,6 +162,86 @@ impl ProofreadingView {
             });
         })
         .detach();
+    }
+
+    /// One virtualized paragraph row (source | translation + edit). Reads the
+    /// segment by index — no chapter clone, only visible rows are built.
+    /// Called inside `view.update` from the list item closure, so `Context`
+    /// (and `cx.listener`) is available.
+    fn segment_row(
+        view: &ProofreadingView,
+        ix: usize,
+        palette: theme::Palette,
+        cx: &mut Context<ProofreadingView>,
+    ) -> AnyElement {
+        let (Some(chapter), busy) = (view.chapter.as_ref(), view.busy()) else {
+            return div().into_any_element();
+        };
+        let (Some(seg), last) = (
+            chapter.segments.get(ix),
+            chapter.segments.len().saturating_sub(1),
+        ) else {
+            return div().into_any_element();
+        };
+        let si = seg.index;
+        let linked = view.deep_link_si == Some(si);
+        let baseline = seg.target.clone();
+        div()
+            .flex()
+            .w_full()
+            .when(ix != last, |this| {
+                this.border_b_1().border_color(palette.border)
+            })
+            .when(linked, |this| this.bg(palette.accent_soft))
+            // Source column.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .p_4()
+                    .border_r_1()
+                    .border_color(palette.border)
+                    .child(
+                        div().text_xs().text_color(palette.muted_foreground).child(
+                            if linked {
+                                format!("#{si} ← linked from review")
+                            } else {
+                                format!("#{si}")
+                            },
+                        ),
+                    )
+                    .child(div().text_sm().child(seg.source.clone())),
+            )
+            // Translation column + edit action.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .p_4()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div().text_xs().text_color(palette.muted_foreground).child("Translation"),
+                    )
+                    .child(
+                        div().text_sm().child(
+                            seg.target.clone().unwrap_or_else(|| "(untranslated)".into()),
+                        ),
+                    )
+                    .child(
+                        Button::new(format!("edit-seg-{si}"))
+                            .ghost()
+                            .label("Edit")
+                            .disabled(busy)
+                            .on_click({
+                                cx.listener(move |this, _, window, cx| {
+                                    this.open_editor(si, baseline.clone(), window, cx);
+                                })
+                            }),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// Cross-screen entry point for Review issue links (the `?segment=`
@@ -286,12 +380,20 @@ impl ProofreadingView {
 
     fn filtered_chapters(&self, cx: &App) -> Vec<ChapterSummary> {
         let q = self.search.read(cx).value().to_string().to_lowercase();
-        if q.trim().is_empty() {
-            return self.chapters.clone();
-        }
+        let q = q.trim();
         self.chapters
             .iter()
-            .filter(|ch| ch.title.to_lowercase().contains(&q))
+            .filter(|ch| {
+                (self.status_filter.is_empty() || ch.status == self.status_filter)
+                    && (q.is_empty()
+                        || format!(
+                            "{} {}",
+                            ch.title,
+                            ch.title_translated.as_deref().unwrap_or("")
+                        )
+                        .to_lowercase()
+                        .contains(q))
+            })
             .cloned()
             .collect()
     }
@@ -317,87 +419,239 @@ impl Render for ProofreadingView {
             );
         }
 
-        // Chapter list (left column semantics; single column in U-pass).
-        col = col.child(
-            div().flex().gap_2()
-                .child(div().flex_1().child(Input::new(&self.search)))
-                .child(
-                    Button::new("proof-search")
-                        .label("Search")
-                        .on_click(cx.listener(|_, _, _, cx| cx.notify())),
-                ),
-        );
+        // Chapter card (mirrors the source `Card`): title + search/filter row
+        // + divide-y chapter rows (title, saved words, status pill). Hidden
+        // while a chapter is open (the source navigates to a chapter route;
+        // the nav row below provides back/prev/next).
+        if self.open_ci.is_none() {
+        let mut statuses: Vec<String> = Vec::new();
+        for ch in &self.chapters {
+            if !statuses.contains(&ch.status) {
+                statuses.push(ch.status.clone());
+            }
+        }
+        let options = std::iter::once(String::new()).chain(statuses.into_iter()).collect::<Vec<_>>();
+        if self.status_select.is_none() || self.status_options != options {
+            let idx = options.iter().position(|o| o == &self.status_filter).unwrap_or(0);
+            let entity = cx.new(|cx| SelectState::new(options.clone(), Some(IndexPath::new(idx)), window, cx));
+            cx.subscribe(
+                &entity,
+                |this: &mut ProofreadingView, _, event: &SelectEvent<Vec<String>>, cx| {
+                    if let SelectEvent::Confirm(Some(value)) = event {
+                        this.status_filter = value.clone();
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            self.status_options = options;
+            self.status_select = Some(entity);
+        }
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .rounded_md()
+            .border_1()
+            .border_color(palette.border)
+            .bg(palette.card)
+            .child(div().font_weight(FontWeight::MEDIUM).child("Proofread by chapter"))
+            .child(
+                div()
+                    .flex()
+                    .gap_3()
+                    .items_end()
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_sm().child("Search"))
+                            .child(Input::new(&self.search)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_sm().child("Filter"))
+                            .child(Select::new(self.status_select.as_ref().unwrap())),
+                    ),
+            );
         if self.loading_chapters && self.chapters.is_empty() {
-            col = col.child(div().text_sm().text_color(palette.muted_foreground).child("Loading…"));
+            card = card.child(
+                div().text_sm().text_color(palette.muted_foreground).child("Loading…"),
+            );
         } else {
             let chapters = self.filtered_chapters(cx);
-            let mut list = div().flex().gap_1().flex_wrap();
-            for ch in chapters {
-                let ci = ch.index;
-                let active = self.open_ci == Some(ci);
-                let mut btn = Button::new(format!("open-ch-{ci}")).label(format!(
-                    "#{} {} ({})",
-                    ch.index,
-                    if ch.title.is_empty() { "—" } else { &ch.title },
-                    ch.status
-                ));
-                if active {
-                    btn = btn.primary();
-                } else {
-                    btn = btn.ghost();
+            if chapters.is_empty() {
+                card = card.child(
+                    div().text_sm().text_color(palette.muted_foreground).child(
+                        if self.chapters.is_empty() {
+                            "Chapters will appear after parsing."
+                        } else {
+                            "No chapters match the current filters."
+                        },
+                    ),
+                );
+            } else {
+                let last = chapters.len().saturating_sub(1);
+                let mut list = div().flex().flex_col();
+                for (i, ch) in chapters.iter().enumerate() {
+                    let ci = ch.index;
+                    let active = self.open_ci == Some(ci);
+                    let title = ch
+                        .title_translated
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|t| !t.is_empty())
+                        .or_else(|| (!ch.title.trim().is_empty()).then_some(ch.title.trim()))
+                        .unwrap_or("Untitled chapter")
+                        .to_string();
+                    list = list.child(
+                        div()
+                            .id(format!("open-ch-{ci}"))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_4()
+                            .py_3()
+                            .rounded_sm()
+                            .when(i != last, |this| {
+                                this.border_b_1().border_color(palette.border)
+                            })
+                            .when(active, |this| this.bg(palette.accent_soft))
+                            .hover(|this| this.bg(palette.accent_soft.opacity(0.55)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .min_w_0()
+                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(title))
+                                    .child(
+                                        div().text_xs().text_color(palette.muted_foreground).child(
+                                            format!(
+                                                "{} / {} words saved",
+                                                ch.target_word_count, ch.word_count
+                                            ),
+                                        ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_sm()
+                                    .bg(palette.muted)
+                                    .text_xs()
+                                    .flex_none()
+                                    .child(ch.status.clone()),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_chapter(ci, cx);
+                            })),
+                    );
                 }
-                list = list.child(btn.on_click(
-                    cx.listener(move |this, _, _, cx| this.open_chapter(ci, cx)),
-                ));
+                card = card.child(list);
             }
-            col = col.child(list);
         }
-
-        // Paragraph rows for the open chapter.
+        col = col.child(card);
+        }
+        // Paragraph rows for the open chapter: virtualized `list()` (variable
+        // heights) — only visible rows are built, no chapter clone. Same
+        // two-column card look as before.
         if self.loading_chapter {
             col = col.child(div().text_sm().text_color(palette.muted_foreground).child("Loading chapter…"));
-        } else if let Some(chapter) = self.chapter.clone() {
+        } else if self.chapter.is_some() {
+            // Chapter navigation (mirrors the source header actions): back to
+            // the list + previous/next chapter.
+            if let Some(open) = self.open_ci {
+                let pos = self.chapters.iter().position(|c| c.index == open);
+                let prev = pos.and_then(|p| p.checked_sub(1)).and_then(|p| self.chapters.get(p));
+                let next = pos.and_then(|p| self.chapters.get(p + 1));
+                let mut nav_row = div().flex().gap_2().child(
+                    Button::new("back-to-chapters")
+                        .label("All chapters")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_ci = None;
+                            this.chapter = None;
+                            this.editing_si = None;
+                            this.deep_link_si = None;
+                            cx.notify();
+                        })),
+                );
+                if let Some(prev) = prev {
+                    let ci = prev.index;
+                    nav_row = nav_row.child(
+                        Button::new("prev-chapter")
+                            .label("Previous chapter")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_chapter(ci, cx);
+                            })),
+                    );
+                }
+                if let Some(next) = next {
+                    let ci = next.index;
+                    nav_row = nav_row.child(
+                        Button::new("next-chapter")
+                            .label("Next chapter")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_chapter(ci, cx);
+                            })),
+                    );
+                }
+                col = col.child(nav_row);
+            }
+            let (index, total, saved) = self
+                .chapter
+                .as_ref()
+                .map(|c| {
+                    (
+                        c.index,
+                        c.segments.len(),
+                        c.segments.iter().filter(|s| s.target.is_some()).count(),
+                    )
+                })
+                .unwrap_or((0, 0, 0));
             col = col.child(
-                div().font_medium().child(format!(
-                    "Chapter #{} — {} segments",
-                    chapter.index,
-                    chapter.segments.len()
-                )),
+                div().flex().flex_col().gap_1().child(
+                    div().font_medium().child(format!("Chapter #{index} — {total} segments")),
+                ).child(
+                    div().text_sm().text_color(palette.muted_foreground).child(format!(
+                        "{saved} / {total} paragraphs saved",
+                    )),
+                ),
             );
-            let mut rows = div().flex().flex_col().gap_1();
-            for seg in &chapter.segments {
-                let si = seg.index;
-                let read_only = busy;
-                let linked = self.deep_link_si == Some(si);
-                let header = if linked {
-                    format!("#{si} ← linked from review")
-                } else {
-                    format!("#{si}")
-                };
-                rows = rows.child(
-                    div().flex().flex_col().gap_1().p_3().rounded_md()
-                        .border_1().border_color(palette.border)
-                        .child(div().text_xs().text_color(palette.muted_foreground).child(header))
-                        .child(div().text_sm().child(seg.source.clone()))
-                        .child(
-                            div().text_sm().child(
-                                seg.target.clone().unwrap_or_else(|| "(untranslated)".into()),
-                            ),
-                        )
-                        .child(
-                            Button::new(format!("edit-seg-{si}"))
-                                .ghost().label("Edit")
-                                .disabled(read_only)
-                                .on_click({
-                                    let baseline = seg.target.clone();
-                                    cx.listener(move |this, _, window, cx| {
-                                        this.open_editor(si, baseline.clone(), window, cx);
-                                    })
-                                }),
-                        ),
+            if busy {
+                col = col.child(
+                    div().text_sm().text_color(palette.muted_foreground).child(
+                        "Translation is running — editing is disabled until it finishes.",
+                    ),
                 );
             }
-            col = col.child(rows);
+            let view = cx.entity();
+            let rows = list(self.seg_list.clone(), move |ix, _window, cx: &mut App| {
+                view.update(cx, |view, cx| Self::segment_row(view, ix, palette, cx))
+            })
+            .flex_1()
+            .min_h_0();
+            col = col.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(palette.border)
+                    .bg(palette.card)
+                    .overflow_hidden()
+                    .child(rows),
+            );
         }
 
         // Editor panel with tabs (edit/history/precision).
@@ -415,36 +669,21 @@ impl Render for ProofreadingView {
                 .child(div().font_medium().child(format!("Edit segment #{si}")));
             panel = panel.child(
                 TabBar::new("edit-tabs")
+                    .underline()
                     .selected_index(self.edit_tab)
+                    .on_click(cx.listener(|this, index: &usize, _, cx| {
+                        this.edit_tab = (*index).min(2);
+                        if this.edit_tab == 1 {
+                            this.load_history(cx);
+                        } else if this.edit_tab == 2 {
+                            this.load_drafts(cx);
+                        } else {
+                            cx.notify();
+                        }
+                    }))
                     .child(Tab::new().label("Edit"))
                     .child(Tab::new().label("History"))
                     .child(Tab::new().label("Precision")),
-            );
-            // Tab switching is wired via buttons (TabBar selection callback
-            // lands with the tab-interaction pass; index drives content).
-            panel = panel.child(
-                div().flex().gap_1()
-                    .child(
-                        Button::new("tab-edit").ghost().label("Edit")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.edit_tab = 0;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("tab-history").ghost().label("History")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.edit_tab = 1;
-                                this.load_history(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("tab-precision").ghost().label("Precision")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.edit_tab = 2;
-                                this.load_drafts(cx);
-                            })),
-                    ),
             );
             match self.edit_tab {
                 1 => {

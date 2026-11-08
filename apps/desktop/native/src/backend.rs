@@ -45,15 +45,14 @@ fn token() -> Result<String, &'static str> {
 }
 
 /// Resolve the sidecar executable: bundled `wenyi-engine` next to us, or the
-/// dev override `$WENYI_DESKTOP_PYTHON -m wenyi_desktop`.
+/// `$WENYI_DESKTOP_PYTHON -m wenyi_desktop` override (explicit opt-in, works
+/// in all builds so Release is usable for testing without a bundle).
 fn spawn_command() -> Result<Command, &'static str> {
-    if cfg!(debug_assertions) {
-        if let Some(python) = std::env::var_os("WENYI_DESKTOP_PYTHON") {
-            let mut command = Command::new(python);
-            command.env_remove("__PYVENV_LAUNCHER__");
-            command.args(["-m", "wenyi_desktop"]);
-            return Ok(command);
-        }
+    if let Some(python) = std::env::var_os("WENYI_DESKTOP_PYTHON") {
+        let mut command = Command::new(python);
+        command.env_remove("__PYVENV_LAUNCHER__");
+        command.args(["-m", "wenyi_desktop"]);
+        return Ok(command);
     }
     let exe = std::env::current_exe().map_err(|_| "Cannot locate executable")?;
     let dir = exe.parent().ok_or("Cannot locate executable dir")?;

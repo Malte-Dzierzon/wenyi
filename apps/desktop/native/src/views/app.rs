@@ -8,6 +8,7 @@
 //! supports a collapsed icon-only mode with tooltips; both persist to a
 //! local JSON file (mirrors `wenyi.sidebarCollapsed`).
 
+use gpui_kit::base::component_traits::{Collapsible as _, Selectable as _};
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem,
     SidebarToggleButton,
@@ -60,6 +61,8 @@ pub struct App {
     sidebar_collapsed: bool,
     /// Expanded sidebar width in px (drag-persisted).
     sidebar_width: f32,
+    /// Last sidebar-prefs disk write (drags persist debounced).
+    sidebar_saved_at: Option<std::time::Instant>,
     dashboard: Entity<Dashboard>,
     create: Entity<Create>,
     /// Per-project Progress views, keyed by pid (created on open).
@@ -126,7 +129,6 @@ impl App {
                         app._backend = backend;
                         app.client = Some(client.clone());
                         app.dashboard.update(cx, |d, cx| d.set_client(client.clone(), cx));
-                        app.create.update(cx, |c, cx| c.set_client(client.clone(), cx));
                         app.global_settings.update(cx, |g, cx| g.set_client(client.clone(), cx));
                     }
                     Err(err) => {
@@ -150,12 +152,17 @@ impl App {
         let create = cx.new(|cx| Create::new(window, cx));
         let global_settings = cx.new(|cx| GlobalSettingsView::new(window, cx));
         let app_handle = cx.entity().downgrade();
+        // Theme selects in settings write back through this handle so mode
+        // changes apply live (App::render would otherwise overwrite the
+        // global choice with its stale copy on the next render).
+        global_settings.update(cx, |g, _| g.set_app_handle(app_handle.clone()));
         let prefs = sidebar_prefs::load_prefs();
         Self {
             location: Location::Global(GlobalNav::Projects),
             current_project: None,
             sidebar_collapsed: prefs.collapsed,
             sidebar_width: prefs.clamped_width(),
+            sidebar_saved_at: None,
             dashboard,
             create,
             global_settings,
@@ -177,13 +184,26 @@ impl App {
     }
 
     /// Persist the sidebar prefs (best-effort; shell state only).
-    fn persist_sidebar(&self) {
+    fn persist_sidebar(&mut self) {
+        self.sidebar_saved_at = Some(std::time::Instant::now());
         let prefs = sidebar_prefs::SidebarPrefs {
             collapsed: self.sidebar_collapsed,
             width: self.sidebar_width,
         };
         if let Err(err) = sidebar_prefs::save_prefs(&prefs) {
             tracing::warn!(error = %err, "sidebar prefs save failed");
+        }
+    }
+
+    /// Persist at most every 500ms during width drags (per-pixel disk
+    /// writes stutter the drag; the in-memory width stays live).
+    fn persist_sidebar_debounced(&mut self) {
+        let due = self
+            .sidebar_saved_at
+            .map(|t| t.elapsed() >= std::time::Duration::from_millis(500))
+            .unwrap_or(true);
+        if due {
+            self.persist_sidebar();
         }
     }
 
@@ -259,6 +279,11 @@ impl App {
                         view.update(cx, |v, cx| v.set_visible(visible, cx));
                     }
                 }
+                ProjectNav::Glossary => {
+                    if let Some(view) = self.glossary_views.get(&project.id) {
+                        view.update(cx, |v, cx| v.set_visible(visible, cx));
+                    }
+                }
                 _ => {}
             },
             _ => {}
@@ -293,7 +318,7 @@ impl App {
     fn global_item(&self, nav: GlobalNav, cx: &mut Context<Self>) -> SidebarMenuItem {
         let active = self.location == Location::Global(nav);
         SidebarMenuItem::new(nav.label())
-            .icon(Icon::new(Self::global_icon(nav)))
+            .icon(Icon::new(Self::global_icon(nav)).size_4())
             .active(active)
             .collapsed(self.sidebar_collapsed)
             .on_click(cx.listener(move |this: &mut App, _, _, cx| {
@@ -314,7 +339,7 @@ impl App {
             };
         let project = project.clone();
         SidebarMenuItem::new(nav.label())
-            .icon(Icon::new(Self::project_icon(nav)))
+            .icon(Icon::new(Self::project_icon(nav)).size_4())
             .active(active)
             .collapsed(self.sidebar_collapsed)
             .on_click(cx.listener(move |this: &mut App, _, _, cx| {
@@ -344,20 +369,29 @@ impl App {
     }
 
     /// Footer entry (Interface settings) — pinned via `Sidebar::footer`.
-    /// A plain row (the kit footer slot takes `IntoElement`, not menus).
-    fn footer_row(&self, palette: theme::Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.location == Location::Global(GlobalNav::InterfaceSettings);
+    /// Content row only (16px icon + label); hover/selected backgrounds come
+    /// from the kit footer so only one hover rect exists.
+    fn footer_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let collapsed = self.sidebar_collapsed;
+        // Plain content row: the kit `SidebarFooter` owns hover + selected
+        // backgrounds (a second hover rect inside produced the doubled
+        // hover artifact).
         div()
             .id("sidebar-footer-settings")
             .flex()
+            .w_full()
             .items_center()
             .gap_2()
-            .px_2()
-            .h_8()
-            .rounded_md()
-            .when(active, |this| this.bg(palette.accent))
-            .when(!self.sidebar_collapsed, |this| {
-                this.child(GlobalNav::InterfaceSettings.label())
+            .text_sm()
+            .when(collapsed, |this| this.justify_center())
+            .child(Icon::new(Self::global_icon(GlobalNav::InterfaceSettings)).size_4())
+            .when(!collapsed, |this| {
+                this.child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .child(GlobalNav::InterfaceSettings.label()),
+                )
             })
             .on_click(cx.listener(|this: &mut App, _, _, cx| {
                 this.navigate(Location::Global(GlobalNav::InterfaceSettings), cx);
@@ -386,13 +420,18 @@ impl Render for App {
         let palette = theme::current_palette();
         let collapsed = self.sidebar_collapsed;
         let expanded_width = px(sidebar_prefs::clamp_width(self.sidebar_width));
-        // Brand header row: wordmark + collapse toggle.
+        // Brand header row: wordmark + collapse toggle. Collapsed, the brand
+        // hides (web behaviour) and the toggle centers in the 64px rail.
         let header = SidebarHeader::new().child(
             h_flex()
                 .w_full()
                 .items_center()
-                .justify_between()
-                .child(div().flex_1().min_w_0().child(brand_header(collapsed, palette)))
+                .when(collapsed, |this| this.justify_center())
+                .when(!collapsed, |this| {
+                    this.justify_between().child(
+                        div().flex_1().min_w_0().child(brand_header(collapsed, palette)),
+                    )
+                })
                 .child(
                     SidebarToggleButton::new()
                         .side(Side::Left)
@@ -408,7 +447,9 @@ impl Render for App {
                 ),
         );
 
-        // Global panels group (Projects).
+        // Global panels group (Projects). Collapse state is owned by the
+        // `Sidebar` below — kit propagates it to groups/menus/items (labels
+        // hide, icons center, tooltips arm).
         let global_menu = SidebarMenu::new().children(self.global_panel_items(cx));
         let global_group = SidebarGroup::new("").child(global_menu);
 
@@ -423,32 +464,33 @@ impl Render for App {
                     .map(|nav| self.project_item(&project, nav, cx))
                     .collect();
                 vec![
-                    SidebarGroup::new(project.name.clone()).children([SidebarMenu::new()
-                        .children(items)]),
+                    SidebarGroup::new(project.name.clone())
+                        .children([SidebarMenu::new().children(items)]),
                 ]
             } else {
                 Vec::new()
             };
 
         // Primary action row under the header (web `action` slot).
-        let action_group = SidebarGroup::new("").child(
-            SidebarMenu::new().children([self.action_item(cx)]),
-        );
+        let action_group =
+            SidebarGroup::new("").child(SidebarMenu::new().children([self.action_item(cx)]));
 
         // Footer: Interface settings pinned to the bottom (web `foot` slot).
-        let footer = SidebarFooter::new().child(self.footer_row(palette, cx));
+        // Selected state goes to the kit footer (single hover/selected rect).
+        let settings_active = self.location == Location::Global(GlobalNav::InterfaceSettings);
+        let footer = SidebarFooter::new()
+            .selected(settings_active)
+            .child(self.footer_row(cx));
 
-        let sidebar_width = if collapsed {
-            px(sidebar_prefs::COLLAPSED_WIDTH)
-        } else {
-            expanded_width
-        };
+        // Kit-owned collapse: animated clip-width wrapper, group labels hide,
+        // items center. The expanded width stays draggable (persisted).
         let sidebar = Sidebar::new("nav")
             .side(Side::Left)
-            .collapsible(false)
+            .collapsible(true)
+            .collapsed(collapsed)
             .header(header)
             .footer(footer)
-            .w(sidebar_width)
+            .w(expanded_width)
             .child(action_group)
             .child(global_group)
             .children(project_groups);
@@ -462,7 +504,9 @@ impl Render for App {
                     .h_full()
                     .flex_shrink_0()
                     .min_h_0()
-                    .min_w(px(sidebar_prefs::COLLAPSED_WIDTH))
+                    // Kit collapses to a 48px icon rail; the wrapper must not
+                    // clamp wider or the collapse animation fights the layout.
+                    .min_w(px(48.0))
                     .child(sidebar),
             );
         let shell = if collapsed {
@@ -480,7 +524,7 @@ impl Render for App {
                     let width: f32 = event.event.position.x.into();
                     _ = app.update(cx, |this: &mut App, cx| {
                         this.sidebar_width = sidebar_prefs::clamp_width(width);
-                        this.persist_sidebar();
+                        this.persist_sidebar_debounced();
                         cx.notify();
                     });
                 }),

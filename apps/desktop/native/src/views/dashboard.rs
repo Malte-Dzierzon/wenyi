@@ -266,6 +266,7 @@ impl Dashboard {
             .border_1()
             .border_color(palette.border)
             .bg(palette.card)
+            .hover(|this| this.border_color(palette.accent).bg(palette.accent_soft.opacity(0.25)))
             .when_some(on_open, |this, on_open| {
                 // Card body click = overlay Link in the source. Delete button
                 // stops at its own handler (GPUI hit-testing: innermost first).

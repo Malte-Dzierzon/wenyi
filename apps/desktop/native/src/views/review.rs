@@ -94,17 +94,31 @@ impl ReviewView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let runs = block_on(client.list_review_runs(&pid))?;
-                    let project = block_on(client.get_project(&pid))?;
-                    let chapters = block_on(client.list_chapters(&pid)).unwrap_or_default();
-                    let workflow = block_on(client.get_workflow(&pid)).ok();
+                    let (runs, project, chapters, workflow) = block_on(async {
+                        tokio::join!(
+                            client.list_review_runs(&pid),
+                            client.get_project(&pid),
+                            client.list_chapters(&pid),
+                            client.get_workflow(&pid),
+                        )
+                    });
+                    let runs = runs?;
+                    let project = project?;
                     // Default selection: latest run (runs are desc by id).
                     let rid = selected.or_else(|| runs.first().map(|r| r.id.clone()));
+                    // Depends on `runs`; stays sequential (single cheap call).
                     let detail = match &rid {
                         Some(rid) => Some(block_on(client.get_review_run(&pid, rid))?),
                         None => None,
                     };
-                    Ok::<_, crate::client::Error>((runs, project, chapters, workflow, rid, detail))
+                    Ok::<_, crate::client::Error>((
+                        runs,
+                        project,
+                        chapters.unwrap_or_default(),
+                        workflow.ok(),
+                        rid,
+                        detail,
+                    ))
                 })
                 .await;
             _ = this.update(cx, |view: &mut ReviewView, cx| {

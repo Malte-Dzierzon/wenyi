@@ -96,11 +96,12 @@ impl StyleView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let project = block_on(client.get_project(&pid))?;
+                    let (project, data) = block_on(async {
+                        tokio::join!(client.get_project(&pid), client.get_analysis(&pid),)
+                    });
                     // Analysis may 500 before preparation produces it — the
                     // source renders the form with empty values + ErrorNotice.
-                    let data = block_on(client.get_analysis(&pid)).ok();
-                    Ok::<_, crate::client::Error>((data, project.project.status))
+                    Ok::<_, crate::client::Error>((data.ok(), project?.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut StyleView, cx| {
@@ -259,94 +260,116 @@ impl Render for StyleView {
 
         col = col.child(
             TabBar::new("style-tabs")
+                .underline()
                 .selected_index(self.tab)
+                .on_click(cx.listener(|this, index: &usize, _, cx| {
+                    this.tab = (*index).min(2);
+                    cx.notify();
+                }))
                 .child(Tab::new().label("Style"))
                 .child(Tab::new().label("Synopsis"))
                 .child(Tab::new().label("Digests")),
         );
-        // Tab switching via buttons (TabBar callback pass lands later).
-        col = col.child(
-            div().flex().gap_1()
-                .child(
-                    Button::new("tab-style").ghost().label("Style").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.tab = 0;
-                            cx.notify();
-                        }),
-                    ),
-                )
-                .child(
-                    Button::new("tab-synopsis").ghost().label("Synopsis").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.tab = 1;
-                            cx.notify();
-                        }),
-                    ),
-                )
-                .child(
-                    Button::new("tab-digests").ghost().label("Digests").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.tab = 2;
-                            cx.notify();
-                        }),
-                    ),
-                ),
-        );
 
         match self.tab {
             0 => {
-                // Style fields + guide, each group with its own save.
-                let mut form = div().flex().flex_col().gap_2();
-                for (key, label) in STYLE_FIELDS {
+                // Style fields as a two-column grid of cards (Genre + Tone,
+                // Narration + Pacing, …); guide spans full width below.
+                // Cards use subtle borders + minimal rounding (glossary look).
+                let mut grid = div().flex().flex_col().gap_3();
+                let mut row: Option<Div> = None;
+                for (i, (key, label)) in STYLE_FIELDS.iter().enumerate() {
                     let input = self.field_input(key, window, cx);
-                    form = form.child(
-                        div().flex().flex_col().gap_1()
-                            .child(div().text_sm().font_medium().child(label.to_string()))
-                            .child(Input::new(&input)),
-                    );
+                    let card = div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .p_3()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(palette.border)
+                        .bg(palette.card)
+                        .child(div().text_sm().font_medium().child(label.to_string()))
+                        .child(Input::new(&input));
+                    if i % 2 == 0 {
+                        row = Some(div().flex().gap_3().child(card));
+                    } else if let Some(r) = row.take() {
+                        grid = grid.child(r.child(card));
+                    }
+                }
+                if let Some(r) = row.take() {
+                    // Odd field out spans the remaining half; balance with spacer.
+                    grid = grid.child(r.child(div().flex_1().min_w_0()));
                 }
                 let keys: Vec<String> =
                     STYLE_FIELDS.iter().map(|(k, _)| k.to_string()).collect();
-                form = form.child(
-                    Button::new("save-style")
-                        .primary()
-                        .label(if self.saving { "Saving…" } else { "Save style" })
-                        .disabled(read_only || self.saving)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.save_keys(keys.clone(), cx);
-                        })),
+                grid = grid.child(
+                    div().flex().justify_end().child(
+                        Button::new("save-style")
+                            .primary()
+                            .label(if self.saving { "Saving…" } else { "Save style" })
+                            .disabled(read_only || self.saving)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.save_keys(keys.clone(), cx);
+                            })),
+                    ),
                 );
                 let guide = self.field_input("style_guide", window, cx);
-                form = form.child(
-                    div().flex().flex_col().gap_1()
+                grid = grid.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .p_3()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(palette.border)
+                        .bg(palette.card)
                         .child(div().text_sm().font_medium().child("Style guide"))
                         .child(Input::new(&guide)),
                 );
-                form = form.child(
-                    Button::new("save-guide")
-                        .primary()
-                        .label("Save guide")
-                        .disabled(read_only || self.saving)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.save_keys(vec!["style_guide".into()], cx);
-                        })),
+                grid = grid.child(
+                    div().flex().justify_end().child(
+                        Button::new("save-guide")
+                            .primary()
+                            .label("Save guide")
+                            .disabled(read_only || self.saving)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_keys(vec!["style_guide".into()], cx);
+                            })),
+                    ),
                 );
-                col = col.child(form);
+                col = col.child(grid);
             }
             1 => {
                 let synopsis = self.field_input("book_synopsis", window, cx);
                 col = col.child(
-                    div().flex().flex_col().gap_2()
-                        .child(div().text_sm().font_medium().child("Book synopsis"))
-                        .child(Input::new(&synopsis))
+                    div().flex().flex_col().gap_3()
                         .child(
-                            Button::new("save-synopsis")
-                                .primary()
-                                .label("Save synopsis")
-                                .disabled(read_only || self.saving)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.save_keys(vec!["book_synopsis".into()], cx);
-                                })),
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .p_3()
+                                .rounded_sm()
+                                .border_1()
+                                .border_color(palette.border)
+                                .bg(palette.card)
+                                .child(div().text_sm().font_medium().child("Book synopsis"))
+                                .child(Input::new(&synopsis)),
+                        )
+                        .child(
+                            div().flex().justify_end().child(
+                                Button::new("save-synopsis")
+                                    .primary()
+                                    .label("Save synopsis")
+                                    .disabled(read_only || self.saving)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.save_keys(vec!["book_synopsis".into()], cx);
+                                    })),
+                            ),
                         ),
                 );
             }
