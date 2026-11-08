@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from threading import Lock
 from typing import Any
 from uuid import uuid4
@@ -198,7 +198,9 @@ class RoutedLLMClient(LLMClient):
             emit("llm_request_scheduled")
             active_reservation = None
 
-            def record(sample: UsageSample | None) -> None:
+            def record(sample: UsageSample | None, *, elapsed_ms: int = 0) -> None:
+                if sample is not None and elapsed_ms:
+                    sample = replace(sample, completion_ms=max(0, int(elapsed_ms)))
                 if sample is not None and active_reservation is not None:
                     active_reservation.actual_tokens = sample.total_tokens
                 self.usage.record(

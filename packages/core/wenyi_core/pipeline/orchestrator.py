@@ -12,6 +12,7 @@ agents/ingest/glossary/assemble/RunStore. Lower layers must never import this mo
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -95,10 +96,17 @@ class Orchestrator:
         only_chapter: int | None = None,
         progress: ProgressFn | None = None,
     ) -> Storage:
-        """Prepare state and translate pending chapters under the book lock."""
+        """Prepare state and translate pending chapters.
+
+        Single-chapter runs hold only that chapter's lock so different
+        chapters translate in parallel; book-wide runs hold the book lock.
+        """
         with self._runtime.track_workflow("translate"):
             store = self._preparation.prepare(input_path, progress=progress)
-            with store.lock():
+            run_lock = (
+                store.chapter_lock(only_chapter) if only_chapter is not None else store.lock()
+            )
+            with run_lock:
                 return self._run_locked(
                     store,
                     only_chapter=only_chapter,
@@ -135,6 +143,53 @@ class Orchestrator:
         finally:
             # Prescan can stop before translation's own usage checkpoint is reached.
             self._runtime.flush_usage(store, scope="translate")
+
+    def run_curator(
+        self,
+        input_path: str,
+        *,
+        progress: ProgressFn | None = None,
+    ) -> dict[str, Any]:
+        """Run one glossary-curation pass (~20 terms) under the curator lock."""
+        from .curator import CURATOR_BATCH_SIZE, CuratorService
+
+        with self._runtime.track_workflow("curate"):
+            store = self._preparation.locate_existing(input_path, progress=progress)
+            with store.curator_lock():
+                curator = CuratorService(self.client, self.config)
+                manifest = store.load_manifest()
+                book_title = manifest.get("title", "")
+                all_terms = store.all_terms()
+                state = store.read_artifact("curator_state.json") or {}
+                state.pop("stop_requested", None)
+                checked_at: dict[str, str] = state.get("checked_at", {})
+                # Priority: open conflicts first, then least-recently-checked.
+                conflicts = {c.get("source") for c in store.open_conflicts()}
+                now = time.time()
+                terms = sorted(
+                    all_terms,
+                    key=lambda t: (
+                        t.source not in conflicts,
+                        checked_at.get(t.source, ""),
+                    ),
+                )[:CURATOR_BATCH_SIZE]
+                history, _corpus = TranslationService.load_translation_inputs(store)
+                chapters = [
+                    store.load_chapter(entry["index"])
+                    for entry in manifest.get("chapters", [])
+                    if isinstance(entry.get("index"), int)
+                ]
+                stats = curator.run_pass(store, terms, chapters, history, book_title=book_title)
+                for term in terms:
+                    checked_at[term.source] = str(now)
+                store.write_artifact(
+                    "curator_state.json",
+                    {"checked_at": checked_at, "last_pass": stats},
+                )
+                self._runtime.flush_usage(store, scope="curate")
+                if progress:
+                    progress(stats["checked"], stats["checked"], "Glossary curation pass")
+                return {"store": store, **stats}
 
     def run_review(
         self,

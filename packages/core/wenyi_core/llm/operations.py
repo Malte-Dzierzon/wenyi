@@ -105,6 +105,12 @@ OPERATIONS = register_operations(
         OperationSpec("glossary.extract", "Extract glossary candidates", "fast"),
         OperationSpec("glossary.align_history", "Align terms with earlier translations", "fast"),
         OperationSpec(
+            "glossary.curate",
+            "Review one glossary term against book evidence",
+            "cheap",
+            output_tokens=1024,
+        ),
+        OperationSpec(
             "annotation.align",
             "Align EPUB annotation positions",
             "cheap",

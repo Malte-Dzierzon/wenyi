@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict
 
 from .configuration import ProviderConfig
 from .retrying import RetryReporter, provider_retry
-from .usage import UsageSample
 
 OptionsT = TypeVar("OptionsT", bound=BaseModel)
 Messages = list[dict[str, str]]
@@ -37,7 +36,7 @@ class RequestContext:
     tier: str
     max_tokens: int | None
     emit: Callable[..., None]
-    record_usage: Callable[[UsageSample | None], None]
+    record_usage: Callable[..., None]
     attempt_scope: Callable[..., Any]
     sleep: Callable[[float], None] | None = None
     redact_diagnostic: Callable[[str], str] | None = None

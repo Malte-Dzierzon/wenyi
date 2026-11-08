@@ -133,6 +133,9 @@ PROVIDERS = register_providers(
             "ollama", "ollama", "OllamaClient", "OpenAICompatibleOptions", "openai_compatible"
         ),
         ProviderSpec("vllm", "vllm", "VLLMClient", "OpenAICompatibleOptions", "openai_compatible"),
+        ProviderSpec(
+            "llamacpp", "llamacpp", "LlamaCppClient", "OpenAICompatibleOptions", "openai_compatible"
+        ),
         ProviderSpec("gemini", "gemini", "GeminiClient", "GeminiOptions"),
         ProviderSpec("fake", "fake", "FakeProvider", "FakeOptions"),
     )

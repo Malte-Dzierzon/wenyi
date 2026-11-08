@@ -181,7 +181,7 @@ def _probe(
         # Respect provider rules such as the minimum output size for thinking modes.
         max_tokens=adapter_type.output_limit(request_model.options, PROBE_OUTPUT_TOKENS, None),
         emit=lambda event, **data: None,
-        record_usage=lambda sample: None,
+        record_usage=lambda sample, **kwargs: None,
         attempt_scope=nullcontext,
     )
     started = time.monotonic()

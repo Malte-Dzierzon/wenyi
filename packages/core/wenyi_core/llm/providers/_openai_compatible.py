@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from abc import abstractmethod
 from typing import Any, Generic, TypeVar
 
@@ -152,8 +153,13 @@ class OpenAICompatibleBaseClient(ProviderAdapter, Generic[OptionsT]):
         kwargs = self._build_request_kwargs(
             model, messages, json_mode=json_mode, max_tokens=context.max_tokens
         )
+        started = time.monotonic()
         response = self._ensure_client().chat.completions.create(**kwargs)
-        context.record_usage(self._normalize_usage(getattr(response, "usage", None)))
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        context.record_usage(
+            self._normalize_usage(getattr(response, "usage", None)),
+            elapsed_ms=elapsed_ms,
+        )
         choice = response.choices[0]
         message = choice.message
         raw_content = getattr(message, "content", None)
@@ -167,7 +173,16 @@ class OpenAICompatibleBaseClient(ProviderAdapter, Generic[OptionsT]):
         if not content.strip():
             fallback = self._json_response_fallback(model_config, message) if json_mode else None
             if fallback is None or not fallback.strip():
-                raise EmptyResponseError(f"{self.cfg.kind} response content is empty")
+                refusal = getattr(message, "refusal", None)
+                tool_calls = getattr(message, "tool_calls", None) or []
+                reasoning = getattr(message, "reasoning_content", None)
+                raise EmptyResponseError(
+                    f"{self.cfg.kind} response content is empty "
+                    f"(finish_reason={finish_reason or 'none'}, "
+                    f"refusal={bool(refusal)}, "
+                    f"tool_calls={len(tool_calls)}, "
+                    f"reasoning_content={'present' if reasoning else 'absent'})"
+                )
             try:
                 json.loads(fallback)
             except json.JSONDecodeError as error:

@@ -13,6 +13,12 @@ _USAGE_FIELDS = (
     "total_tokens",
     "cache_hit_tokens",
     "cache_miss_tokens",
+    "completion_ms",
+    # Timed subset (calls that measured wall-clock time): the output rate
+    # must divide timed tokens by timed milliseconds, never historical
+    # totals (which lack time) by fresh milliseconds.
+    "timed_calls",
+    "timed_completion_tokens",
 )
 
 
@@ -25,6 +31,10 @@ class UsageSample:
     total_tokens: int
     cache_hit_tokens: int = 0
     cache_miss_tokens: int = 0
+    #: Wall-clock milliseconds of the provider call. Enables true output
+    #: rates (`completion_tokens / completion_ms`); historical ledgers
+    #: without this field read as 0 (no migration needed).
+    completion_ms: int = 0
 
 
 def read_usage_value(usage: Any, name: str) -> Any:
@@ -235,7 +245,11 @@ class UsageTracker:
                 slot = self._groups[group].setdefault(key, dict.fromkeys(_USAGE_FIELDS, 0))
                 slot["calls"] += 1
                 for field in _USAGE_FIELDS[1:]:
-                    slot[field] += getattr(sample, field)
+                    if hasattr(sample, field):
+                        slot[field] += getattr(sample, field)
+                if sample.completion_ms > 0:
+                    slot["timed_calls"] += 1
+                    slot["timed_completion_tokens"] += sample.completion_tokens
             self._labels.update(labels or {})
 
     def summary(self) -> dict[str, Any]:

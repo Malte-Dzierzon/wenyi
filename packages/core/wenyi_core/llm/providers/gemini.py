@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from math import ceil
 from typing import Any
 
@@ -248,15 +249,17 @@ class GeminiClient(ProviderAdapter):
         if model_config.options.extra_body:
             config_kwargs.update(model_config.options.extra_body)
 
+        started = time.monotonic()
         response = client.models.generate_content(
             model=model_config.model,
             contents=contents,
             config=config_kwargs,
         )
+        elapsed_ms = int((time.monotonic() - started) * 1000)
 
         # Record usage.
         sample = extract_gemini_usage(getattr(response, "usage_metadata", None))
-        context.record_usage(sample)
+        context.record_usage(sample, elapsed_ms=elapsed_ms)
 
         # Validate the response and check safety blocking.
         candidates = getattr(response, "candidates", None)

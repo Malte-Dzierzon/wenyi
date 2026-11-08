@@ -13,7 +13,8 @@ from ..i18n.policy.models import PolicyContext
 from ..i18n.policy.resolver import resolve_policy
 from ..i18n.resources import read_text
 
-ABOUT_TITLE = "关于此翻译"
+ABOUT_TITLES = {"zh": "关于此翻译", "en": "About this translation", "de": "Über diese Übersetzung"}
+ABOUT_TITLE = ABOUT_TITLES["en"]
 ABOUT_FILENAME = "trans-novel-about.xhtml"
 ABOUT_REPOSITORY = "https://github.com/BigDawnGhost/wenyi"
 
@@ -26,9 +27,10 @@ def about_xhtml(lang: str, *, locale: str | None = None) -> bytes:
             PolicyContext("auto", lang, phase="export", format="epub")
         ).export.about_locale
     )
+    title = ABOUT_TITLES.get(locale, ABOUT_TITLES["en"])
     return (
         Template(read_text(f"export/about.{locale}.xhtml"))
-        .substitute(lang=lang, title=ABOUT_TITLE, repository=ABOUT_REPOSITORY)
+        .substitute(lang=lang, title=title, repository=ABOUT_REPOSITORY)
         .encode("utf-8")
     )
 

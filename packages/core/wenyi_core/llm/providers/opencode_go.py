@@ -86,6 +86,15 @@ class OpenCodeGoClient(OpenAICompatibleBaseClient[OpenCodeGoOptions]):
                 )
         return self._client
 
+    def _json_response_fallback(
+        self, model_config: ResolvedModel[OpenCodeGoOptions], message: Any
+    ) -> str | None:
+        # Free gateway models (e.g. beam-free) sometimes place their answer in
+        # `reasoning_content` while leaving `content` empty; without this the
+        # call fails with EmptyResponseError despite a usable reply.
+        value = getattr(message, "reasoning_content", None)
+        return value if isinstance(value, str) and value.strip() else None
+
     def _build_request_kwargs(
         self,
         model_config: ResolvedModel[OpenCodeGoOptions],

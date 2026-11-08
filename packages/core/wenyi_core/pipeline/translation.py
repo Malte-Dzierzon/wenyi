@@ -315,7 +315,9 @@ class TranslationService:
                 ci,
                 batch_start,
                 b,
-                term_snapshot,
+                # Only batch-relevant terms: the full glossary would be ~43k
+                # tokens (90%+ of the prompt). Continuity comes from context.
+                GlossaryStore.terms_in(term_snapshot, " ".join(s.source for s in b if s.source)),
                 ctx_text,
                 style,
                 book_synopsis,

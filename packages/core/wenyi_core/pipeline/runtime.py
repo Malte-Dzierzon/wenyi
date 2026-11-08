@@ -111,24 +111,31 @@ class PipelineRuntime:
         )
 
     def flush_usage(self, store: Storage, *, scope: str, review=None) -> dict[str, Any]:
-        """Merge the client's unpersisted usage delta into the book's usage.json."""
-        store.recover_usage()
-        current = self.client.usage_summary()
-        increment = usage_delta(current, self._usage_checkpoint)
-        accumulated = store.load_usage() or empty_usage()
-        if not increment["totals"]["calls"]:
-            if review is not None and review.load_usage() is None:
-                review.save_usage(empty_usage())
-            return merge_usage_summaries(accumulated, increment)
-        cumulative = merge_usage_summaries(accumulated, increment)
-        ledgers = {"usage.json": cumulative}
-        if review is not None:
-            ledgers[f"reviews/{review.review_id}/usage.json"] = merge_usage_summaries(
-                review.load_usage() or empty_usage(), increment
-            )
-        store.prepare_usage_commit(ledgers)
-        self._usage_checkpoint = current
-        store.recover_usage()
+        """Merge the client's unpersisted usage delta into the book's usage.json.
+
+        The read-modify-write runs inside one `state_lock` so parallel
+        chapter workers cannot lose each other's increments: without the
+        lock, two workers could read the same `accumulated` value and the
+        second commit would silently drop the first worker's delta.
+        """
+        with store.state_lock():
+            store.recover_usage()
+            current = self.client.usage_summary()
+            increment = usage_delta(current, self._usage_checkpoint)
+            accumulated = store.load_usage() or empty_usage()
+            if not increment["totals"]["calls"]:
+                if review is not None and review.load_usage() is None:
+                    review.save_usage(empty_usage())
+                return merge_usage_summaries(accumulated, increment)
+            cumulative = merge_usage_summaries(accumulated, increment)
+            ledgers = {"usage.json": cumulative}
+            if review is not None:
+                ledgers[f"reviews/{review.review_id}/usage.json"] = merge_usage_summaries(
+                    review.load_usage() or empty_usage(), increment
+                )
+            store.prepare_usage_commit(ledgers)
+            self._usage_checkpoint = current
+            store.recover_usage()
         store.log_event(
             "usage_summary",
             scope=scope,

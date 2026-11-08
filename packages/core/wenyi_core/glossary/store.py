@@ -15,6 +15,7 @@ import tempfile
 import time
 import unicodedata
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 from ..i18n.metadata import normalize_gender, normalize_term_type
@@ -41,6 +42,7 @@ class GlossaryTerm:
     first_chapter: int | None = None
     note: str = ""
     status: str = "ok"
+    mentions: int = 0
 
     def __post_init__(self) -> None:
         self.type = normalize_term_type(self.type)
@@ -59,6 +61,7 @@ class GlossaryTerm:
             first_chapter=row["first_chapter"],
             note=row["note"] or "",
             status=row["status"] or "ok",
+            mentions=row["mentions"] if "mentions" in row.keys() else 0,
         )
 
 
@@ -73,9 +76,18 @@ CREATE TABLE IF NOT EXISTS glossary (
     first_chapter INTEGER,
     note          TEXT,
     status        TEXT DEFAULT 'ok',
-    updated_at    REAL
+    updated_at    REAL,
+    mentions      INTEGER DEFAULT 0
 )
 """
+
+
+def _ensure_mentions_column(conn: sqlite3.Connection) -> None:
+    """Add the mentions counter to pre-existing tables (idempotent)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(glossary)")}
+    if "mentions" not in columns:
+        conn.execute("ALTER TABLE glossary ADD COLUMN mentions INTEGER DEFAULT 0")
+
 
 _SCHEMA = (
     _CREATE_GLOSSARY_TABLE
@@ -112,6 +124,7 @@ def _match_text(text: str) -> str:
 _WORD_BOUNDARY_SCRIPTS = ("LATIN", "GREEK", "CYRILLIC")
 
 
+@lru_cache(maxsize=8192)
 def _source_pattern(key: str) -> re.Pattern[str] | None:
     """Build word boundaries for space-delimited scripts; return None for substring-matched
     scripts.
@@ -225,6 +238,7 @@ class GlossaryStore:
         self.conn.execute("PRAGMA busy_timeout = 5000")
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(_SCHEMA)
+        _ensure_mentions_column(self.conn)
         self.conn.commit()
         self._owns_connection = True
 
@@ -242,6 +256,7 @@ class GlossaryStore:
         for statement in _SCHEMA.split(";"):
             if statement.strip():
                 conn.execute(statement)
+        _ensure_mentions_column(conn)
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
@@ -357,7 +372,7 @@ class GlossaryStore:
                 result = "unchanged"
             else:
                 # Different target: keep the established mapping and record the candidate for human resolution.
-                self._log_conflict(term.source, existing.target, term.target, chapter)
+                self._log_conflict(term.source, existing.target, term.target, chapter, term.note)
                 self.conn.execute(
                     "UPDATE glossary SET status='conflict', updated_at=? WHERE source=?",
                     (now, term.source),
@@ -371,13 +386,13 @@ class GlossaryStore:
                 self.conn.rollback()
             raise
 
-    def _log_conflict(self, source, existing_target, proposed_target, chapter):
+    def _log_conflict(self, source, existing_target, proposed_target, chapter, note=None):
         """Record one candidate-translation conflict within the current transaction."""
         self.conn.execute(
             """INSERT INTO term_conflicts
-               (source,existing_target,proposed_target,chapter,created_at)
-               VALUES (?,?,?,?,?)""",
-            (source, existing_target, proposed_target, chapter, time.time()),
+               (source,existing_target,proposed_target,chapter,note,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (source, existing_target, proposed_target, chapter, note, time.time()),
         )
 
     def resolve_term(self, source: str, target: str) -> bool:
@@ -391,6 +406,15 @@ class GlossaryStore:
         if self._owns_connection:
             self.conn.commit()
         return cur.rowcount > 0
+
+    def set_mentions(self, source: str, count: int) -> None:
+        """Store the curator's occurrence count for ranking (no status change)."""
+        self.conn.execute(
+            "UPDATE glossary SET mentions=?, updated_at=? WHERE source=?",
+            (max(0, count), time.time(), source),
+        )
+        if self._owns_connection:
+            self.conn.commit()
 
     def all_terms(self) -> list[GlossaryTerm]:
         """Return all terms in insertion order (rowid).

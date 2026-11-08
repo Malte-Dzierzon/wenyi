@@ -1,4 +1,4 @@
-[Characters / Style guide]
+[Characters / Style guide] (MANDATORY — violating these rules is a translation error)
 $style
 
 [Whole-book synopsis]
