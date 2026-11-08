@@ -356,7 +356,14 @@ class LocalBackend:
         config_snapshot: dict | None = None,
         run_id: str | None = None,
     ) -> int:
-        """Commit scheduling identity and busy status together, outside domain state."""
+        """Commit scheduling identity and busy status together, outside domain state.
+
+        Chapter translations run in parallel: a chapter job is admitted unless
+        the same chapter is already active or a book-wide job (translation,
+        prepare, review, ...) is running. Book-wide jobs still require a
+        fully idle project. The check runs inside the admission transaction,
+        so two simultaneous starts cannot both pass.
+        """
         from wenyi_backend.dal import RUNNING_PROJECT_STATUSES
 
         with self.transaction() as connection:
@@ -364,7 +371,25 @@ class LocalBackend:
             project = self._get("projects", pid, connection)
             if project is None:
                 raise HTTPException(404, "project not found")
-            if project["status"] in RUNNING_PROJECT_STATUSES:
+            active = [
+                row
+                for row in self._list("jobs", pid=pid, connection=connection)
+                if row["status"] in {"queued", "running"}
+            ]
+            chapter = (params or {}).get("chapter_index")
+            if kind == "glossary_curator":
+                if any(row["kind"] == "glossary_curator" for row in active):
+                    raise HTTPException(409, "a curator pass is already running")
+            elif kind == "chapter_translation" and isinstance(chapter, int):
+                for row in active:
+                    row_chapter = (row.get("params") or {}).get("chapter_index")
+                    if row["kind"] == "glossary_curator":
+                        continue
+                    if row["kind"] != "chapter_translation" or row_chapter == chapter:
+                        raise HTTPException(409, "project already has a conflicting running task")
+            elif any(row["kind"] != "glossary_curator" for row in active) or project[
+                "status"
+            ] in RUNNING_PROJECT_STATUSES - {"curating"}:
                 raise HTTPException(409, "project already has a running task")
             identity = self.create_job(
                 pid,
@@ -473,9 +498,14 @@ class LocalBackend:
             self._put("jobs", job_id, job, conn)
         return True
 
-    def latest_resumable_job(self, pid: str) -> dict | None:
-        job = next((j for j in self.list_jobs(pid) if j["kind"] != "export"), None)
-        return job if job and job["status"] in {"paused", "error", "interrupted"} else None
+    def latest_resumable_job(self, pid: str, chapter: int | None = None) -> dict | None:
+        for job in self.list_jobs(pid):
+            if job["kind"] == "export":
+                continue
+            if chapter is not None and (job.get("params") or {}).get("chapter_index") != chapter:
+                continue
+            return job if job["status"] in {"paused", "error", "interrupted"} else None
+        return None
 
     def is_paused(self, pid: str) -> bool:
         return (self._get("projects", pid) or {}).get("status") in {"paused", "pausing"}
@@ -493,7 +523,13 @@ class LocalBackend:
         ]
         store = self.storage_for(job["project_id"], create=False)
         try:
-            events = store.list_events(limit=0)
+            # Only review events can match: filter in SQL instead of parsing
+            # all 10k+ llm_usage/progress rows per workflow poll.
+            events = sorted(
+                store.list_events(event_type="review_started", limit=0)
+                + store.list_events(event_type="review_autofix_finished", limit=0),
+                key=lambda e: e.get("_id", 0),
+            )
         finally:
             store.close()
         for event in reversed(events):
@@ -531,6 +567,41 @@ class LocalBackend:
             if not store.exists():
                 return []
             review = store.load_latest_review_result() or {}
+            # Count issues once per request instead of O(chapters × issues).
+            from collections import Counter
+
+            issue_counts = Counter(issue.get("chapter") for issue in review.get("issues", []))
+            # Fast path: compact statistics rows (written by every save_chapter)
+            # instead of parsing multi-MB chapter bodies + Pydantic validation.
+            stats = store.chapter_statistics()
+            if stats:
+                by_index = {row["index"]: row for row in stats}
+                manifest_entries = store.load_manifest().get("chapters", [])
+                # Statistics table is authoritative only when it covers every
+                # manifest chapter (older projects may lack rows).
+                if all(e["index"] in by_index for e in manifest_entries):
+                    result = []
+                    for entry in manifest_entries:
+                        row = by_index[entry["index"]]
+                        state, current = chapter_review_state(
+                            review, row["meta"], entry.get("review_status")
+                        )
+                        result.append(
+                            {
+                                "index": row["index"],
+                                "title": row["title"],
+                                "title_translated": row["title_translated"],
+                                "status": entry.get("status") or "pending",
+                                "word_count": int(row["word_count"]),
+                                "target_word_count": int(row["target_word_count"]),
+                                "review_status": state or "pending",
+                                "review_issue_count": issue_counts.get(row["index"], 0)
+                                if current
+                                else 0,
+                            }
+                        )
+                    return result
+            # Slow path (legacy): fall back to full chapter bodies.
             result = []
             for entry in store.load_manifest().get("chapters", []):
                 chapter = store.load_chapter(entry["index"])
@@ -547,12 +618,7 @@ class LocalBackend:
                         "word_count": len(segments),
                         "target_word_count": sum(s.target is not None for s in segments),
                         "review_status": state or "pending",
-                        "review_issue_count": sum(
-                            issue.get("chapter") == chapter.index
-                            for issue in review.get("issues", [])
-                        )
-                        if current
-                        else 0,
+                        "review_issue_count": issue_counts.get(chapter.index, 0) if current else 0,
                     }
                 )
             return result

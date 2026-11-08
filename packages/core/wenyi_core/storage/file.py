@@ -147,6 +147,18 @@ class FileStorage(FileArtifacts):
             finally:
                 self.close()
 
+    @contextmanager
+    def chapter_lock(self, chapter_index: int, blocking: bool = True) -> Iterator[None]:
+        """Hold the per-chapter lock (blocking flag accepted for protocol parity)."""
+        with self._run.chapter_lock(chapter_index, blocking):
+            yield
+
+    @contextmanager
+    def curator_lock(self, blocking: bool = True) -> Iterator[None]:
+        """Hold the curator lock (blocking flag accepted for protocol parity)."""
+        with self._run.curator_lock(blocking):
+            yield
+
     def close(self) -> None:
         if self._glossary is not None:
             self._glossary.close()
@@ -254,6 +266,9 @@ class FileStorage(FileArtifacts):
 
     def resolve_term(self, source: str, target: str) -> bool:
         return self._g.resolve_term(source, target)
+
+    def set_term_mentions(self, source: str, count: int) -> None:
+        self._g.set_mentions(source, count)
 
     def delete_term(self, source: str) -> bool:
         cursor = self._g.conn.execute("DELETE FROM glossary WHERE source=?", (source,))

@@ -74,6 +74,20 @@ class RunStore(FileArtifacts):
             yield
 
     @contextmanager
+    def chapter_lock(self, chapter_index: int, blocking: bool = True) -> Iterator[None]:
+        """Serialize workers per chapter (blocking flag accepted for protocol parity)."""
+        if not isinstance(chapter_index, int) or isinstance(chapter_index, bool):
+            raise ValueError("Invalid chapter index")
+        with self._file_lock(f".chapter-{chapter_index}.lock"):
+            yield
+
+    @contextmanager
+    def curator_lock(self, blocking: bool = True) -> Iterator[None]:
+        """Serialize curator passes (blocking flag accepted for protocol parity)."""
+        with self._file_lock(".curator.lock"):
+            yield
+
+    @contextmanager
     def state_lock(self) -> Iterator[None]:
         """Briefly freeze manifest and chapters for atomic persistence or a consistent
         snapshot. Nested calls on the same store/thread reuse the outer lock; independent

@@ -26,6 +26,15 @@ from ..ingest.models import Chapter, Document
 from ..pipeline.runstore import ExportSnapshotStore, RunStore, source_sha256
 from .protocol import STATUS_DONE, STATUS_PENDING
 
+#: Process-wide manifest cache: `(mtime_ns, size)` of state.sqlite3 -> parsed
+#: manifest. The manifest embeds multi-MB static import metadata (toc_entries)
+#: and is re-read on every overview poll; the DB file changes on every commit,
+#: so a key mismatch safely invalidates. Bounded: one entry per project DB.
+#: Callers MUST treat the returned dict as read-only (no in-place mutation).
+_MANIFEST_CACHE: dict[str, tuple[tuple[int, int], dict]] = {}
+_MANIFEST_CACHE_LOCK = threading.Lock()
+_MANIFEST_CACHE_MAX = 32
+
 
 class StorageBusyError(BlockingIOError):
     """Another local process owns the requested workflow lock."""
@@ -97,6 +106,13 @@ class SqliteStorage:
                     "CREATE INDEX IF NOT EXISTS artifact_records_key "
                     "ON artifact_records(key, sequence)"
                 )
+                # Expression index for filtered event scans (job_review_id polls
+                # review events every 2.5s on the overview; without it SQLite
+                # evaluates json_extract over all 10k+ llm_usage rows).
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS artifact_records_event "
+                    "ON artifact_records(key, json_extract(value, '$.event'))"
+                )
                 conn.execute(
                     "CREATE TABLE IF NOT EXISTS chapter_statistics "
                     "(chapter_index INTEGER PRIMARY KEY, "
@@ -118,6 +134,13 @@ class SqliteStorage:
                 )
                 GlossaryStore.initialize_schema(conn)
                 conn.commit()
+            else:
+                # Existing database: idempotently add the event-expression index
+                # (new in this version; the creation block above only runs once).
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS artifact_records_event "
+                    "ON artifact_records(key, json_extract(value, '$.event'))"
+                )
         except BaseException:
             conn.close()
             raise
@@ -247,6 +270,20 @@ class SqliteStorage:
                 if self._lock_local.depths[".run.lock"] == 1:
                     self.close()
 
+    @contextmanager
+    def chapter_lock(self, chapter_index: int, blocking: bool = True) -> Iterator[None]:
+        """Serialize workers per chapter so different chapters translate in parallel."""
+        if not isinstance(chapter_index, int) or isinstance(chapter_index, bool):
+            raise ValueError("Invalid chapter index")
+        with self._file_lock(f".chapter-{chapter_index}.lock", blocking=blocking):
+            yield
+
+    @contextmanager
+    def curator_lock(self, blocking: bool = True) -> Iterator[None]:
+        """Serialize glossary-curator passes (max. one curator per project)."""
+        with self._file_lock(".curator.lock", blocking=blocking):
+            yield
+
     def assemble_lock(self):
         return self._file_lock(".assemble.lock")
 
@@ -341,7 +378,15 @@ class SqliteStorage:
             ]
 
     def exists(self) -> bool:
-        return isinstance(self.read_artifact("manifest.json"), dict)
+        """Check initialization without parsing the multi-MB manifest blob."""
+        key = self._key("manifest.json")
+        with self._mutex:
+            if self._conn is None and not os.path.isfile(self.database_path):
+                return False
+            return (
+                self._connection().execute("SELECT 1 FROM artifacts WHERE key=?", (key,)).fetchone()
+                is not None
+            )
 
     def begin_initialization(self, source_hash: str) -> None:
         if not re.fullmatch(r"[0-9a-f]{64}", source_hash):
@@ -413,8 +458,11 @@ class SqliteStorage:
         return actual
 
     def create_export_snapshot(self, *, actual_sha256: str) -> ExportSnapshotStore:
+        import copy
+
         with self._read_lock():
-            manifest = self.load_manifest()
+            # Deep copy: the snapshot owns its manifest; load_manifest is shared.
+            manifest = copy.deepcopy(self.load_manifest())
             RunStore._validate_source_identity(manifest, actual_sha256)
             entries = manifest.get("chapters")
             if not isinstance(entries, list):
@@ -436,16 +484,42 @@ class SqliteStorage:
 
     def save_manifest(self, manifest: dict) -> None:
         self.write_artifact("manifest.json", manifest)
+        with _MANIFEST_CACHE_LOCK:
+            _MANIFEST_CACHE.pop(self.database_path, None)
 
     def load_manifest(self) -> dict:
+        """Load the manifest, served from a mtime-keyed process cache.
+
+        Cache hits return the SHARED cached object - readers must NOT mutate
+        it in place. Callers that modify before saving (set_chapter_*) take
+        their own deep copy. `save_manifest` invalidates the entry.
+        """
+        try:
+            st = os.stat(self.database_path)
+            key = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+        if key is not None:
+            with _MANIFEST_CACHE_LOCK:
+                hit = _MANIFEST_CACHE.get(self.database_path)
+                if hit is not None and hit[0] == key:
+                    return hit[1]
         manifest = self.read_artifact("manifest.json")
         if manifest is None:
             raise FileNotFoundError(f"Translation state is not initialized: {self.database_path}")
+        if key is not None:
+            with _MANIFEST_CACHE_LOCK:
+                if len(_MANIFEST_CACHE) >= _MANIFEST_CACHE_MAX:
+                    _MANIFEST_CACHE.pop(next(iter(_MANIFEST_CACHE)), None)
+                _MANIFEST_CACHE[self.database_path] = (key, manifest)
         return manifest
 
     def set_chapter_status(self, ci: int, status: str) -> None:
+        import copy
+
         with self.state_lock():
-            manifest = self.load_manifest()
+            # Deep copy: load_manifest returns the shared cached object.
+            manifest = copy.deepcopy(self.load_manifest())
             for chapter in manifest["chapters"]:
                 if chapter["index"] == ci:
                     chapter["status"] = status
@@ -460,8 +534,11 @@ class SqliteStorage:
         ]
 
     def set_chapter_review_status(self, ci: int, status: str) -> None:
+        import copy
+
         with self.state_lock():
-            manifest = self.load_manifest()
+            # Deep copy: load_manifest returns the shared cached object.
+            manifest = copy.deepcopy(self.load_manifest())
             for chapter in manifest["chapters"]:
                 if chapter["index"] == ci:
                     chapter["review_status"] = status
@@ -692,7 +769,10 @@ class SqliteStorage:
             if value is None:
                 raise FileNotFoundError(f"Chapter not found: {ci}")
             chapter = Chapter.model_validate(value)
-            manifest = self.read_artifact("manifest.json") or {}
+            try:
+                manifest = self.load_manifest()
+            except FileNotFoundError:
+                manifest = {}
             entry = next(
                 (entry for entry in manifest.get("chapters", []) if entry["index"] == ci), {}
             )
@@ -802,10 +882,10 @@ class SqliteStorage:
     def completed_batch_glossary_keys(self, chapter: int) -> set[str]:
         return {
             self.batch_glossary_key(row["start_index"], row["count"])
-            for row in self.list_events(event_type="batch_glossary_extracted", limit=0)
-            if row.get("chapter") == chapter
-            and isinstance(row.get("start_index"), int)
-            and isinstance(row.get("count"), int)
+            for row in self.list_events(
+                event_type="batch_glossary_extracted", chapter=chapter, limit=0
+            )
+            if isinstance(row.get("start_index"), int) and isinstance(row.get("count"), int)
         }
 
     def log_event(self, event: str, **data: Any) -> None:
@@ -818,21 +898,30 @@ class SqliteStorage:
             },
         )
 
-    def list_events(self, *, event_type: str | None = None, limit: int = 200) -> list[dict]:
+    def list_events(
+        self,
+        *,
+        event_type: str | None = None,
+        chapter: int | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
         with self._mutex:
             if self._conn is None and not os.path.isfile(self.database_path):
                 return []
-            rows = (
-                self._connection()
-                .execute(
-                    """SELECT sequence,value FROM artifact_records
-                WHERE key='events.jsonl'
-                  AND (? IS NULL OR json_extract(value, '$.event')=?)
-                ORDER BY sequence DESC LIMIT ?""",
-                    (event_type, event_type, limit or -1),
-                )
-                .fetchall()
-            )
+            # Separate queries: the `? IS NULL OR expr=?` form prevents SQLite
+            # from using the artifact_records_event expression index.
+            query = """SELECT sequence,value FROM artifact_records
+                WHERE key='events.jsonl'"""
+            args: list = []
+            if event_type is not None:
+                query += "\n                  AND json_extract(value, '$.event')=?"
+                args.append(event_type)
+            if chapter is not None:
+                query += "\n                  AND json_extract(value, '$.chapter')=?"
+                args.append(chapter)
+            query += "\n                ORDER BY sequence DESC LIMIT ?"
+            args.append(limit or -1)
+            rows = self._connection().execute(query, args).fetchall()
         result = []
         for sequence, value in reversed(rows):
             record = json.loads(value)
@@ -872,6 +961,10 @@ class SqliteStorage:
     def resolve_term(self, source: str, target: str) -> bool:
         with self.state_lock():
             return self._glossary().resolve_term(source, target)
+
+    def set_term_mentions(self, source: str, count: int) -> None:
+        with self.state_lock():
+            self._glossary().set_mentions(source, count)
 
     def delete_term(self, source: str) -> bool:
         with self.state_lock():

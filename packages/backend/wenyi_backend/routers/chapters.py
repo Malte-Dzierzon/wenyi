@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException
@@ -145,7 +146,8 @@ def update_chapter_title(pid: str, ci: int, body: ChapterTitleUpdate) -> dict:
         if not storage.exists():
             raise HTTPException(409, "Prepare the book before editing chapter titles")
         with storage.state_lock():
-            manifest = storage.load_manifest()
+            # Deep copy: load_manifest returns the shared cached object.
+            manifest = copy.deepcopy(storage.load_manifest())
             chapter = next(
                 (row for row in manifest.get("chapters", []) if row["index"] == ci), None
             )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from wenyi_core.assemble.report import build_report
+from wenyi_core.assemble.report import build_report, build_summary
 from wenyi_core.srt.store import SrtRunStore
 
 from ..project_service import project_write, require_project, storage_for
@@ -33,7 +33,22 @@ def _report(project: dict, storage) -> dict:
 
 
 @router.get("")
-def get_report(pid: str) -> dict:
+def get_report(pid: str, summary_only: bool = False) -> dict:
+    """Full report, or only the summary counts when `summary_only` is set.
+
+    The native overview renders just the five summary numbers; the full
+    report loads every done chapter body plus usage/timing ledgers.
+    """
+    if summary_only:
+        project = require_project(pid)
+        storage = storage_for(pid)
+        try:
+            with storage.state_lock():
+                if project.get("fmt") == "srt":
+                    return _report(project, storage)
+                return build_summary(storage, storage)
+        finally:
+            storage.close()
     return _report(require_project(pid), storage_for(pid))
 
 

@@ -9,6 +9,42 @@ from ..pipeline.runstore import STATUS_DONE
 from ..storage.protocol import Storage
 
 
+def build_summary(store: Storage, glossary: Storage | GlossaryStore) -> dict[str, Any]:
+    """Build only the report summary counts, without loading chapter bodies.
+
+    `empty_targets` is derived from the compact chapter_statistics table
+    (word_count - target_word_count over done chapters) instead of scanning
+    every segment of every done chapter. This matches the full scan except
+    for blank-string targets (whitespace-only), which the statistics count
+    as translated. The native overview only renders these five numbers.
+    """
+    m = store.load_manifest()
+    chapters_total = len(m["chapters"])
+    done = {c["index"] for c in m["chapters"] if c["status"] == STATUS_DONE}
+    empty_targets = 0
+    stats_fn = getattr(store, "chapter_statistics", None)
+    if callable(stats_fn):
+        for row in stats_fn():
+            if row["index"] in done:
+                empty_targets += int(row["word_count"]) - int(row["target_word_count"])
+    else:  # Storage without statistics table: fall back to the segment scan.
+        for c in m["chapters"]:
+            if c["index"] not in done:
+                continue
+            ch = store.load_chapter(c["index"])
+            empty_targets += sum(1 for s in ch.text_segments if not (s.target and s.target.strip()))
+    gstats = glossary.stats()
+    return {
+        "summary": {
+            "chapters_total": chapters_total,
+            "chapters_done": len(done),
+            "terms": gstats["terms"],
+            "open_conflicts": gstats["open_conflicts"],
+            "empty_targets": empty_targets,
+        },
+    }
+
+
 def build_report(store: Storage, glossary: Storage | GlossaryStore) -> dict[str, Any]:
     """Summarize progress, empty translations, glossary conflicts and the latest review."""
     m = store.load_manifest()
