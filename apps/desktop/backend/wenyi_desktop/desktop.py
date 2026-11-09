@@ -32,6 +32,44 @@ def default_workspace() -> Path:
     return base / "Wenyi Desktop"
 
 
+def reap_orphaned_sidecar(workspace: Path) -> None:
+    """Kill a previous sidecar whose UI died without shutdown.
+    The workspace lock file holds the owner's PID; a live PID that is
+    still a wenyi sidecar gets SIGTERM (graceful checkpoint flush via
+    its own lifespan) then SIGKILL. Anything else is left alone.
+    """
+    import signal
+    import time
+
+    try:
+        pid = int((workspace / ".desktop.lock").read_text().strip())
+    except (OSError, ValueError):
+        return
+    if pid <= 0 or pid == os.getpid():
+        return
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            cmdline = handle.read().decode("latin1")
+    except OSError:
+        return  # PID is dead; lock will be free.
+    if "wenyi_desktop" not in cmdline and "wenyi-engine" not in cmdline:
+        return  # PID recycled by an unrelated process; never touch it.
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return
+    for _ in range(100):  # 10s grace for checkpoint flush.
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.1)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
 class LocalBoundary:
     """Reject DNS rebinding and foreign browser origins, including WebSockets."""
 
@@ -116,9 +154,11 @@ def main() -> None:
     args = parser.parse_args()
     if not os.environ.get("WENYI_API_TOKEN"):
         parser.error("WENYI_API_TOKEN must be supplied by the desktop parent")
+    workspace = args.data_dir or default_workspace()
+    reap_orphaned_sidecar(workspace)
     protocol_stream = sys.stdout
     sys.stdout = sys.stderr
-    asyncio.run(serve(args.data_dir or default_workspace(), protocol_stream))
+    asyncio.run(serve(workspace, protocol_stream))
 
 
 if __name__ == "__main__":

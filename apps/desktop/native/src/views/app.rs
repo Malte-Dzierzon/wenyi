@@ -399,6 +399,39 @@ impl App {
     }
 }
 
+impl Drop for App {
+    fn drop(&mut self) {
+        // Window closed: pause running work first so the worker exits at
+        // the next checkpoint with a clean `paused` status instead of
+        // `pausing` stuck mid-batch; then signal shutdown synchronously
+        // (a few ms, never lost) and let the 30s grace wait run on a
+        // background thread so the UI exits immediately. The sidecar
+        // enforces its own checkpoint deadline + watchdog; orphans are
+        // reaped on relaunch.
+        if let Some(client) = self.client.clone() {
+            // Best-effort, bounded: never hold the close path hostage.
+            let _ = std::thread::scope(|s| {
+                s.spawn(|| {
+                    crate::client::block_on(async {
+                        let projects = client.list_projects().await.unwrap_or_default();
+                        for p in projects.iter().filter(|p| {
+                            crate::client::is_project_busy(p.status.as_str())
+                        }) {
+                            let _ = client.pause(&p.id).await;
+                        }
+                    })
+                });
+            });
+        }
+        if let Some(mut backend) = self._backend.take() {
+            backend.signal_shutdown();
+            std::thread::spawn(move || {
+                backend.wait_for_exit(std::time::Duration::from_secs(30));
+            });
+        }
+    }
+}
+
 impl Render for App {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Keep the OS chrome in sync with the web title.

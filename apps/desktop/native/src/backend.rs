@@ -148,10 +148,24 @@ impl Backend {
     }
 
     pub fn shutdown(&mut self) {
+        self.signal_shutdown();
+        self.wait_for_exit(Duration::from_secs(30));
+    }
+
+    /// Send the shutdown command without waiting (returns immediately).
+    /// The sidecar flushes checkpoints on its own deadline + watchdog;
+    /// use when the UI must exit now (window close under load).
+    pub fn signal_shutdown(&mut self) {
         if let Some(mut input) = self.child.stdin.take() {
             let _ = input.write_all(b"{\"command\":\"shutdown\"}\n");
+            // EOF (drop) also triggers the sidecar's watch_parent loop.
         }
-        let until = Instant::now() + Duration::from_secs(30);
+    }
+
+    /// Wait bounded for exit, then kill. Split from `shutdown` so callers
+    /// can signal synchronously (never lost) and wait on a thread.
+    pub fn wait_for_exit(&mut self, grace: Duration) {
+        let until = Instant::now() + grace;
         while Instant::now() < until {
             if self.exited() {
                 return;

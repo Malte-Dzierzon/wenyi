@@ -72,6 +72,15 @@ class WorkspaceLock:
                 "This Desktop workspace is already open or cannot be locked."
             ) from error
         self._handle = handle
+        # Record the owner PID so a relaunch can reap an orphaned sidecar
+        # whose UI died without shutdown (window killed, crash).
+        try:
+            handle.seek(0)
+            handle.truncate()
+            handle.write(str(os.getpid()).encode())
+            handle.flush()
+        except OSError:
+            pass
 
     def close(self) -> None:
         handle, self._handle = self._handle, None
@@ -438,7 +447,24 @@ class LocalRuntime:
                     queue.task_done()
             for task in tuple(self._active.values()):
                 self._cancel(task)
-            await asyncio.gather(*tuple(self._active.values()), return_exceptions=True)
+            # Bounded checkpoint flush: a worker mid-batch (LLM call, retry
+            # backoff, glossary scan) would otherwise hold shutdown for
+            # minutes. Checkpoints persist per batch; losing at most one
+            # in-flight batch is safe (startup recovery replays it).
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tuple(self._active.values()), return_exceptions=True),
+                    timeout=15,
+                )
+            except asyncio.TimeoutError:
+                for job in self.backend.all_jobs():
+                    if job["status"] in {"queued", "running"}:
+                        log.warning(
+                            "Shutdown deadline hit; job %s (%s) replays on next launch",
+                            job["id"],
+                            job["kind"],
+                        )
+                        break
             for _ in range(self.WORKFLOW_CONSUMERS):
                 self.workflow_queue.put_nowait(None)
             for _ in range(self.EXPORT_CONSUMERS):
