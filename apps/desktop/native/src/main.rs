@@ -7,6 +7,8 @@
 mod backend;
 mod client;
 #[cfg(test)]
+mod contract_tests;
+#[cfg(test)]
 mod sidecar_tests;
 mod nav;
 mod theme;

@@ -1275,3 +1275,38 @@ pub struct GlobalConfigOut {
     pub default_template: String,
     pub revision: i64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seeded_client_with_list() -> Client {
+        let client = Client::new("http://127.0.0.1:9".into(), "t".into());
+        if let Ok(mut cache) = client.cache.lock() {
+            cache.project_list = Some(Cached::fresh(vec![]));
+        }
+        client
+    }
+
+    #[test]
+    fn invalidate_project_clears_project_list() {
+        let client = seeded_client_with_list();
+        client.invalidate_project("proj-1");
+        let cache = client.cache.lock().unwrap();
+        assert!(cache.project_list.is_none());
+        assert!(cache.projects.get("proj-1").is_none());
+    }
+
+    #[test]
+    fn urlencode_leaves_unreserved_and_escapes_rest() {
+        assert_eq!(urlencode("abc-_.~z9"), "abc-_.~z9");
+        assert_eq!(urlencode("a b/c"), "a%20b%2Fc");
+    }
+
+    #[test]
+    fn pid_from_path_extracts_pid() {
+        assert_eq!(Client::pid_from_path("/projects/abc/chapters"), Some("abc"));
+        assert_eq!(Client::pid_from_path("/projects"), None);
+        assert_eq!(Client::pid_from_path("/projects/"), None);
+    }
+}
