@@ -419,14 +419,12 @@ impl GlossaryView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let (terms, conflicts, project) = block_on(async {
-                        tokio::join!(
-                            client.list_terms(&pid, None, None),
-                            client.list_conflicts(&pid),
-                            client.get_project(&pid),
-                        )
-                    });
-                    Ok::<_, crate::client::Error>((terms?, conflicts?, project?.project.status))
+                    // Sequential, not join!: terms/conflicts/project render
+                    // independently; one hanging endpoint must not blank all.
+                    let terms = block_on(client.list_terms(&pid, None, None))?;
+                    let conflicts = block_on(client.list_conflicts(&pid))?;
+                    let project = block_on(client.get_project(&pid))?;
+                    Ok::<_, crate::client::Error>((terms, conflicts, project.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut GlossaryView, cx| {

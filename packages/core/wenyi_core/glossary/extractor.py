@@ -48,6 +48,8 @@ class GlossaryExtractor(Agent):
         self._recurrence_corpus: str | None = None
         self._recurrence_matcher: GlossaryOccurrenceMatcher | None = None
         self._recurrence_cache: dict[tuple[str, str, tuple[str, ...]], bool] = {}
+        self._occurrence_history: list[TranslatedSegmentEvidence] | None = None
+        self._occurrence_index: dict[str, TranslatedSegmentEvidence] = {}
 
     def _recurring_existing_terms(
         self,
@@ -120,8 +122,8 @@ class GlossaryExtractor(Agent):
             )
         return terms
 
-    @staticmethod
     def _first_occurrences(
+        self,
         terms: list[GlossaryTerm],
         store: Storage | GlossaryStore,
         history: Iterable[TranslatedSegmentEvidence],
@@ -129,22 +131,37 @@ class GlossaryExtractor(Agent):
     ) -> dict[str, TranslatedSegmentEvidence]:
         """Find the first translated paragraph before the given position for terms not yet
         stored.
+
+        Caches the sorted history and per-term hits across batches of one run:
+        without this, every batch re-sorts 10k+ segments and re-runs regex
+        matching for the same pending sources (single-core hotloop on resume).
         """
         pending = {term.source for term in terms if store.get_term(term.source) is None}
         if not pending:
             return {}
-
+        ordered = list(history)
+        if self._occurrence_history is None or len(ordered) != len(self._occurrence_history):
+            self._occurrence_history = sorted(ordered, key=lambda item: (item.chapter, item.segment))
+            self._occurrence_index.clear()
+        ordered_history = self._occurrence_history
         first: dict[str, TranslatedSegmentEvidence] = {}
-        ordered_history = sorted(history, key=lambda item: (item.chapter, item.segment))
-        matchers = {source: TermMatcher([source]) for source in pending}
+        for source in pending:
+            cached = self._occurrence_index.get(source)
+            if cached is not None and (cached.chapter, cached.segment) < before:
+                first[source] = cached
+        remaining = pending - set(first)
+        if not remaining:
+            return first
+        matchers = {source: TermMatcher([source]) for source in remaining}
         for evidence in ordered_history:
             if (evidence.chapter, evidence.segment) >= before:
                 continue
-            for source in pending:
+            for source in remaining:
                 if source in first:
                     continue
                 if matchers[source].matches(evidence.source):
                     first[source] = evidence
+                    self._occurrence_index[source] = evidence
             if len(first) == len(pending):
                 break
         return first

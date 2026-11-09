@@ -16,6 +16,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from ..i18n.metadata import normalize_gender, normalize_term_type
@@ -335,13 +336,26 @@ class GlossaryStore:
 
     @classmethod
     def load_terms_readonly(cls, db_path: str) -> list[GlossaryTerm]:
-        """Read terms from a temporary snapshot without touching the formal database or its WAL
-        files.
-        immutable=1 avoids creating shm but ignores committed, uncheckpointed WAL data. Copy
-        the database and existing WAL to a temporary directory and let SQLite recover the
-        complete view there. Any resulting shm files or checkpoints remain outside formal
-        book state.
+        """Read terms without touching the database or its WAL files.
+        Opens read-only against the live WAL (sees committed data, writes
+        nothing, creates no shm sidecar in the book directory). Falls back
+        to the copy-snapshot only when the live WAL cannot be read.
         """
+        try:
+            uri = Path(db_path).as_uri() + "?mode=ro"
+            conn = sqlite3.connect(uri, uri=True, timeout=5)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("PRAGMA query_only = ON")
+                # Insertion order (rowid), not type/source sorting: inserting
+                # a new term in the middle would shift the remaining prompt
+                # glossary and invalidate prefix caches.
+                rows = conn.execute("SELECT * FROM glossary ORDER BY rowid").fetchall()
+                return [GlossaryTerm.from_row(row) for row in rows]
+            finally:
+                conn.close()
+        except sqlite3.OperationalError:
+            pass
         with tempfile.TemporaryDirectory(prefix="wenyi-glossary-review-") as directory:
             snapshot_path = f"{directory}/glossary.db"
             wal_path = f"{db_path}-wal"
@@ -378,8 +392,6 @@ class GlossaryStore:
             conn = sqlite3.connect(snapshot_path)
             conn.row_factory = sqlite3.Row
             try:
-                # Return insertion order (rowid), not type/source sorting: inserting a new term in the middle
-                # would shift the remaining prompt glossary and invalidate prefix caches.
                 rows = conn.execute("SELECT * FROM glossary ORDER BY rowid").fetchall()
                 return [GlossaryTerm.from_row(row) for row in rows]
             finally:

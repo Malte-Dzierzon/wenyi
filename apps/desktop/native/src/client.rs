@@ -82,8 +82,14 @@ pub enum Error {
 
 impl Client {
     pub fn new(api_base: String, token: String) -> Self {
+        // Local sidecar: 30s hard cap so no view freezes forever when
+        // the backend is wedged (measured: glossary hung 15s+ mid-run).
+        let inner = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            inner: reqwest::Client::new(),
+            inner,
             api_base: api_base.trim_end_matches('/').to_string(),
             token,
             cache: Arc::new(Mutex::new(CacheStore::default())),

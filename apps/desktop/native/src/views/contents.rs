@@ -81,10 +81,11 @@ impl ContentsView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let (chapters, project) = block_on(async {
-                        tokio::join!(client.list_chapters(&pid), client.get_project(&pid),)
-                    });
-                    Ok::<_, crate::client::Error>((chapters?, project?.project.status))
+                    // Sequential, not join!: if one endpoint hangs, the other
+                    // still renders instead of both failing together.
+                    let chapters = block_on(client.list_chapters(&pid))?;
+                    let project = block_on(client.get_project(&pid))?;
+                    Ok::<_, crate::client::Error>((chapters, project.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut ContentsView, cx| {
