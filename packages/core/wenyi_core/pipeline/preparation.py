@@ -299,6 +299,44 @@ class PreparationService:
             self._rebuild_analysis(store, manifest)
         return manifest
 
+    def refresh_analysis(
+        self, store: Storage, *, progress: ProgressFn | None = None
+    ) -> dict[str, Any]:
+        """Re-run style analysis + synopsis on current source; preserve user edits.
+        Only keys the user never touched (absent from analysis) are rewritten;
+        edited voice/guide/synopsis stay. Returns the merged analysis.
+        """
+        manifest = store.load_manifest()
+        chapters = [store.load_chapter(row["index"]) for row in manifest.get("chapters", [])]
+        document = Document(
+            title=manifest.get("title", ""),
+            source_lang=self._runtime.config.source_lang,
+            target_lang=self._runtime.config.target_lang,
+            fmt=manifest.get("fmt", "text"),
+            chapters=chapters,
+        )
+        if progress:
+            progress(0, 3, "Re-analyzing book style…")
+        fresh = self._runtime.analyzer.analyze(self.sample_text(document))
+        current = store.load_analysis() or {}
+        for key, value in fresh.items():
+            if key not in current:
+                current[key] = value
+        current["style_policy"] = self._runtime.config.language_policy("analysis").task_fingerprint(
+            "analyzer"
+        )
+        current["language_policy"] = (
+            f"language-policies/{self._runtime.config.language_policy('analysis').fingerprint}.json"
+        )
+        store.save_analysis(current)
+        if progress:
+            progress(2, 3, "Refreshing synopsis…")
+        self.ensure_understanding(store, progress=progress)
+        store.log_event("analysis_refreshed")
+        if progress:
+            progress(3, 3, "Analysis refreshed")
+        return store.load_analysis() or {}
+
     def _rebuild_analysis(self, store: Storage, manifest: dict[str, Any]) -> None:
         """Refresh built-in guidance while preserving formal targets and glossary."""
         chapters = [store.load_chapter(row["index"]) for row in manifest["chapters"]]
@@ -503,9 +541,7 @@ class PreparationService:
                             )
                         else:
                             failed.append(ci)
-                            store.log_event(
-                                "book_understanding_chapter_digest_failed", chapter=ci
-                            )
+                            store.log_event("book_understanding_chapter_digest_failed", chapter=ci)
                         if progress:
                             progress(done_count, len(todo), "Prescanning chapter digests")
                 except FutureTimeoutError:

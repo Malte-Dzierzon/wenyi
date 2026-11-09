@@ -129,6 +129,9 @@ def _book_operation(kind, pid, storage, config, client, progress, params):
     if kind == "glossary_curator":
         orch.run_curator(source, progress=progress)
         return "curated"
+    if kind == "refresh_analysis":
+        orch.refresh_analysis(source, progress=progress)
+        return "prepared"
     steps = {"translate", "report"}
     if config.pipeline.review:
         steps.add("review")
@@ -220,6 +223,7 @@ def lane_lock_for_job(storage, kind: str, params: dict, *, blocking: bool = True
     if lane is not None:
         return storage.chapter_lock(lane, blocking=blocking)
     return storage.lock(blocking=blocking)
+
 
 def _superseded(pid: str, current: dict, lane: int | str | None) -> bool:
     """True when a newer active job supersedes `current` on the same lane.
@@ -446,6 +450,11 @@ async def run_srt(ctx, *, project_id: str, run_id: str | None = None, **params):
 @_worker_entry
 async def run_glossary_curator(ctx, *, project_id: str, run_id: str | None = None, **params):
     await _run("glossary_curator", project_id, run_id, params)
+
+
+@_worker_entry
+async def run_refresh_analysis(ctx, *, project_id: str, run_id: str | None = None, **params):
+    await _run("refresh_analysis", project_id, run_id, params)
 
 
 def _render_export_sync(

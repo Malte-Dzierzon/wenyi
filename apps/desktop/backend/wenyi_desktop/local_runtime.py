@@ -37,6 +37,7 @@ TASK_NAMES = frozenset(
         "run_srt",
         "run_export",
         "run_glossary_curator",
+        "run_refresh_analysis",
     }
 )
 

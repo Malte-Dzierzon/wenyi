@@ -18,6 +18,7 @@ TASK_FUNCTIONS = {
     "review": "run_review",
     "srt": "run_srt",
     "glossary_curator": "run_glossary_curator",
+    "refresh_analysis": "run_refresh_analysis",
 }
 TASK_STATUSES = {
     "parse": "parsing",
@@ -27,6 +28,7 @@ TASK_STATUSES = {
     "review": "reviewing",
     "srt": "translating",
     "glossary_curator": "curating",
+    "refresh_analysis": "preparing",
 }
 
 

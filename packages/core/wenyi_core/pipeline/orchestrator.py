@@ -186,6 +186,21 @@ class Orchestrator:
                     progress(stats["checked"], stats["checked"], "Glossary curation pass")
                 return {"store": store, **stats}
 
+    def refresh_analysis(
+        self,
+        input_path: str,
+        *,
+        progress: ProgressFn | None = None,
+    ) -> dict[str, Any]:
+        """Re-run style analysis + synopsis; user-edited keys are preserved."""
+        with self._runtime.track_workflow("refresh_analysis"):
+            store = self._preparation.locate_existing(input_path, progress=progress)
+            with store.lock():
+                self._preparation.activate(store)
+                analysis = self._preparation.refresh_analysis(store, progress=progress)
+                self._runtime.flush_usage(store, scope="refresh_analysis")
+            return {"store": store, "analysis": analysis}
+
     def run_review(
         self,
         input_path: str,

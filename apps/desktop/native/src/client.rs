@@ -586,6 +586,11 @@ impl Client {
         .await
     }
 
+    /// `POST /projects/{pid}/analysis/refresh` — re-run style analysis.
+    pub async fn refresh_analysis(&self, pid: &str) -> Result<serde_json::Value, Error> {
+        self.post(&format!("/projects/{pid}/analysis/refresh"), serde_json::json!({})).await
+    }
+
     // -- Subtitle ops (doc 18 §2 screen 10) --
 
     /// `GET …/subtitles` — mirrors `api.getSubtitles`.

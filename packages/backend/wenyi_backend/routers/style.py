@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..project_service import project_write, require_book, require_project, storage_for
-from ..schemas import AnalysisOut, AnalysisUpdate, DigestUpdate
+from ..schemas import AnalysisOut, AnalysisUpdate, DigestUpdate, JobEnqueued
 
 router = APIRouter(prefix="/projects/{pid}", tags=["style"])
 
@@ -34,6 +34,16 @@ def update_analysis(pid: str, body: AnalysisUpdate) -> dict:
         storage.save_analysis(body.analysis)
         storage.log_event("analysis_edited")
     return {"ok": True}
+
+
+@router.post("/analysis/refresh", response_model=JobEnqueued)
+async def refresh_analysis(pid: str) -> dict:
+    """Re-run style analysis + synopsis as a background job (book lane).
+    User-edited keys are preserved; only untouched keys refresh."""
+    from ..job_service import start_job
+
+    require_book(require_project(pid))
+    return await start_job(pid, "refresh_analysis")
 
 
 @router.put("/chapter-digests/{ci}")
