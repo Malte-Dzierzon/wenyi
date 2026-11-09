@@ -136,6 +136,18 @@ def _book_operation(kind, pid, storage, config, client, progress, params):
     return "done"
 
 
+def _set_curator_job_status(
+    run_id: str | None, status: str, error: BaseException | None = None
+) -> None:
+    """Record a curator outcome on its job row only.
+    Background curation never touches the project status: a looping model
+    would otherwise paint every project red every 5 minutes.
+    """
+    job = dal.get_job_by_arq_id(run_id) if run_id else None
+    if job:
+        dal.set_job_status(job["id"], status, error=str(error) if error else None)
+
+
 def _record_terminal_status(
     pid, run_id, error: BaseException | None = None, *, status="error", job_status=None
 ):
@@ -338,15 +350,27 @@ def _execute(
             storage.log_event("task_completed", kind=kind, run_id=run_id)
         # Publish completion only after telemetry and the project's run lock have exited.
         # Siblings still running keep the project status; this job is always done.
-        _record_terminal_status(pid, run_id, status=result_status, job_status="done")
+        if kind == "glossary_curator":
+            _set_curator_job_status(run_id, "done")
+        else:
+            _record_terminal_status(pid, run_id, status=result_status, job_status="done")
     except (KeyboardInterrupt, RequestCancelled):
-        _record_terminal_status(pid, run_id, status="paused")
+        if kind == "glossary_curator":
+            _set_curator_job_status(run_id, "interrupted")
+        else:
+            _record_terminal_status(pid, run_id, status="paused")
         storage.log_event("task_paused", kind=kind, run_id=run_id)
     except RequestStopped as error:
-        _record_terminal_status(pid, run_id, error, status="paused")
+        if kind == "glossary_curator":
+            _set_curator_job_status(run_id, "interrupted", error)
+        else:
+            _record_terminal_status(pid, run_id, error, status="paused")
         storage.log_event("task_paused", kind=kind, run_id=run_id, reason=str(error))
     except Exception as error:
-        _record_terminal_status(pid, run_id, error)
+        if kind == "glossary_curator":
+            _set_curator_job_status(run_id, "error", error)
+        else:
+            _record_terminal_status(pid, run_id, error)
         storage.log_event("pipeline_error", kind=kind, run_id=run_id, error=str(error))
         raise
     finally:

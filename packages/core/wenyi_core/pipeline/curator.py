@@ -178,7 +178,7 @@ class CuratorService(Agent):
         """Check up to `CURATOR_BATCH_SIZE` terms; return pass statistics."""
         from ..glossary.store import GlossaryTerm as Term
 
-        checked = verified = conflicts = 0
+        checked = verified = conflicts = skipped = 0
         started = time.monotonic()
         stop_requested = False
         for index, term in enumerate(terms[:CURATOR_BATCH_SIZE]):
@@ -194,7 +194,20 @@ class CuratorService(Agent):
             scanned = _scan_occurrences(term, chapters, history)
             store.set_term_mentions(term.source, len(scanned))
             occurrences = pick_excerpts(scanned, CURATOR_MAX_EVIDENCE)
-            verdict = self.check_term(term, occurrences, book_title=book_title)
+            try:
+                verdict = self.check_term(term, occurrences, book_title=book_title)
+            except Exception as error:
+                # One bad term (looping model, truncation, outage) must not
+                # kill the pass: skip it, log, continue with the next term.
+                skipped += 1
+                store.log_event(
+                    "curator_term_skipped",
+                    source=term.source,
+                    error_type=type(error).__name__,
+                    reason=str(error)[:200],
+                    elapsed_seconds=round(time.monotonic() - term_started, 1),
+                )
+                continue
             checked += 1
             if verdict.get("status") == "conflict":
                 conflicts += 1
@@ -224,6 +237,7 @@ class CuratorService(Agent):
             checked=checked,
             verified=verified,
             conflicts=conflicts,
+            skipped=skipped,
             elapsed_seconds=round(time.monotonic() - started, 1),
         )
-        return {"checked": checked, "verified": verified, "conflicts": conflicts}
+        return {"checked": checked, "verified": verified, "conflicts": conflicts, "skipped": skipped}

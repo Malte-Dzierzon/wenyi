@@ -92,7 +92,7 @@ class TestCuratorPass(unittest.TestCase):
                 term = GlossaryTerm(source="Klein", target="Klein")
                 store.upsert_term(term, 0)
                 stats = curator.run_pass(store, [term], [], {})
-                self.assertEqual(stats, {"checked": 1, "verified": 0, "conflicts": 1})
+                self.assertEqual(stats, {"checked": 1, "verified": 0, "conflicts": 1, "skipped": 0})
                 conflicts = store.open_conflicts()
                 self.assertEqual(len(conflicts), 1)
                 self.assertIn("curator:", conflicts[0].get("note", ""))
@@ -108,7 +108,7 @@ class TestCuratorPass(unittest.TestCase):
                 term = GlossaryTerm(source="Klein", target="Klein")
                 store.upsert_term(term, 0)
                 stats = curator.run_pass(store, [term], [], {})
-                self.assertEqual(stats, {"checked": 1, "verified": 1, "conflicts": 0})
+                self.assertEqual(stats, {"checked": 1, "verified": 1, "conflicts": 0, "skipped": 0})
                 self.assertEqual(store.open_conflicts(), [])
             finally:
                 store.close()
@@ -129,3 +129,28 @@ class TestCuratorPass(unittest.TestCase):
 
     def test_batch_size_bounds_pass(self):
         self.assertEqual(CURATOR_BATCH_SIZE, 20)
+
+    def test_failing_term_skips_and_pass_continues(self):
+        calls = []
+
+        def flaky(messages, tier, json_mode):
+            calls.append(messages)
+            if len(calls) == 1:
+                raise RuntimeError("looping model truncated")
+            return json.dumps({"status": "verified"})
+
+        client = FakeClient(handler=flaky)
+        curator = CuratorService(client, _cfg())
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            try:
+                terms = [GlossaryTerm(source=f"t{i}", target=f"t{i}") for i in range(3)]
+                stats = curator.run_pass(store, terms, [], {})
+                self.assertEqual(stats["checked"], 2)
+                self.assertEqual(stats["verified"], 2)
+                self.assertEqual(stats["skipped"], 1)
+                skipped = store.list_events(event_type="curator_term_skipped", limit=0)
+                self.assertEqual(len(skipped), 1)
+                self.assertEqual(skipped[0]["source"], "t0")
+            finally:
+                store.close()

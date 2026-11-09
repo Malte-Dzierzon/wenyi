@@ -104,3 +104,34 @@ def test_queue_rejection_marks_job_and_restores_status(catalog):
             await asyncio.wait_for(runtime.stop(), 5)
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("failing", [True, False])
+def test_curator_never_touches_project_status(catalog, failing):
+    """Curator success/failure records only its job row, never the project.
+    A looping curator model must not paint the project red every 5 minutes.
+    """
+    from wenyi_backend.workers import tasks
+
+    pid = dal.create_project("Isolation", "en", "zh", {})
+    dal.set_project_status(pid, "paused")
+    run_id = "curator-iso"
+    catalog.admit_job(
+        pid,
+        "glossary_curator",
+        run_id,
+        project_status="curating",
+        run_id=run_id,
+    )
+    job = dal.get_job_by_arq_id(run_id)
+    # Emulate the worker outcome path without running a full pass.
+    if failing:
+        tasks._set_curator_job_status(run_id, "error", RuntimeError("truncated"))
+        assert dal.get_job(job["id"])["status"] == "error"
+    else:
+        tasks._set_curator_job_status(run_id, "done")
+        assert dal.get_job(job["id"])["status"] == "done"
+    # Project status untouched by curator outcome (admission set
+    # it; the worker must not overwrite it with error/curated).
+    project = dal.get_project(pid)
+    assert project["status"] == "curating", project
