@@ -168,6 +168,8 @@ Replace `YOUR_EDITOR_MODEL` with a model supported by your endpoint. Other opera
 
 Compatible endpoints accept `reasoning_style: none` (default), `deepseek`, `openai`, or `openrouter`. `json_response_fallback: reasoning_content` is an explicit option for gateways placing JSON there; the default is `none`, and non-JSON reasoning is never accepted. Gemini thinking level and thinking budget are mutually exclusive. Raw extension dictionaries are endpoint-specific; offline validation cannot prove a remote model supports them.
 
+`opencode-go` always sends `reasoning_effort` (default `low`; `low`/`medium`/`high` accepted, `minimal`/`none` rejected by the gateway). Gateway reasoning models think even without the flag and burn the output budget on reasoning tokens — `low` measured 3x faster with 3x fewer tokens at equal quality on translation batches, and fixes curator truncation loops. Raise per model via `options: {reasoning_effort: medium}` when deep reasoning matters more than speed.
+
 Provider SDK retries are disabled. Wenyi retries transient connections/timeouts, HTTP 408/409/429 and 5xx responses, and empty responses through one shared policy. Retry backoff releases the connection permit and responds to cancellation. Ordinary 4xx errors are not retried. PDF's default MinerU import uses a separate `MINERU_API_KEY`; the optional BabelDOC HTTP bridge is independent of model routing.
 
 The global **MinerU PDF parsing** settings card is separate from model connections.
@@ -404,7 +406,7 @@ paths:
   state_dir: state
 ```
 
-- `max_tokens_per_batch`: source-token budget for one model translation request, counted with tiktoken `cl100k_base` (a universal estimator, not the live provider tokenizer).
+- `max_tokens_per_batch`: source-token budget for one model translation request, counted with tiktoken `cl100k_base` (a universal estimator, not the live provider tokenizer). Scale it to your smallest model: prompt overhead (synopsis, glossary, context, ~5k tokens) rides on top, so `batch + 5000 + max_output` must fit `max_input_tokens`. Large-context models (beam-free: millions) can take 8000+; local 8k models should stay at 1200-1800. Saving rejects batches that already exceed the smallest configured input limit.
 - `max_tokens_per_segment`: token threshold for splitting an exceptionally long source paragraph at sentence boundaries.
 - `honorific.strategy`: Japanese-source honorific policy: `keep_style`, `normalize`, or `drop`.
 - `state_dir`: location of book checkpoints, chapter files, the glossary database, usage data, and reports. Subtitle runs store a separate tree at `<state_dir>/srt/<slug>/targets/<target-language>/` (manifest, cues, batches, usage, events) and never create a glossary or review directory.

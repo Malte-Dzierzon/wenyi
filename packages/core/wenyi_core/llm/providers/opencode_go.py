@@ -8,7 +8,7 @@ compatibility notes.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,7 +30,7 @@ class OpenCodeGoOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     thinking: bool = False
-    reasoning_effort: str = "high"
+    reasoning_effort: Literal["low", "medium", "high"] = "low"
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -44,9 +44,11 @@ def build_request_kwargs(
     """Build Chat Completions arguments for the OpenCode Go gateway."""
     kwargs = base_request_kwargs(model_config.model, messages, json_mode=json_mode)
     extra_body = dict(model_config.options.extra_body)
-    if model_config.options.thinking:
-        # Keep optional thinking fields out of the default path; gateways vary.
-        extra_body.setdefault("reasoning_effort", model_config.options.reasoning_effort)
+    # Always cap reasoning: gateway models (beam-free) think by default and
+    # burn the output budget on reasoning tokens, truncating before the
+    # answer. Measured: low = 3x faster, 3x fewer tokens, same quality.
+    # Users can raise per model (low/medium/high).
+    extra_body.setdefault("reasoning_effort", model_config.options.reasoning_effort)
     if extra_body:
         kwargs["extra_body"] = deep_merge({}, extra_body)
     if max_tokens is not None:

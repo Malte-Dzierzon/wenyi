@@ -273,6 +273,36 @@ export function ProviderSettings({
                 }
                 onChange={(value) => update("models", id, { model: value })}
               />
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor={`max-input-${id}`}>Max input tokens (empty = no limit)</Label>
+                <Input
+                  id={`max-input-${id}`}
+                  type="number"
+                  min={1}
+                  value={model.max_input_tokens ?? ""}
+                  placeholder="e.g. 120000"
+                  onChange={(e) =>
+                    update("models", id, {
+                      max_input_tokens: e.target.value === "" ? null : Number(e.target.value),
+                    })
+                  }
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor={`max-output-${id}`}>Max output tokens (empty = default)</Label>
+                <Input
+                  id={`max-output-${id}`}
+                  type="number"
+                  min={1}
+                  value={model.max_output_tokens ?? ""}
+                  placeholder="e.g. 8192"
+                  onChange={(e) =>
+                    update("models", id, {
+                      max_output_tokens: e.target.value === "" ? null : Number(e.target.value),
+                    })
+                  }
+                />
+              </div>
             </div>
           );
         })}

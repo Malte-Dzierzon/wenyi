@@ -1326,6 +1326,17 @@ impl GlobalSettingsView {
                 Ok(v) if v >= 1 => serde_json::Value::from(v),
                 _ => return,
             },
+            "max_input_tokens" | "max_output_tokens" => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    match trimmed.parse::<i64>() {
+                        Ok(v) if v >= 1 => serde_json::Value::from(v),
+                        _ => return,
+                    }
+                }
+            }
             "base_url" | "api_key_env" => {
                 if value.is_empty() {
                     serde_json::Value::Null
@@ -1924,6 +1935,8 @@ impl GlobalSettingsView {
             refs: Vec<String>,
             conn_select: Entity<SelectState<Vec<String>>>,
             name_input: Entity<InputState>,
+            max_input: Entity<InputState>,
+            max_output: Entity<InputState>,
             rename: Entity<InputState>,
             fetching: bool,
             suggestions: Option<Vec<String>>,
@@ -1935,10 +1948,14 @@ impl GlobalSettingsView {
         for (id, model) in &models {
             let conn = model.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let name = model.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let max_in = model.get("max_input_tokens").and_then(|v| v.as_i64()).map(|v| v.to_string()).unwrap_or_default();
+            let max_out = model.get("max_output_tokens").and_then(|v| v.as_i64()).map(|v| v.to_string()).unwrap_or_default();
             let refs = registry_references(&self.effective, "models", id);
             rows.push(ModelRow {
                 conn_select: self.ensure_select(&format!("conn:{id}"), provider_ids.clone(), &conn, window, cx),
                 name_input: self.text_input(&format!("m:{id}:name"), name, window, cx),
+                max_input: self.text_input(&format!("m:{id}:max_input_tokens"), max_in, window, cx),
+                max_output: self.text_input(&format!("m:{id}:max_output_tokens"), max_out, window, cx),
                 rename: self.rename_input("models", id, window, cx),
                 fetching: self.fetching_models.contains(id),
                 suggestions: self.suggestions.get(id).cloned(),
@@ -2042,6 +2059,19 @@ impl GlobalSettingsView {
                                 div().flex_1().flex().flex_col().gap_1()
                                     .child("Model name")
                                     .child(Input::new(&row.name_input).disabled(form_disabled)),
+                            ),
+                    )
+                    .child(
+                        div().flex().gap_2()
+                            .child(
+                                div().flex_1().flex().flex_col().gap_1()
+                                    .child("Max input tokens (empty = no limit)")
+                                    .child(Input::new(&row.max_input).disabled(form_disabled)),
+                            )
+                            .child(
+                                div().flex_1().flex().flex_col().gap_1()
+                                    .child("Max output tokens (empty = operation default)")
+                                    .child(Input::new(&row.max_output).disabled(form_disabled)),
                             ),
                     );
                 // Suggestions (mirrors ModelNameField fetch).

@@ -201,6 +201,26 @@ class Config(BaseModel):
         )
         return self
 
+    @model_validator(mode="after")
+    def validate_batch_fits_model_limits(self) -> Config:
+        """Reject batch sizes that cannot fit the smallest configured input limit.
+        Prompt overhead (synopsis, glossary, context) rides on top of the
+        batch; if the bare batch already exceeds a model's input window,
+        every call to that model fails. Models without limits opt out.
+        """
+        limits = [
+            model.max_input_tokens
+            for model in self.llm.models.values()
+            if model.max_input_tokens is not None
+        ]
+        if limits and self.segment.max_tokens_per_batch >= min(limits):
+            raise ValueError(
+                f"max_tokens_per_batch={self.segment.max_tokens_per_batch} does not fit "
+                f"the smallest model input limit ({min(limits)} tokens); lower the "
+                "batch size or raise the model limit"
+            )
+        return self
+
     def language_policy(
         self,
         phase: Phase = "translation",

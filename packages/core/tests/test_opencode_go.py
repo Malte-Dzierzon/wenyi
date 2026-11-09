@@ -59,6 +59,30 @@ class TestOpenCodeGoProvider(unittest.TestCase):
         )
         self.assertEqual(headers["x-opencode-session"], client._session_id)
 
+    def test_reasoning_effort_defaults_low_and_always_sent(self):
+        from wenyi_core.llm.providers.opencode_go import (
+            OpenCodeGoOptions,
+            build_request_kwargs,
+        )
+        from wenyi_core.llm.transport import ResolvedModel
+
+        model = ResolvedModel("beam-free", OpenCodeGoOptions())
+        kwargs = build_request_kwargs(model, [{"role": "user", "content": "hi"}])
+        self.assertEqual(kwargs["extra_body"]["reasoning_effort"], "low")
+        raised = OpenCodeGoOptions(reasoning_effort="high")
+        kwargs = build_request_kwargs(
+            ResolvedModel("beam-free", raised), [{"role": "user", "content": "hi"}]
+        )
+        self.assertEqual(kwargs["extra_body"]["reasoning_effort"], "high")
+
+    def test_reasoning_effort_rejects_unsupported_values(self):
+        from pydantic import ValidationError
+        from wenyi_core.llm.providers.opencode_go import OpenCodeGoOptions
+
+        for bad in ("minimal", "none", "ultra"):
+            with self.assertRaises(ValidationError):
+                OpenCodeGoOptions(reasoning_effort=bad)
+
 
 if __name__ == "__main__":
     unittest.main()

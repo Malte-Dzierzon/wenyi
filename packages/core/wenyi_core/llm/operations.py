@@ -127,7 +127,7 @@ OPERATIONS = register_operations(
             "glossary.curate",
             "Review one glossary term against book evidence",
             "cheap",
-            output_tokens=1024,
+            output_tokens=2048,
         ),
         OperationSpec(
             "annotation.align",
