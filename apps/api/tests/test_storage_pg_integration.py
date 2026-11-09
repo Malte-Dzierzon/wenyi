@@ -57,7 +57,7 @@ def test_precision_candidates_and_guarded_publication_use_backend_storage(storag
     assert saved.resource_href == "chapter.xhtml"
     assert executor.execute(plan, storage) == result
     assert len(client.calls) == 4
-    assert all(call["max_tokens"] is None for call in client.calls)
+    assert all(call["max_tokens"] == 8192 for call in client.calls)
     if isinstance(storage, PostgresStorage):
         assert not Path(storage.run_dir, "precision").exists()
 
