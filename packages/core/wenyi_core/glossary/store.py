@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS glossary (
 """
 
 
-def _ensure_mentions_column(conn: sqlite3.Connection) -> None:
+def ensure_mentions_column(conn: sqlite3.Connection) -> None:
     """Add the mentions counter to pre-existing tables (idempotent)."""
     columns = {row[1] for row in conn.execute("PRAGMA table_info(glossary)")}
     if "mentions" not in columns:
@@ -307,7 +307,7 @@ class GlossaryStore:
         self.conn.execute("PRAGMA busy_timeout = 5000")
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(_SCHEMA)
-        _ensure_mentions_column(self.conn)
+        ensure_mentions_column(self.conn)
         self.conn.commit()
         self._owns_connection = True
 
@@ -325,7 +325,8 @@ class GlossaryStore:
         for statement in _SCHEMA.split(";"):
             if statement.strip():
                 conn.execute(statement)
-        _ensure_mentions_column(conn)
+        ensure_mentions_column(conn)
+
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from ..glossary.store import GlossaryStore, GlossaryTerm
+from ..glossary.store import GlossaryStore, GlossaryTerm, ensure_mentions_column
 from ..ingest.models import Chapter, Document
 from ..pipeline.runstore import ExportSnapshotStore, RunStore, source_sha256
 from .protocol import STATUS_DONE, STATUS_PENDING
@@ -141,6 +141,9 @@ class SqliteStorage:
                     "CREATE INDEX IF NOT EXISTS artifact_records_event "
                     "ON artifact_records(key, json_extract(value, '$.event'))"
                 )
+                # Idempotently add the curator mentions counter to
+                # pre-existing glossaries (same helper as fresh databases).
+                ensure_mentions_column(conn)
         except BaseException:
             conn.close()
             raise

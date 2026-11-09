@@ -756,3 +756,30 @@ def test_manifest_title_edit_reload_and_export_snapshot(store, document, cleared
     assert "title_translated" not in cleared_snapshot.load_chapter(3).meta
     assert store.chapter_statistics()[0]["title_translated"] is None
     assert snapshot.load_chapter(3).meta["title_translated"] == "Manual title"
+
+
+def test_existing_database_gains_mentions_column_on_open(tmp_path):
+    """Pre-mentions glossaries migrate on open; curator writes must not fail.
+    Regression: the migration ran only for fresh databases, crashing live
+    polling with 'no such column: mentions'.
+    """
+    import sqlite3
+
+    run_dir = str(tmp_path / "run")
+    storage = SqliteStorage(run_dir)
+    storage.upsert_term(GlossaryTerm(source="Ann", target="安"), chapter=0)
+    storage.close()
+    # Simulate a pre-mentions database.
+    raw = sqlite3.connect(f"{run_dir}/state.sqlite3")
+    raw.execute("ALTER TABLE glossary DROP COLUMN mentions")
+    raw.commit()
+    assert "mentions" not in {row[1] for row in raw.execute("PRAGMA table_info(glossary)")}
+    raw.close()
+    # Reopen: migration adds the column, curator write succeeds.
+    reopened = SqliteStorage(run_dir)
+    try:
+        reopened.set_term_mentions("Ann", 3)
+        terms = reopened.all_terms()
+        assert len(terms) == 1 and terms[0].mentions == 3
+    finally:
+        reopened.close()
