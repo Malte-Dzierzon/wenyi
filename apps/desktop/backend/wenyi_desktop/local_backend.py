@@ -400,7 +400,11 @@ class LocalBackend:
                 run_id=run_id,
                 connection=connection,
             )
-            self.update_project(pid, status=project_status, error=None, connection=connection)
+            # Curator never owns the project status (background service):
+            # setting "curating" here would stick forever since the worker
+            # no longer resets it, and busy() would 409 every later start.
+            if kind != "glossary_curator":
+                self.update_project(pid, status=project_status, error=None, connection=connection)
             return identity
 
     def fail_admission(self, job_id: int, previous_status: str, error: str) -> bool:
@@ -421,9 +425,12 @@ class LocalBackend:
                 return False
             job.update(status="error", error=error, updated_at=_now())
             self._put("jobs", job_id, job, connection)
-            self.update_project(
-                job["project_id"], status=previous_status, error=error, connection=connection
-            )
+            # Curator never owned the project status, so there is nothing
+            # to restore (restoring would clobber real translation state).
+            if job["kind"] != "glossary_curator":
+                self.update_project(
+                    job["project_id"], status=previous_status, error=error, connection=connection
+                )
             return True
 
     def admit_export(

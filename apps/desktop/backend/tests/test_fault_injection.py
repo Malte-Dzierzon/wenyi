@@ -108,8 +108,9 @@ def test_queue_rejection_marks_job_and_restores_status(catalog):
 
 @pytest.mark.parametrize("failing", [True, False])
 def test_curator_never_touches_project_status(catalog, failing):
-    """Curator success/failure records only its job row, never the project.
-    A looping curator model must not paint the project red every 5 minutes.
+    """Curator admission/success/failure leave the project status alone.
+    A looping curator model must not paint the project red every 5 minutes,
+    and must not stick it on curating either (that 409s later starts).
     """
     from wenyi_backend.workers import tasks
 
@@ -123,6 +124,8 @@ def test_curator_never_touches_project_status(catalog, failing):
         project_status="curating",
         run_id=run_id,
     )
+    # Admission leaves the project status untouched.
+    assert dal.get_project(pid)["status"] == "paused"
     job = dal.get_job_by_arq_id(run_id)
     # Emulate the worker outcome path without running a full pass.
     if failing:
@@ -131,7 +134,6 @@ def test_curator_never_touches_project_status(catalog, failing):
     else:
         tasks._set_curator_job_status(run_id, "done")
         assert dal.get_job(job["id"])["status"] == "done"
-    # Project status untouched by curator outcome (admission set
-    # it; the worker must not overwrite it with error/curated).
+    # Project status still untouched by curator outcome.
     project = dal.get_project(pid)
-    assert project["status"] == "curating", project
+    assert project["status"] == "paused", project

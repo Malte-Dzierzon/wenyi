@@ -146,10 +146,13 @@ class PostgresRepository:
             ):
                 raise HTTPException(409, "project already has a running task")
             result = dal.create_job(pid, kind, job_id, status="queued", connection=connection, **kwargs)
-            connection.execute(
-                "UPDATE projects SET status=%s, error=NULL, updated_at=now() WHERE id=%s",
-                (project_status, pid),
-            )
+            # Curator never owns the project status (background service,
+            # desktop parity): the worker no longer resets it either.
+            if kind != "glossary_curator":
+                connection.execute(
+                    "UPDATE projects SET status=%s, error=NULL, updated_at=now() WHERE id=%s",
+                    (project_status, pid),
+                )
             connection.commit()
             return result
 
