@@ -43,7 +43,7 @@ def test_synthesis_sees_all_distinct_drafts_source_and_context_without_output_hi
         worker.translate(packet)
     assert worker.synthesize(packet, [["甲稿"], ["乙稿"], ["丙稿"]]) == ["综合稿"]
     assert len(client.calls) == 4
-    assert all(call["max_tokens"] is None for call in client.calls)
+    assert all(call["max_tokens"] == 8192 for call in client.calls)
     assert all(call["messages"][:2] == client.calls[0]["messages"][:2] for call in client.calls)
     assert [call["operation"] for call in client.calls] == ["translation.body"] * 3 + [
         "polish.body"
@@ -129,7 +129,7 @@ def test_invalid_output_retries_full_request_and_recovers(stage, failure):
         assert correction["role"] == "user"
         assert "failed local validation" in correction["content"]
         assert "exactly 2 strings" in correction["content"]
-    assert all(call["max_tokens"] is None for call in client.calls)
+    assert all(call["max_tokens"] == 8192 for call in client.calls)
     assert '"sources": ["Title", "Body"]' in client.calls[-1]["messages"][1]["content"]
 
 
@@ -234,7 +234,7 @@ def test_truncation_does_not_add_a_small_budget_or_split_context():
     with pytest.raises(PrecisionError, match="truncated"):
         worker.translate(inputs("one", "two"))
     assert len(client.calls) == 3
-    assert all(call["max_tokens"] is None for call in client.calls)
+    assert all(call["max_tokens"] == 8192 for call in client.calls)
     assert all(
         '"sources": ["one", "two"]' in call["messages"][1]["content"] for call in client.calls
     )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
@@ -11,6 +10,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from ..ingest.tokens import count_tokens
 from .base import LLMClient, Messages
 from .configuration import LLMConfig
 from .credentials import CredentialRedactor, validate_credential
@@ -69,11 +69,6 @@ class RoutedLLMClient(LLMClient):
             route = self.routes[operation]
             connections.add(route.provider)
             connections.update(self.config.models[profile].provider for profile in route.fallbacks)
-            self._validate_token_reservation(route)
-            for profile in route.fallbacks:
-                self._validate_token_reservation(
-                    model_route(self.config, operation, profile, origin="fallback")
-                )
         for connection in sorted(connections):
             self.adapter(connection).validate_credentials()
 
@@ -168,6 +163,13 @@ class RoutedLLMClient(LLMClient):
         ]
         call_id = uuid4().hex
         attempt_number = 0
+        # Estimate once in TOKENS: messages are frozen for this call.
+        # Bytes over-reserve ~4.6x (EN) / ~2.4x (CJK) against token quotas.
+        message_tokens = (
+            sum(count_tokens(message.get("content", "")) for message in messages)
+            + 4 * len(messages)
+            + 8
+        )
         for position, route in enumerate(routes):
             self.limits.check()
             metadata = {
@@ -220,12 +222,14 @@ class RoutedLLMClient(LLMClient):
             @contextmanager
             def attempt_scope():
                 nonlocal active_reservation, attempt_number
-                self._validate_token_reservation(route)
-                estimate = (
-                    len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
-                    + 256
-                    + (route.max_output_tokens or 0)
-                )
+                if route.max_input_tokens is not None and message_tokens > route.max_input_tokens:
+                    raise ValueError(
+                        f"{operation}: estimated {message_tokens} input tokens exceed "
+                        f"max_input_tokens={route.max_input_tokens} for model "
+                        f"'{route.profile}' ({route.model}); shrink the batch or "
+                        "raise the model limit"
+                    )
+                estimate = message_tokens + (route.max_output_tokens or 0)
                 with self.limits.attempt(route.provider, estimate, emit) as reservation:
                     active_reservation = reservation
                     attempt_number += 1
@@ -246,12 +250,20 @@ class RoutedLLMClient(LLMClient):
                 self._redact,
             )
             safe_error = None
+            # Share the retry budget across failover: with N routes, each
+            # route retries less so a healthy fallback is reached quickly
+            # instead of burning (fallbacks+1) x (retries+1) generations.
+            per_route_retries = (
+                self.config.providers[route.provider].max_retries if len(routes) == 1
+                else max(0, self.config.providers[route.provider].max_retries - 2)
+            )
             try:
                 result = self.adapter(route.provider).generate(
                     [dict(message) for message in messages],
                     route.request_model(),
                     json_mode=json_mode,
                     context=context,
+                    max_retries=per_route_retries,
                 )
             except Exception as error:
                 emit(
@@ -276,13 +288,3 @@ class RoutedLLMClient(LLMClient):
             if safe_error is not None:
                 raise safe_error from None
         raise RuntimeError("No model route was selected")
-
-    def _validate_token_reservation(self, route: ResolvedRoute) -> None:
-        connection = self.config.providers[route.provider]
-        quota = self.config.quotas.get(connection.quota_group or "")
-        if (
-            self.config.budget.max_tokens or (quota and quota.tokens_per_minute)
-        ) and route.max_output_tokens is None:
-            raise ValueError(
-                f"{route.operation}: token limits require an explicit max_output_tokens"
-            )

@@ -114,7 +114,7 @@ impl ReviewView {
                     Ok::<_, crate::client::Error>((
                         runs,
                         project,
-                        chapters.unwrap_or_default(),
+                        chapters,
                         workflow.ok(),
                         rid,
                         detail,
@@ -127,8 +127,18 @@ impl ReviewView {
                     Ok((runs, project, chapters, workflow, rid, detail)) => {
                         view.runs = runs;
                         view.project_status = project.project.status;
-                        view.translated = !chapters.is_empty()
-                            && chapters.iter().all(|c| c.status == "done");
+                        match chapters {
+                            Ok(chapters) => {
+                                view.translated = !chapters.is_empty()
+                                    && chapters.iter().all(|c| c.status == "done");
+                                view.error = None;
+                            }
+                            Err(err) => {
+                                // Chapters feed the Run gate; a failed fetch
+                                // must surface, not silently disable Run.
+                                view.error = Some(format!("chapters: {err}"));
+                            }
+                        }
                         if let Some(workflow) = workflow {
                             view.workflow_active =
                                 workflow.status == "running" || workflow.status == "queued";
@@ -136,7 +146,6 @@ impl ReviewView {
                         }
                         view.selected_rid = rid;
                         view.run_detail = detail;
-                        view.error = None;
                     }
                     Err(err) => {
                         view.error = Some(err.to_string());
@@ -232,16 +241,20 @@ impl Render for ReviewView {
         let mut actions = div().flex().items_center().gap_2();
         if self.runs.len() > 1 {
             let mut hist = div().flex().gap_1();
-            for run in self.runs.clone() {
-                let rid = run.id.clone();
-                let active = self.selected_rid.as_deref() == Some(rid.as_str());
-                let label = run.created_at.clone().unwrap_or_else(|| run.status.clone());
-                let mut btn = Button::new(format!("run-{rid}")).label(label);
+            let selected = self.selected_rid.as_deref();
+            for run in &self.runs {
+                let active = selected == Some(run.id.as_str());
+                let label = run
+                    .created_at
+                    .clone()
+                    .unwrap_or_else(|| run.status.clone());
+                let mut btn = Button::new(format!("run-{}", run.id)).label(label);
                 if active {
                     btn = btn.primary();
                 } else {
                     btn = btn.ghost();
                 }
+                let rid = run.id.clone();
                 hist = hist.child(btn.on_click(cx.listener(move |this, _, _, cx| {
                     this.select_run(rid.clone(), cx);
                 })));
@@ -286,7 +299,7 @@ impl Render for ReviewView {
                 .child(Progress::new("review-activity").value(if running { 50.0 } else { 100.0 })),
         );
 
-        let Some(detail) = self.run_detail.clone() else {
+        let Some(detail) = &self.run_detail else {
             col = col.child(
                 div().py_12().text_center().text_sm().text_color(palette.muted_foreground)
                     .child("No review runs yet. Translate every chapter, then run a review."),

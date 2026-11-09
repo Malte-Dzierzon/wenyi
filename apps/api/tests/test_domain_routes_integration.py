@@ -40,8 +40,10 @@ def test_review_run_listing_and_sparse_segment_mapping(domain_client, tmp_path):
     )
     root = f"/projects/{storage.project_id}"
     run = client.get(root + "/review/runs").json()[0]
-    assert run["id"] == "review-2026" and run["autofix"]["records"][0]["status"] == "failed"
+    assert run["id"] == "review-2026" and run["summary"]["issue_count"] == 1
+    assert run["issues"] == [] and run["result"] == {}
     detail = client.get(root + "/review/runs/review-2026").json()
+    assert detail["autofix"]["records"][0]["status"] == "failed"
     assert detail["result"]["status"] == "completed"
     assert detail["items"][0]["location"]["segment_index"] == 18
     assert detail["items"][0]["location"]["text_index"] == 1

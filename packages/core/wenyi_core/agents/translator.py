@@ -8,7 +8,7 @@ entire paragraphs from being omitted.
 from __future__ import annotations
 
 from ..glossary.store import GlossaryTerm
-from ..llm.json_parser import JsonParseError
+from ..llm.json_parser import JsonParseError, parse_json_result
 from ..llm.retrying import TruncatedResponseError
 from . import prompts
 from .base import Agent, Messages
@@ -142,6 +142,13 @@ class Translator(Agent):
             raise AlignmentError(
                 "Cannot parse the translation JSON returned by the model"
             ) from error
+        # Reject structurally repaired payloads: a repair that invents array
+        # items or completes strings would publish hallucinated translations.
+        # Same bar as the reviewer (safe_for_complete_payload).
+        if not parse_json_result(raw).safe_for_complete_payload:
+            raise AlignmentError(
+                "The translation JSON required structural repair; retrying"
+            )
         items = data.get("translations") if isinstance(data, dict) else data
         if not isinstance(items, list):
             raise AlignmentError("The model did not return a translation array")

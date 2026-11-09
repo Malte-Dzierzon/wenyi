@@ -18,7 +18,7 @@ impl Audience {
     pub fn visible_for(self, fmt: Option<&str>) -> bool {
         match self {
             Audience::All => true,
-            Audience::Book => fmt.map(|f| f != "srt").unwrap_or(false),
+            Audience::Book => fmt.map(|f| !f.is_empty() && f != "srt").unwrap_or(false),
             Audience::Srt => fmt == Some("srt"),
         }
     }

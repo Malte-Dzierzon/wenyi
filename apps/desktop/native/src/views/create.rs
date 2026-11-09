@@ -182,14 +182,6 @@ impl Create {
             cx.notify();
             return;
         }
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) if !bytes.is_empty() => bytes,
-            _ => {
-                self.error = Some("Could not read source file".into());
-                cx.notify();
-                return;
-            }
-        };
         let filename = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -210,9 +202,18 @@ impl Create {
         // Drop window borrow: the async block owns everything it needs.
         let _ = window;
         cx.spawn(async move |this, cx| {
-            let result =
-                cx.background_spawn(async move { block_on(client.create_project(&body, &filename, bytes)) })
-                    .await;
+            let result = cx
+                .background_spawn(async move {
+                    // Read on the background thread: a multi-MB source file
+                    // must not block the UI thread.
+                    let bytes = match std::fs::read(&path) {
+                        Ok(bytes) if !bytes.is_empty() => bytes,
+                        _ => return Err("Could not read source file".to_string()),
+                    };
+                    block_on(client.create_project(&body, &filename, bytes))
+                        .map_err(|err| err.to_string())
+                })
+                .await;
             _ = this.update(cx, |view: &mut Create, cx| {
                 view.busy = false;
                 match result {
@@ -221,7 +222,7 @@ impl Create {
                         view.poll_preview(cx);
                     }
                     Err(err) => {
-                        view.error = Some(err.to_string());
+                        view.error = Some(err);
                     }
                 }
                 cx.notify();
@@ -229,6 +230,7 @@ impl Create {
         })
         .detach();
     }
+
 
     /// Poll `GET preview` until ready (409 while parsing) — mirrors preview poll.
     fn poll_preview(&mut self, cx: &mut Context<Self>) {

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
+from hashlib import sha256
 from typing import Any
 
 from .configuration import LLMConfig
@@ -120,12 +122,40 @@ def _probe_all(
             validate_credential(secret)
     if not targets:
         return []
+    adapters: dict[tuple, Any] = {}
+    adapters_lock = threading.Lock()
+
+    def cached_adapter(probe_connection, adapter_type, credential, has_snapshot):
+        digest = sha256(credential.encode("utf-8")).hexdigest() if credential else None
+        key = (
+            probe_connection.kind,
+            probe_connection.base_url,
+            probe_connection.timeout,
+            has_snapshot,
+            digest,
+        )
+        with adapters_lock:
+            adapter = adapters.get(key)
+            if adapter is None:
+                adapter = (
+                    adapter_type(probe_connection, credentials=(credential,))
+                    if has_snapshot
+                    else adapter_type(probe_connection)
+                )
+                adapters[key] = adapter
+            return adapter
+
     with ThreadPoolExecutor(max_workers=min(MAX_PROBE_WORKERS, len(targets))) as pool:
         # map() yields in submission order, so completion order never reorders results.
         return list(
             pool.map(
                 lambda item: _probe(
-                    config, item[0], item[1], credentials=credentials, timeout=timeout
+                    config,
+                    item[0],
+                    item[1],
+                    credentials=credentials,
+                    timeout=timeout,
+                    adapter_factory=cached_adapter,
                 ),
                 targets.items(),
             )
@@ -139,6 +169,7 @@ def _probe(
     *,
     credentials: Mapping[str, str | None] | None,
     timeout: float,
+    adapter_factory=None,
 ) -> ProbeResult:
     operation = operations[0] if operations else _DEFAULT_PROBE_OPERATION
     route = model_route(config, operation, profile, origin="probe")
@@ -149,11 +180,14 @@ def _probe(
     probe_config = connection.model_copy(
         update={"max_retries": 0, "timeout": min(timeout, connection.timeout)}
     )
-    adapter = (
-        adapter_type(probe_config)
-        if credentials is None
-        else adapter_type(probe_config, credentials=(credentials.get(route.provider),))
-    )
+    has_snapshot = credentials is not None
+    credential = credentials.get(route.provider) if has_snapshot else None
+    if adapter_factory is not None:
+        adapter = adapter_factory(probe_config, adapter_type, credential, has_snapshot)
+    elif has_snapshot:
+        adapter = adapter_type(probe_config, credentials=(credential,))
+    else:
+        adapter = adapter_type(probe_config)
 
     def result(ok: bool, category: str, message: str, **extra: Any) -> ProbeResult:
         return ProbeResult(

@@ -136,7 +136,9 @@ def _book_operation(kind, pid, storage, config, client, progress, params):
     return "done"
 
 
-def _record_terminal_status(pid, run_id, error: BaseException | None = None, *, status="error"):
+def _record_terminal_status(
+    pid, run_id, error: BaseException | None = None, *, status="error", job_status=None
+):
     """A late Future or duplicate delivery may update only its own task's project.
 
     The project-level status is set only when no sibling job is still
@@ -158,7 +160,7 @@ def _record_terminal_status(pid, run_id, error: BaseException | None = None, *, 
                 return
             project = dal.get_project(pid)
             if (
-                job["status"] == status
+                job["status"] == (job_status or status)
                 and project
                 and project["status"] == status
                 and project.get("error") == message
@@ -180,7 +182,7 @@ def _record_terminal_status(pid, run_id, error: BaseException | None = None, *, 
             finally:
                 storage.close()
         finally:
-            dal.set_job_status(job["id"], status, error=message)
+            dal.set_job_status(job["id"], job_status or status, error=message)
     elif not run_id:
         dal.set_project_status(pid, status, error=message)
 
@@ -192,6 +194,18 @@ def _chapter_lane(kind: str, params: dict) -> int | str | None:
     chapter = params.get("chapter_index") if kind == "chapter_translation" else None
     return chapter if isinstance(chapter, int) and not isinstance(chapter, bool) else None
 
+
+def lane_lock_for_job(storage, kind: str, params: dict, *, blocking: bool = True):
+    """Return the run lock a job of this kind holds (chapter/curator/book).
+    Recovery must probe the same lane the worker holds: probing the book
+    lock for a chapter job would declare a live worker dead.
+    """
+    lane = _chapter_lane(kind, params or {})
+    if lane == "curator":
+        return storage.curator_lock(blocking=blocking)
+    if lane is not None:
+        return storage.chapter_lock(lane, blocking=blocking)
+    return storage.lock(blocking=blocking)
 
 def _superseded(pid: str, current: dict, lane: int | str | None) -> bool:
     """True when a newer active job supersedes `current` on the same lane.
@@ -255,12 +269,7 @@ def _execute(
 
     try:
         lane = _chapter_lane(kind, params)
-        if lane == "curator":
-            run_lock = storage.curator_lock()
-        elif lane is not None:
-            run_lock = storage.chapter_lock(lane)
-        else:
-            run_lock = storage.lock()
+        run_lock = lane_lock_for_job(storage, kind, params)
         with run_lock, ExitStack() as scope:
             if run_id:
                 current = dal.get_job_by_arq_id(run_id)
@@ -328,9 +337,8 @@ def _execute(
             progress(1, 1, "Task completed")
             storage.log_event("task_completed", kind=kind, run_id=run_id)
         # Publish completion only after telemetry and the project's run lock have exited.
-        dal.set_project_status(pid, result_status)
-        if job:
-            dal.set_job_status(job["id"], "done")
+        # Siblings still running keep the project status; this job is always done.
+        _record_terminal_status(pid, run_id, status=result_status, job_status="done")
     except (KeyboardInterrupt, RequestCancelled):
         _record_terminal_status(pid, run_id, status="paused")
         storage.log_event("task_paused", kind=kind, run_id=run_id)

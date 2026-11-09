@@ -50,11 +50,12 @@ async def recover_jobs(ctx: dict) -> None:
             export_id_i = export_id
         storage = storage_for(pid)
         assert isinstance(storage, RecoveryStorage)
-        lock = (
-            storage.export_lock(export_id_i, blocking=False)
-            if export_id_i is not None
-            else storage.lock(blocking=False)
-        )
+        if export_id_i is not None:
+            lock = storage.export_lock(export_id_i, blocking=False)
+        else:
+            from wenyi_backend.workers.tasks import lane_lock_for_job
+
+            lock = lane_lock_for_job(storage, kind, params or {}, blocking=False)
         try:
             with lock:
                 # Running workers keep these session locks through rendering/model calls.

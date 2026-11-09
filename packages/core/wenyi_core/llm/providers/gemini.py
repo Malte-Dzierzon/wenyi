@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..retrying import EmptyResponseError, TruncatedResponseError
+from ..retrying import ContentBlockedError, EmptyResponseError, TruncatedResponseError
 from ..transport import Messages, ProviderAdapter, RequestContext, ResolvedModel
 from ..usage import UsageSample, make_usage_sample, read_usage_int
 
@@ -271,7 +271,9 @@ class GeminiClient(ProviderAdapter):
         if "MAX_TOKENS" in finish_reason.upper():
             raise TruncatedResponseError("Gemini response was truncated at the token limit")
         if "SAFETY" in finish_reason.upper() or "BLOCK" in finish_reason.upper():
-            raise RuntimeError(f"Gemini API blocked the response (finish_reason={finish_reason})")
+            raise ContentBlockedError(
+                f"Gemini API blocked the response (finish_reason={finish_reason})"
+            )
 
         text = getattr(response, "text", None)
         if not isinstance(text, str):

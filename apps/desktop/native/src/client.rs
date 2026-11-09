@@ -270,7 +270,11 @@ impl Client {
                 detail: detail.chars().take(300).collect(),
             });
         }
-        Ok(resp.json().await?)
+        let detail: ProjectDetail = resp.json().await?;
+        // `request()` invalidates automatically; this raw multipart call must
+        // do it explicitly or the dashboard shows a stale list for 5s.
+        self.invalidate_project(&detail.project.id);
+        Ok(detail)
     }
 
     /// `POST /projects/{pid}/resume` — mirrors `api.resume`.
@@ -860,15 +864,19 @@ pub struct Project {
 }
 
 /// Active statuses — mirrors `ACTIVE_STATUSES` in `lib/api.ts`.
+/// Includes every status the backend sets while work runs (`TASK_STATUSES`
+/// + `translating_subtitles` in `RUNNING_PROJECT_STATUSES`).
 pub const ACTIVE_STATUSES: &[&str] = &[
     "parsing",
     "queued",
     "preparing",
     "translating",
+    "translating_subtitles",
     "reviewing",
     "autofixing",
     "postprocessing",
     "pausing",
+    "curating",
 ];
 
 pub fn is_project_busy(status: &str) -> bool {

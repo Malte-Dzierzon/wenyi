@@ -13,6 +13,10 @@ from .base import Agent, Messages
 
 
 class Polisher(Agent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_polish_failed = False
+
     def polish(
         self,
         targets: list[str],
@@ -38,7 +42,9 @@ class Polisher(Agent):
         )
         items = self._ask_json(system, user, operation="polish.body", key="polished", default=None)
         if isinstance(items, list) and len(items) == n:
+            self.last_polish_failed = False
             return [str(x) for x in items]
+        self.last_polish_failed = True
         return list(targets)
 
     def polish_continue(

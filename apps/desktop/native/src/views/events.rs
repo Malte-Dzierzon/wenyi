@@ -158,11 +158,36 @@ pub struct EventsView {
     client: Option<Client>,
     pid: String,
     events: Option<Vec<EventOut>>,
+    /// Pre-rendered per-event strings, rebuilt when `events` changes.
+    /// Keeps `render` free of JSON traversal and `format!` per frame.
+    rows: Vec<EventRow>,
     error: Option<String>,
     expanded: HashSet<i64>,
     /// Whether this screen is currently shown; the 5s poll timer only
     /// re-arms while visible (set by the App shell on navigation).
     visible: bool,
+}
+
+/// Pre-rendered strings for one event row.
+#[derive(Clone)]
+struct EventRow {
+    id: i64,
+    event_type: String,
+    timestamp: String,
+    summary: String,
+    lines: Vec<String>,
+}
+
+impl EventRow {
+    fn new(event: &EventOut) -> Self {
+        Self {
+            id: event.id,
+            event_type: event.event_type.clone(),
+            timestamp: event.created_at.clone().unwrap_or_default(),
+            summary: describe(event),
+            lines: payload_lines(&event.payload),
+        }
+    }
 }
 
 impl EventsView {
@@ -171,6 +196,7 @@ impl EventsView {
             client: None,
             pid,
             events: None,
+            rows: Vec::new(),
             error: None,
             expanded: HashSet::new(),
             visible: true,
@@ -216,6 +242,7 @@ impl EventsView {
                         // Backend returns asc; newest first (mirrors `select`).
                         events.sort_by(|a, b| b.id.cmp(&a.id));
                         if view.events.as_ref() != Some(&events) || view.error.is_some() {
+                            view.rows = events.iter().map(EventRow::new).collect();
                             view.events = Some(events);
                             view.error = None;
                             cx.notify();
@@ -304,7 +331,7 @@ impl Render for EventsView {
             .border_color(palette.border)
             .bg(palette.card);
 
-        if events.is_empty() {
+        if self.rows.is_empty() {
             card = card.child(
                 div()
                     .text_sm()
@@ -314,14 +341,16 @@ impl Render for EventsView {
                     .child("No events yet."),
             );
         } else {
-            for event in events {
-                let id = event.id;
-                let open = self.expanded.contains(&id);
-                let (badge_label, tone) = badge_for(&event.event_type);
+            let expanded = self.expanded.clone();
+            let rows = self.rows.clone();
+            for row in &rows {
+                let id = row.id;
+                let open = expanded.contains(&id);
+                let (badge_label, tone) = badge_for(&row.event_type);
                 let tone = tone.color(&palette);
-                let timestamp = event.created_at.clone().unwrap_or_default();
-                let summary = describe(event);
-                let lines = payload_lines(&event.payload);
+                let timestamp = row.timestamp.clone();
+                let summary = row.summary.clone();
+                let lines = row.lines.clone();
 
                 let summary_row = div()
                     .id(format!("event-{id}"))

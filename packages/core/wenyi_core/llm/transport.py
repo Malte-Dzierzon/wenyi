@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+from urllib.parse import urlsplit
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +17,17 @@ from .retrying import RetryReporter, provider_retry
 
 OptionsT = TypeVar("OptionsT", bound=BaseModel)
 Messages = list[dict[str, str]]
+
+
+def _is_loopback(base_url: str | None) -> bool:
+    """True for localhost URLs whose connection failures should fail fast."""
+    if not base_url:
+        return False
+    try:
+        host = (urlsplit(base_url).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost")
 
 
 @dataclass(frozen=True)
@@ -87,18 +99,27 @@ class ProviderAdapter(ABC):
         return os.environ.get(self.api_key_env) if self.api_key_env else None
 
     def generate(
-        self, messages: Messages, model: ResolvedModel, *, json_mode: bool, context: RequestContext
+        self,
+        messages: Messages,
+        model: ResolvedModel,
+        *,
+        json_mode: bool,
+        context: RequestContext,
+        max_retries: int | None = None,
     ) -> str:
+        attempts = self.cfg.max_retries if max_retries is None else max_retries
         reporter = RetryReporter(
             provider=self.cfg.kind,
             tier=context.tier,
             stage=context.operation,
-            max_attempts=self.cfg.max_retries + 1,
+            max_attempts=attempts + 1,
             emit=context.emit,
             redact=context.redact_diagnostic,
         )
 
-        @provider_retry(self.cfg.max_retries, reporter, sleep=context.sleep)
+        @provider_retry(
+            attempts, reporter, sleep=context.sleep, local=_is_loopback(self.base_url)
+        )
         def request() -> str:
             with context.attempt_scope():
                 return self._request(messages, model, json_mode=json_mode, context=context)

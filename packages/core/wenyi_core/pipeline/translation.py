@@ -80,8 +80,9 @@ class TranslationService:
             targets = store.pending_chapters()
             progress_chapters = [chapter["index"] for chapter in manifest.get("chapters", [])]
 
-        total, done = self.progress_counts(store, progress_chapters)
-        translation_history, source_corpus = self.load_translation_inputs(store)
+        translation_history, source_corpus, total, done = self.prepare_run_inputs(
+            store, progress_chapters
+        )
         annotation_context_registry = store.load_annotation_contexts()
         store.log_event(
             "translate_run_started",
@@ -119,7 +120,85 @@ class TranslationService:
         store.log_event("translate_run_finished", total_segments=total)
         return store
 
+    def prepare_run_inputs(
+        self, store: Storage, progress_chapters: list[int]
+    ) -> tuple[dict[tuple[int, int], TranslatedSegmentEvidence], str, int, int]:
+        """Load chapters once for history, corpus and progress counts.
+        Single-pass equivalent of load_translation_inputs + progress_counts.
+        """
+        history: dict[tuple[int, int], TranslatedSegmentEvidence] = {}
+        source_parts: list[str] = []
+        total = 0
+        done = 0
+        manifest = store.load_manifest()
+        chapter_indices = sorted(
+            chapter["index"]
+            for chapter in manifest.get("chapters", [])
+            if isinstance(chapter.get("index"), int)
+        )
+        progress_set = set(progress_chapters)
+        max_tokens = self._runtime.config.segment.max_tokens_per_batch
+        for chapter_index in chapter_indices:
+            chapter = store.load_chapter(chapter_index)
+            segments = chapter.text_segments
+            for segment_index, segment in enumerate(segments):
+                source_parts.append(segment.source)
+                target = (segment.target or "").strip()
+                if not target:
+                    continue
+                history[(chapter_index, segment_index)] = TranslatedSegmentEvidence(
+                    chapter=chapter_index,
+                    segment=segment_index,
+                    source=segment.source,
+                    target=target,
+                )
+            if chapter_index not in progress_set:
+                continue
+            total += len(segments)
+            for batch in resume_batches(segments, max_tokens):
+                if all(segment.target is not None for segment in batch):
+                    done += len(batch)
+        # Preserve progress_counts behavior for validated-but-unlisted chapters.
+        for chapter_index in progress_set.difference(chapter_indices):
+            segments = store.load_chapter(chapter_index).text_segments
+            total += len(segments)
+            for batch in resume_batches(segments, max_tokens):
+                if all(segment.target is not None for segment in batch):
+                    done += len(batch)
+        return history, "\n".join(source_parts), total, done
+
     @staticmethod
+    def load_curator_inputs(
+        store: Storage,
+    ) -> tuple[dict[tuple[int, int], TranslatedSegmentEvidence], str, list[Chapter]]:
+        """Load chapters once for curator history, corpus and chapter list.
+        Single-pass equivalent of load_translation_inputs + per-chapter reload.
+        """
+        history: dict[tuple[int, int], TranslatedSegmentEvidence] = {}
+        source_parts: list[str] = []
+        chapters: list[Chapter] = []
+        manifest = store.load_manifest()
+        chapter_indices = sorted(
+            chapter["index"]
+            for chapter in manifest.get("chapters", [])
+            if isinstance(chapter.get("index"), int)
+        )
+        for chapter_index in chapter_indices:
+            chapter = store.load_chapter(chapter_index)
+            chapters.append(chapter)
+            for segment_index, segment in enumerate(chapter.text_segments):
+                source_parts.append(segment.source)
+                target = (segment.target or "").strip()
+                if not target:
+                    continue
+                history[(chapter_index, segment_index)] = TranslatedSegmentEvidence(
+                    chapter=chapter_index,
+                    segment=segment_index,
+                    source=segment.source,
+                    target=target,
+                )
+        return history, "\n".join(source_parts), chapters
+
     def load_translation_inputs(
         store: Storage,
     ) -> tuple[dict[tuple[int, int], TranslatedSegmentEvidence], str]:
@@ -283,6 +362,7 @@ class TranslationService:
                         b,
                         translation_history,
                         source_corpus,
+                        term_snapshot,
                     )
                     glossary_checkpoints.add(glossary_key)
                     term_snapshot_stale = True
@@ -381,6 +461,7 @@ class TranslationService:
                 start_index=batch_start,
                 count=len(b),
                 polished=self._runtime.config.pipeline.polish,
+                polish_failed=result.polish_failed,
                 translation_mode=self._runtime.config.pipeline.translation_mode,
                 segments=[
                     {
@@ -404,6 +485,7 @@ class TranslationService:
                 b,
                 translation_history,
                 source_corpus,
+                term_snapshot,
             )
             self.update_translation_history(translation_history, ci, batch_start, b)
             glossary_checkpoints.add(glossary_key)
@@ -492,6 +574,7 @@ class TranslationService:
         batch,
         translation_history: dict[tuple[int, int], TranslatedSegmentEvidence],
         source_corpus: str,
+        existing_terms=None,
     ) -> dict[str, int]:
         """Extract terms immediately after translating or resuming a batch for use by later
         chapter batches.
@@ -506,6 +589,7 @@ class TranslationService:
             history=translation_history.values(),
             before=(chapter, start_index),
             source_corpus=source_corpus,
+            existing_terms=existing_terms,
         )
         store.log_event(
             "batch_glossary_extracted",

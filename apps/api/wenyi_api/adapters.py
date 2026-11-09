@@ -116,15 +116,61 @@ class PostgresRepository:
             conn.execute("SELECT 1")
 
     def admit_job(self, pid, kind, job_id, *, project_status, **kwargs):
-        result = dal.create_job(pid, kind, job_id, status="queued", **kwargs)
-        dal.set_project_status(pid, project_status)
-        return result
+        """Admit with lane rules in one transaction (desktop parity).
+        Locks the project row so two simultaneous starts cannot both pass.
+        """
+        from wenyi_backend.dal import RUNNING_PROJECT_STATUSES
+
+        params = kwargs.get("params") or {}
+        with self.pool.connection() as connection:
+            row = connection.execute(
+                "SELECT status FROM projects WHERE id=%s FOR UPDATE", (pid,)
+            ).fetchone()
+            if row is None:
+                raise HTTPException(404, "project not found")
+            (project_status_current,) = row
+            active = dal.list_active_jobs(pid, connection=connection)
+            chapter = params.get("chapter_index")
+            if kind == "glossary_curator":
+                if any(job["kind"] == "glossary_curator" for job in active):
+                    raise HTTPException(409, "a curator pass is already running")
+            elif kind == "chapter_translation" and isinstance(chapter, int):
+                for job in active:
+                    job_chapter = (job.get("params") or {}).get("chapter_index")
+                    if job["kind"] == "glossary_curator":
+                        continue
+                    if job["kind"] != "chapter_translation" or job_chapter == chapter:
+                        raise HTTPException(409, "project already has a conflicting running task")
+            elif any(job["kind"] != "glossary_curator" for job in active) or (
+                project_status_current in RUNNING_PROJECT_STATUSES - {"curating"}
+            ):
+                raise HTTPException(409, "project already has a running task")
+            result = dal.create_job(pid, kind, job_id, status="queued", connection=connection, **kwargs)
+            connection.execute(
+                "UPDATE projects SET status=%s, error=NULL, updated_at=now() WHERE id=%s",
+                (project_status, pid),
+            )
+            connection.commit()
+            return result
 
     def fail_admission(self, job_id, status, error):
+        """Compensate a queue rejection, never a runner that claimed work (desktop parity)."""
         job = dal.get_job(job_id)
+        if job is None or job["status"] != "queued" or job["kind"] == "export":
+            return False
+        latest = next(
+            (
+                row
+                for row in dal.list_jobs(job["project_id"])
+                if row["kind"] != "export"
+            ),
+            None,
+        )
+        if latest is None or latest["id"] != job_id:
+            return False
         dal.set_job_status(job_id, "error", error=error)
-        if job:
-            dal.set_project_status(job["project_id"], status)
+        dal.set_project_status(job["project_id"], status)
+        return True
 
     def update_term(self, pid, storage, source, term):
         with self.pool.connection() as conn:

@@ -295,10 +295,12 @@ export const ACTIVE_STATUSES = [
   "queued",
   "preparing",
   "translating",
+  "translating_subtitles",
   "reviewing",
   "autofixing",
   "postprocessing",
   "pausing",
+  "curating",
 ];
 export const isProjectBusy = (status?: string) =>
   ACTIVE_STATUSES.includes(status || "");

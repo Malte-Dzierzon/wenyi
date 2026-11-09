@@ -66,6 +66,7 @@ OPERATIONS = register_operations(
             "language.detect",
             "Detect source language",
             "cheap",
+            output_tokens=512,
             workflows=("prepare", "translate"),
             flags=("language_auto",),
         ),
@@ -73,6 +74,7 @@ OPERATIONS = register_operations(
             "analysis.style",
             "Analyze style, characters and seed terms",
             "strong",
+            output_tokens=8192,
             workflows=("prepare", "translate"),
         ),
         OperationSpec(
@@ -92,18 +94,35 @@ OPERATIONS = register_operations(
             flags=("book_understanding",),
         ),
         OperationSpec(
-            "translation.body", "Translate body paragraphs", "strong", protocol_version=2
+            "translation.body",
+            "Translate body paragraphs",
+            "strong",
+            output_tokens=8192,
+            protocol_version=2,
         ),
-        OperationSpec("translation.title", "Translate chapter and TOC titles", "strong"),
+        OperationSpec(
+            "translation.title",
+            "Translate chapter and TOC titles",
+            "strong",
+            output_tokens=4096,
+        ),
         OperationSpec(
             "polish.body",
             "Polish translated paragraphs",
             "strong",
+            output_tokens=8192,
             flags=("polish",),
             protocol_version=2,
         ),
-        OperationSpec("glossary.extract", "Extract glossary candidates", "fast"),
-        OperationSpec("glossary.align_history", "Align terms with earlier translations", "fast"),
+        OperationSpec(
+            "glossary.extract", "Extract glossary candidates", "fast", output_tokens=4096
+        ),
+        OperationSpec(
+            "glossary.align_history",
+            "Align terms with earlier translations",
+            "fast",
+            output_tokens=4096,
+        ),
         OperationSpec(
             "glossary.curate",
             "Review one glossary term against book evidence",
@@ -114,6 +133,7 @@ OPERATIONS = register_operations(
             "annotation.align",
             "Align EPUB annotation positions",
             "cheap",
+            output_tokens=4096,
             workflows=("translate", "review"),
             flags=("annotation_alignment",),
         ),
@@ -121,6 +141,7 @@ OPERATIONS = register_operations(
             "review.scan",
             "Review and blindly re-review translated text",
             "cheap",
+            output_tokens=8192,
             workflows=("translate", "review"),
             review=True,
         ),
@@ -128,6 +149,7 @@ OPERATIONS = register_operations(
             "review.verify",
             "Verify issues with evidence",
             "strong",
+            output_tokens=8192,
             workflows=("translate", "review"),
             flags=("review_agent_loop",),
             review=True,
@@ -137,6 +159,7 @@ OPERATIONS = register_operations(
             "review.arbitrate",
             "Arbitrate conflicting recommendations",
             "strong",
+            output_tokens=8192,
             workflows=("translate", "review"),
             flags=("review_agent_loop", "review_conflict_arbitration"),
             review=True,
@@ -146,6 +169,7 @@ OPERATIONS = register_operations(
             "review.fix",
             "Propose shadow translation replacements",
             "strong",
+            output_tokens=8192,
             workflows=("translate", "review"),
             flags=("review_fix_loop",),
             review=True,
@@ -169,7 +193,13 @@ OPERATIONS = register_operations(
             review=True,
             protocol_version=2,
         ),
-        OperationSpec("srt.translate", "Translate subtitle cues", "strong", workflows=("srt",)),
+        OperationSpec(
+            "srt.translate",
+            "Translate subtitle cues",
+            "strong",
+            output_tokens=8192,
+            workflows=("srt",),
+        ),
     )
 )
 

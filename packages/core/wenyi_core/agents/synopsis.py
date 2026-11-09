@@ -18,6 +18,11 @@ _REDUCE_BUDGET = 12000
 class Synopsizer(Agent):
     policy_phase = "analysis"
 
+    #: Source characters covered by one digest call; longer chapters digest
+    #: head + tail with an explicit omission marker instead of silently
+    #: dropping everything past the head.
+    _DIGEST_SOURCE_BUDGET = 8000
+
     def digest_chapter(self, source_text: str) -> str:
         """Summarize one source chapter in the target language; return empty on empty input or
         failure.
@@ -26,10 +31,30 @@ class Synopsizer(Agent):
             return ""
         system = self.render("chapter_digest_system", src=self.src, tgt=self.tgt)
         user = self.render(
-            "chapter_digest_user", src=self.src, tgt=self.tgt, source=source_text[:8000]
+            "chapter_digest_user",
+            src=self.src,
+            tgt=self.tgt,
+            source=self._digest_source(source_text),
         )
         # Use the fast tier with output headroom above the language-specific digest budget.
         return self._ask_text(system, user, operation="synopsis.chapter")
+
+    @classmethod
+    def _digest_source(cls, source_text: str) -> str:
+        """Bound digest input without silently biasing to the chapter opening.
+        Long chapters keep head and tail with an explicit omission marker so
+        late revelations still reach the digest.
+        """
+        budget = cls._DIGEST_SOURCE_BUDGET
+        if len(source_text) <= budget:
+            return source_text
+        head = budget * 3 // 4
+        tail = budget - head
+        omitted = len(source_text) - budget
+        return (
+            f"{source_text[:head]}\n\n[… {omitted} characters omitted …]\n\n"
+            f"{source_text[-tail:]}"
+        )
 
     def book_synopsis(self, digests: list[str], analysis_brief: str) -> str:
         """Combine chapter digests and analysis into a book synopsis; use map-reduce for long

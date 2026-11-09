@@ -19,6 +19,7 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     api_key_env: str | None = None
     timeout: float = Field(default=600, gt=0, allow_inf_nan=False)
+    connect_timeout: float = Field(default=10, gt=0, allow_inf_nan=False)
     max_retries: int = Field(default=4, ge=0)
     max_concurrency: int | None = Field(default=None, gt=0)
     quota_group: str | None = None
@@ -51,6 +52,7 @@ class ModelConfig(BaseModel):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
     max_output_tokens: int | None = Field(default=None, gt=0)
+    max_input_tokens: int | None = Field(default=None, gt=0)
     options: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("model", "provider")

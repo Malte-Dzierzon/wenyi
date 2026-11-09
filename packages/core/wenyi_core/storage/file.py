@@ -232,6 +232,8 @@ class FileStorage(FileArtifacts):
         path = self._run.event_log_path
         if not os.path.isfile(path):
             return []
+        if event_type is None and limit:
+            return self._tail_events(path, limit)
         rows: list[dict] = []
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -246,6 +248,38 @@ class FileStorage(FileArtifacts):
                     continue
                 rows.append(row)
         return rows[-limit:] if limit else rows
+
+    @staticmethod
+    def _tail_events(path: str, limit: int) -> list[dict]:
+        """Read the last `limit` events without parsing the whole JSONL log.
+        Event payloads embed full batch text; a full parse per poll costs
+        megabytes on long runs. Tail-read in growing chunks until enough
+        complete lines are buffered.
+        """
+        rows: list[dict] = []
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            chunk = 64 * 1024
+            buf = b""
+            while len(buf.split(b"\n")) <= limit + 1 and len(buf) < size:
+                step = min(chunk, size - len(buf))
+                f.seek(size - len(buf) - step)
+                buf = f.read(step) + buf
+                chunk *= 2
+        lines = buf.split(b"\n")
+        if len(buf) < size:
+            # First buffered line is cut mid-row; drop it unparsed.
+            lines = lines[1:]
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+        return rows[-limit:]
 
     # Glossary operations delegated to GlossaryStore.
     def get_term(self, source: str) -> Optional[GlossaryTerm]:

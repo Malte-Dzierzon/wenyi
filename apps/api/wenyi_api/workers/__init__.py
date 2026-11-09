@@ -10,6 +10,7 @@ from wenyi_backend.context import use_context
 from wenyi_backend.workers.tasks import (
     run_chapter_translation,
     run_export,
+    run_glossary_curator,
     run_parse,
     run_prepare,
     run_review,
@@ -63,12 +64,15 @@ class WorkerSettings:
         run_chapter_translation,
         run_review,
         run_srt,
+        run_glossary_curator,
     ]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = _redis_settings()
     queue_name = WORKFLOW_QUEUE
-    max_jobs = 1
+    # Match desktop's 3 workflow lanes: admitted chapter jobs run
+    # concurrently instead of queueing behind one executor.
+    max_jobs = 3
     job_timeout = 86400
     max_tries = 1
 

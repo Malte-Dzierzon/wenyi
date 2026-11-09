@@ -173,12 +173,7 @@ class Orchestrator:
                         checked_at.get(t.source, ""),
                     ),
                 )[:CURATOR_BATCH_SIZE]
-                history, _corpus = TranslationService.load_translation_inputs(store)
-                chapters = [
-                    store.load_chapter(entry["index"])
-                    for entry in manifest.get("chapters", [])
-                    if isinstance(entry.get("index"), int)
-                ]
+                history, _corpus, chapters = TranslationService.load_curator_inputs(store)
                 stats = curator.run_pass(store, terms, chapters, history, book_title=book_title)
                 for term in terms:
                     checked_at[term.source] = str(now)

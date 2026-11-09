@@ -214,7 +214,7 @@ def test_openai_sdk_retry_is_disabled():
     openai_type.assert_called_once_with(
         api_key="secret",
         base_url="https://example.invalid/v1",
-        timeout=1,
+        timeout=httpx.Timeout(connect=10.0, read=1, write=30.0, pool=10.0),
         max_retries=0,
     )
 

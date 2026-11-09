@@ -36,6 +36,13 @@ class TruncatedResponseError(RuntimeError):
     """The provider stopped generation at its output token limit."""
 
 
+class ContentBlockedError(RuntimeError):
+    """The provider refused the request on safety/policy grounds.
+    Not retryable (same input blocks again) but resumable: the run can
+    continue after the batch is skipped or edited.
+    """
+
+
 class ProviderRequestError(RuntimeError):
     """A credential-scoped failure containing only stable, safe classifications."""
 
@@ -215,6 +222,8 @@ def is_resumable_provider_interrupt(error: Any) -> bool:
     """
     if isinstance(error, ProviderRequestError):
         return error.resumable
+    if any(isinstance(item, ContentBlockedError) for item in _exception_chain(error)):
+        return True
     if is_retryable_provider_error(error):
         return True
     status_code = error_status_code(error)
@@ -356,8 +365,12 @@ class RetryReporter:
         )
 
 
-def provider_retry(max_retries: int, reporter: RetryReporter, *, sleep=None):
-    """Build the selective retry decorator shared by remote providers."""
+def provider_retry(max_retries: int, reporter: RetryReporter, *, sleep=None, local=False):
+    """Build the selective retry decorator shared by remote providers.
+    With local=True, connection-level failures (refused/unreachable, no
+    HTTP status) fail immediately: a down localhost daemon recovers by
+    restart, not by 5 attempts of exponential backoff.
+    """
 
     def exhausted(retry_state: RetryCallState):
         """Record exhaustion at the stop condition and re-raise the last original exception."""
@@ -367,12 +380,18 @@ def provider_retry(max_retries: int, reporter: RetryReporter, *, sleep=None):
         reporter.exhausted(error)
         raise error
 
+    def should_retry(error: Any) -> bool:
+        reason = retry_reason(error, operation=reporter.stage)
+        if reason is None:
+            return False
+        if local and reason == "connection" and error_status_code(error) is None:
+            return False
+        return True
+
     return retry(
         stop=stop_after_attempt(max(1, max_retries + 1)),
         wait=wait_for_provider_retry,
-        retry=retry_if_exception(
-            lambda error: is_retryable_provider_error(error, operation=reporter.stage)
-        ),
+        retry=retry_if_exception(should_retry),
         before_sleep=reporter.before_sleep,
         retry_error_callback=exhausted,
         **({"sleep": sleep} if sleep is not None else {}),

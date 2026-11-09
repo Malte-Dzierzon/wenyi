@@ -68,6 +68,7 @@ class BatchResult:
     targets: tuple[str, ...]
     before_polish: tuple[str | None, ...]
     precision_key: str | None = None
+    polish_failed: bool = False
 
 
 class TranslationBatchExecutor:
@@ -91,6 +92,7 @@ class TranslationBatchExecutor:
         )
         targets = [strip_ruby_markers(target) for target in targets]
         before_polish: tuple[str | None, ...] = (None,) * len(targets)
+        polish_failed = False
         if polish:
             before_polish = tuple(targets)
             turn = self._translator.last_batch_turn
@@ -109,9 +111,10 @@ class TranslationBatchExecutor:
                 polished = self._polisher.polish(
                     targets, glossary_terms=terms, style=plan.style, next_source=plan.next_source
                 )
+                polish_failed = self._polisher.last_polish_failed
             if len(polished) == len(targets):
                 targets = polished
-        return BatchResult(tuple(targets), before_polish)
+        return BatchResult(tuple(targets), before_polish, polish_failed=polish_failed)
 
 
 def resume_batches(segments: list[Segment], max_tokens: int) -> list[list[Segment]]:

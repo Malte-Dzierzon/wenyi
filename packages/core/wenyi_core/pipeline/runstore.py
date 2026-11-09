@@ -209,6 +209,8 @@ class RunStore(FileArtifacts):
         """
         if not re.fullmatch(r"[0-9a-f]{64}", source_hash):
             raise ValueError("Invalid source SHA-256 format")
+        if self.exists():
+            raise ValueError("Translation state is already initialized")
 
         previous_hash: str | None = None
         if os.path.isfile(self.initialization_path):

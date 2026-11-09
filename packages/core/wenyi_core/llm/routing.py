@@ -37,6 +37,7 @@ class ResolvedRoute:
     model: str
     options_json: str
     max_output_tokens: int | None
+    max_input_tokens: int | None
     provider_identity: str
     model_identity: str
     fingerprint: str
@@ -87,6 +88,7 @@ def model_route(
         "adapter_protocol": adapter.protocol_version,
         "options": options.model_dump(mode="json"),
         "max_output_tokens": limit,
+        "max_input_tokens": model.max_input_tokens,
         "connection_options": connection_options.model_dump(mode="json"),
     }
     return ResolvedRoute(
@@ -100,6 +102,7 @@ def model_route(
         model.model,
         canonical_json(options.model_dump(mode="json")),
         limit,
+        model.max_input_tokens,
         identity(physical_provider),
         identity(physical_model),
         identity(

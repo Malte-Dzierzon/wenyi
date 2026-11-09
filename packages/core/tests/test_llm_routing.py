@@ -9,7 +9,7 @@ from wenyi_core.llm.limits import RequestCancelled, RequestLimits, RequestStoppe
 from wenyi_core.llm.operations import OperationSpec, register_operations
 from wenyi_core.llm.providers.fake import FakeProvider
 from wenyi_core.llm.router import RoutedLLMClient
-from wenyi_core.llm.routing import inference_snapshot, resolve_routes
+from wenyi_core.llm.routing import inference_snapshot, model_route, resolve_routes
 from wenyi_core.llm.usage import UsageSample
 
 
@@ -401,15 +401,17 @@ def test_non_retryable_errors_neither_retry_nor_fail_over(monkeypatch, error):
     assert calls == ["first"]
 
 
-def test_token_preflight_checks_fallback_caps():
+def test_token_preflight_uses_operation_hint_when_model_cap_missing():
     raw = _graph(
         routes={"translation.body": {"model": "one", "fallbacks": ["two"]}},
         budget={"max_tokens": 10000},
     ).model_dump()
     raw["models"]["two"]["max_output_tokens"] = None
     client = RoutedLLMClient(LLMConfig.model_validate(raw))
-    with pytest.raises(ValueError, match="max_output_tokens"):
-        client.validate_credentials(("translation.body",))
+    # Operation hints cover the output component; no explicit cap needed.
+    route = model_route(client.config, "translation.body", "two", origin="fallback")
+    assert route.max_output_tokens == 8192
+    client.validate_credentials(("translation.body",))
 
 
 def test_http402_emits_one_safe_failure_without_retry_or_fallback(monkeypatch, caplog):

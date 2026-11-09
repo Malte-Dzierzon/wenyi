@@ -30,7 +30,7 @@ def test_precision_defaults_and_constraints():
         PipelineConfig(translation_mode="best_of_three", polish=False)
 
 
-def test_precision_reuses_standard_translation_and_polish_routes_without_output_hints():
+def test_precision_reuses_standard_translation_and_polish_routes_with_output_hints():
     standard = Config()
     precision = Config(pipeline=PipelineConfig(translation_mode="best_of_three", review=False))
     assert not REMOVED_OPERATIONS.intersection(OPERATIONS)
@@ -44,8 +44,9 @@ def test_precision_reuses_standard_translation_and_polish_routes_without_output_
     for operation in body_operations:
         assert OPERATIONS[operation].tier == "strong"
         assert OPERATIONS[operation].protocol_version == 2
-        assert OPERATIONS[operation].output_tokens is None
+        assert OPERATIONS[operation].output_tokens == 8192
         assert routes[operation].tier == "strong"
+        assert routes[operation].max_output_tokens == 8192
 
 
 @pytest.mark.parametrize("operation", sorted(REMOVED_OPERATIONS))

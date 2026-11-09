@@ -298,6 +298,19 @@ def latest_resumable_job(pid: str, chapter: int | None = None) -> dict[str, Any]
     return result
 
 
+def list_active_jobs(
+    pid: str, *, connection: Connection[Any] | None = None
+) -> list[dict[str, Any]]:
+    """List queued/running jobs, optionally inside the caller's transaction."""
+    with _conn(connection) as c:
+        rows = c.execute(
+            f"SELECT {_JOB_COLUMNS} FROM jobs WHERE project_id=%s "
+            "AND status IN ('queued','running') ORDER BY id",
+            (pid,),
+        ).fetchall()
+    return [item for item in (_job_row(row) for row in rows) if item is not None]
+
+
 def list_jobs(pid: str) -> list[dict[str, Any]]:
     with _conn() as c:
         rows = c.execute(

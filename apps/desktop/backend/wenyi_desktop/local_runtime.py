@@ -314,11 +314,14 @@ class LocalRuntime:
         storage = self.backend.storage_for(pid)
         is_export = job["kind"] == "export"
         try:
-            lock = (
-                storage.export_lock(job["params"]["export_id"], blocking=False)
-                if is_export
-                else storage.lock(blocking=False)
-            )
+            if is_export:
+                lock = storage.export_lock(job["params"]["export_id"], blocking=False)
+            else:
+                from wenyi_backend.workers.tasks import lane_lock_for_job
+
+                lock = lane_lock_for_job(
+                    storage, job["kind"], job.get("params") or {}, blocking=False
+                )
             with lock:
                 changed = self.backend.set_job_status(
                     job["id"],
@@ -391,7 +394,7 @@ class LocalRuntime:
             try:
                 store = self.backend.storage_for(pid, create=False)
                 try:
-                    if not store.all_terms():
+                    if not store.stats().get("terms"):
                         continue
                 finally:
                     store.close()

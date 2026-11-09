@@ -34,7 +34,7 @@ def test_four_calls_produce_synthesis_directly_and_keep_first_draft_for_comparis
     assert [call["operation"] for call in client.calls] == ["translation.body"] * 3 + [
         "polish.body"
     ]
-    assert all(call["max_tokens"] is None for call in client.calls)
+    assert all(call["max_tokens"] == 8192 for call in client.calls)
     assert all(segment.target is None for segment in store.load_chapter(0).text_segments)
     assert _artifact(store, f"{result.precision_key}/publication.json")["status"] == "ready"
 
@@ -102,7 +102,7 @@ def test_structural_retry_repeats_only_failed_request_and_reuses_success(tmp_pat
     }
     operation = "translation.body" if stage == "translate" else "polish.body"
     requests = [call for call in client.calls if call["operation"] == operation]
-    assert all(call["max_tokens"] is None for call in requests)
+    assert all(call["max_tokens"] == 8192 for call in requests)
     # The failed stage alone retries, quoting the rejection instead of repeating it.
     extended = [call for call in requests if len(call["messages"]) > len(failed_messages[0])]
     assert len(extended) == 1

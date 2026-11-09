@@ -177,6 +177,12 @@ impl ProgressView {
                 if !view.visible {
                     return;
                 }
+                // Persistent load error with no snapshot: stop polling.
+                // Hammering a failing endpoint every 3s helps nobody;
+                // revisiting the screen retries via set_visible.
+                if view.error.is_some() && view.snapshot.is_none() {
+                    return;
+                }
                 let busy = view
                     .snapshot
                     .as_ref()

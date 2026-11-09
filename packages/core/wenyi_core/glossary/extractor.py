@@ -19,7 +19,7 @@ from .store import (
     GlossaryOccurrenceMatcher,
     GlossaryStore,
     GlossaryTerm,
-    source_matches_text,
+    TermMatcher,
 )
 
 
@@ -136,13 +136,14 @@ class GlossaryExtractor(Agent):
 
         first: dict[str, TranslatedSegmentEvidence] = {}
         ordered_history = sorted(history, key=lambda item: (item.chapter, item.segment))
+        matchers = {source: TermMatcher([source]) for source in pending}
         for evidence in ordered_history:
             if (evidence.chapter, evidence.segment) >= before:
                 continue
             for source in pending:
                 if source in first:
                     continue
-                if source_matches_text(source, evidence.source):
+                if matchers[source].matches(evidence.source):
                     first[source] = evidence
             if len(first) == len(pending):
                 break
@@ -217,6 +218,7 @@ class GlossaryExtractor(Agent):
         history: Iterable[TranslatedSegmentEvidence] = (),
         before: tuple[int, int] | None = None,
         source_corpus: str | None = None,
+        existing_terms: list[GlossaryTerm] | None = None,
     ) -> dict[str, int]:
         """Extract and store terms, preferring the translation at their first historical
         occurrence.
@@ -227,8 +229,9 @@ class GlossaryExtractor(Agent):
         With source_corpus, inject only existing terms occurring at least twice in the
         source. Low-frequency terms remain stored but do not repeatedly consume extraction
         context.
+        Pass existing_terms to reuse a prefetched snapshot instead of re-reading all terms.
         """
-        all_existing = store.all_terms()
+        all_existing = existing_terms if existing_terms is not None else store.all_terms()
         existing = (
             self._recurring_existing_terms(all_existing, source_corpus)
             if source_corpus is not None

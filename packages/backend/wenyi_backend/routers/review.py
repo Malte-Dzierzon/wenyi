@@ -29,6 +29,34 @@ from .chapters import chapter_payload
 router = APIRouter(prefix="/projects/{pid}/review", tags=["review"])
 
 
+def _review_run_summary(storage, rid: str) -> dict:
+    """List payload: identity + counts only, no issue/change bodies.
+    Full detail stays on GET /runs/{rid}; list consumers render id/created_at/status.
+    """
+    if not re.fullmatch(r"review-[A-Za-z0-9_-]+", rid):
+        raise HTTPException(404, "review run not found")
+    result = storage.read_artifact(f"reviews/{rid}/result.json")
+    if not isinstance(result, dict):
+        raise HTTPException(404, "review run not found")
+    issues = result.get("issues") or []
+    changes = result.get("changes") or []
+    return {
+        "id": rid,
+        "review_id": rid,
+        "status": result.get("status", "running"),
+        "created_at": result.get("started_at"),
+        "issues": [],
+        "changes": [],
+        "autofix": {},
+        "summary": {
+            "issue_count": len(issues),
+            "change_count": len(changes),
+            **(result.get("summary") or {}),
+        },
+        "result": {},
+    }
+
+
 def _review_run(storage, rid: str) -> dict:
     if not re.fullmatch(r"review-[A-Za-z0-9_-]+", rid):
         raise HTTPException(404, "review run not found")
@@ -73,7 +101,7 @@ def list_runs(pid: str) -> list[dict]:
         for key in storage.list_artifacts("reviews/")
         if re.fullmatch(r"reviews/review-[A-Za-z0-9_-]+/result\.json", key)
     }
-    return [_review_run(storage, rid) for rid in sorted(ids, reverse=True)]
+    return [_review_run_summary(storage, rid) for rid in sorted(ids, reverse=True)]
 
 
 @router.get("/runs/{rid}", response_model=ReviewRun)

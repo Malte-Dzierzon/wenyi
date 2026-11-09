@@ -13,6 +13,7 @@ import logging
 import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import TYPE_CHECKING, Any
 
 from ..events import ProgressFn
@@ -475,22 +476,48 @@ class PreparationService:
                 futs = {
                     ex.submit(self._runtime.synopsizer.digest_chapter, src): ci for ci, src in todo
                 }
-                for n_done, fut in enumerate(as_completed(futs), 1):
-                    ci = futs[fut]
-                    digest = fut.result().strip()
-                    if digest:
-                        loaded[ci].meta["source_digest"] = digest
-                        loaded[ci].meta["source_digest_complete"] = True
-                        loaded[ci].meta["source_digest_policy"] = fingerprint
-                        store.save_chapter(loaded[ci])
-                        store.log_event(
-                            "book_understanding_chapter_digest_saved", chapter=ci, digest=digest
-                        )
-                    else:
-                        failed.append(ci)
-                        store.log_event("book_understanding_chapter_digest_failed", chapter=ci)
-                    if progress:
-                        progress(n_done, len(todo), "Prescanning chapter digests")
+                # Bound the barrier: one hung digest must not stall prescan
+                # forever. Completed digests persist per chapter; resume
+                # retries the rest.
+                barrier_timeout = 900.0
+                done_count = 0
+                try:
+                    pending = as_completed(futs, timeout=barrier_timeout)
+                    while True:
+                        try:
+                            fut = next(pending)
+                        except StopIteration:
+                            break
+                        ci = futs[fut]
+                        done_count += 1
+                        digest = fut.result().strip()
+                        if digest:
+                            loaded[ci].meta["source_digest"] = digest
+                            loaded[ci].meta["source_digest_complete"] = True
+                            loaded[ci].meta["source_digest_policy"] = fingerprint
+                            store.save_chapter(loaded[ci])
+                            store.log_event(
+                                "book_understanding_chapter_digest_saved",
+                                chapter=ci,
+                                digest=digest,
+                            )
+                        else:
+                            failed.append(ci)
+                            store.log_event(
+                                "book_understanding_chapter_digest_failed", chapter=ci
+                            )
+                        if progress:
+                            progress(done_count, len(todo), "Prescanning chapter digests")
+                except FutureTimeoutError:
+                    for fut, ci in futs.items():
+                        if not fut.done():
+                            fut.cancel()
+                            failed.append(ci)
+                            store.log_event(
+                                "book_understanding_chapter_digest_failed",
+                                chapter=ci,
+                                reason="timeout",
+                            )
 
         if failed:
             indices = ", ".join(str(ci) for ci in sorted(failed))

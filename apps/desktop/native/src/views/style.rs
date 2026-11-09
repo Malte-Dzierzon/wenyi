@@ -101,19 +101,27 @@ impl StyleView {
                     });
                     // Analysis may 500 before preparation produces it — the
                     // source renders the form with empty values + ErrorNotice.
-                    Ok::<_, crate::client::Error>((data.ok(), project?.project.status))
+                    Ok::<_, crate::client::Error>((data, project?.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut StyleView, cx| {
                 view.loading = false;
                 match result {
                     Ok((data, status)) => {
-                        view.data = Some(data.unwrap_or(AnalysisOut {
-                            analysis: serde_json::Value::Object(Default::default()),
-                            chapter_digests: Vec::new(),
-                        }));
+                        match data {
+                            Ok(data) => {
+                                view.data = Some(data);
+                                view.error = None;
+                            }
+                            Err(err) => {
+                                view.data = Some(AnalysisOut {
+                                    analysis: serde_json::Value::Object(Default::default()),
+                                    chapter_digests: Vec::new(),
+                                });
+                                view.error = Some(format!("analysis: {err}"));
+                            }
+                        }
                         view.project_status = status;
-                        view.error = None;
                     }
                     Err(err) => {
                         view.error = Some(err.to_string());

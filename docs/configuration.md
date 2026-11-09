@@ -144,13 +144,13 @@ Replace `YOUR_EDITOR_MODEL` with a model supported by your endpoint. Other opera
 
 ### Configuration rules
 
-- `providers.<id>` defines a connection: `kind`, optional `base_url`, `api_key_env`, `timeout` (seconds, default 600), `max_retries` (additional attempts, default 4), `max_concurrency` (unlimited unless set), and optional `quota_group`.
-- `models.<id>` defines a request profile: `provider` connection ID, remote `model` ID, optional positive `max_output_tokens`, and adapter-specific `options`.
+- `providers.<id>` defines a connection: `kind`, optional `base_url`, `api_key_env`, `timeout` (read/generation seconds, default 600), `connect_timeout` (connect/DNS/TLS seconds, default 10), `max_retries` (additional attempts, default 4), `max_concurrency` (unlimited unless set), and optional `quota_group`.
+- `models.<id>` defines a request profile: `provider` connection ID, remote `model` ID, optional positive `max_output_tokens`, optional positive `max_input_tokens` (client-side context guard), and adapter-specific `options`.
 - `tiers` maps exactly `strong`, `cheap`, and `fast` to profiles. Without a preset, all three are required; they can select the same profile. Tier names describe preferences, not measured quality or price.
 - `routes.<operation>` selects exactly one of `{model: profile}` or `{tier: strong}`. Unknown operations, fields and references fail before requests. There is no missing-tier fallback.
 - Preset overrides replace whole connection/profile entries by ID. Repeat required fields when replacing an entry; model options are not merged across profiles. Tier and route mappings replace individual keys.
 - An explicit `max_output_tokens` overrides static and dynamic workflow hints. Without it, synopsis and annotation hints retain their prior behavior. OpenAI-compatible thinking profiles expand hints below 4,096 to 4,096; explicit smaller caps are rejected while thinking is enabled. Actual model limits still depend on the service.
-- CLI/Web API keys come only from environment variables; Desktop additionally supports its OS credential store or session-only manual input. Do not place credentials in YAML, endpoints or request overrides. Raw overrides cannot replace model identity, messages, streaming, JSON mode, credentials or output caps.
+- `max_input_tokens` guards the prompt before sending: when set, requests whose estimated input (tiktoken `cl100k_base` + message overhead) exceeds the cap fail immediately with the estimate and the profile name instead of hitting a server-side 400 mid-run. Set it to your model's context window minus the output cap (e.g. 120000 for a 128k model with 8k output). Without it, oversized prompts are only rejected by the provider. Localhost connection failures fail fast (no retry); cloud connections keep exponential backoff. With explicit fallbacks, each route retries at most `max(0, max_retries - 2)` times so a healthy fallback is reached quickly.
 
 ### Provider options
 

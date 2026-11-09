@@ -200,11 +200,16 @@ class TitleTranslationService:
 
         batches = title_batches(plan.pending)
         completed = 0
-        glossary_text = prompts.render_glossary(
-            glossary.all_terms(), source_lang=self._translator.src
-        )
+        term_snapshot = glossary.all_terms()
+        src = self._translator.src
         for batch_index, batch in enumerate(batches):
             titles = [item.source for item in batch]
+            # Only title-relevant terms per batch; the full glossary would
+            # ride every title call (translation/review filter the same way).
+            glossary_text = prompts.render_glossary(
+                GlossaryStore.terms_in(term_snapshot, " ".join(titles)),
+                source_lang=src,
+            )
             try:
                 translated = self._translator.translate(titles, glossary_text)
             except TitleOutputError as error:

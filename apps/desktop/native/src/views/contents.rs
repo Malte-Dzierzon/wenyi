@@ -91,15 +91,24 @@ impl ContentsView {
                 view.loading = false;
                 match result {
                     Ok((chapters, status)) => {
-                        view.chapters = chapters;
-                        view.project_status = status;
-                        view.error = None;
+                        if view.chapters != chapters
+                            || view.project_status != status
+                            || view.error.is_some()
+                        {
+                            view.chapters = chapters;
+                            view.project_status = status;
+                            view.error = None;
+                            cx.notify();
+                        }
                     }
                     Err(err) => {
-                        view.error = Some(err.to_string());
+                        let msg = err.to_string();
+                        if view.error.as_ref() != Some(&msg) {
+                            view.error = Some(msg);
+                            cx.notify();
+                        }
                     }
                 }
-                cx.notify();
             });
         })
         .detach();

@@ -20,7 +20,6 @@ pub struct Connection {
 }
 
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Ready {
     protocol: u8,
     port: u16,
@@ -93,18 +92,48 @@ impl Backend {
         let pid = child.id();
         let output = child.stdout.take().ok_or("Missing protocol pipe")?;
         let mut reader = BufReader::new(output);
-        let mut line = String::new();
-        let port = std::io::BufRead::read_line(
-            &mut std::io::Read::take(&mut reader, 4096),
-            &mut line,
-        )
-        .map_err(|_| "Could not read ready protocol")
-        .and_then(|_| parse_ready(&line, pid))?;
-        // Drain remaining stdout in the background (never log it: may hold secrets).
+        // Read until WENYI_READY with a deadline: the sidecar may log
+        // warnings first, and must never hang the UI forever.
+        // `read_line` has no timeout; run it on a thread and wait bounded.
+        let (port_tx, port_rx) = std::sync::mpsc::channel::<Result<u16, &'static str>>();
         std::thread::spawn(move || {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match std::io::BufRead::read_line(&mut reader, &mut line) {
+                    Ok(0) => {
+                        let _ = port_tx.send(Err("Sidecar closed before ready"));
+                        break;
+                    }
+                    Ok(_) => {
+                        if line.starts_with("WENYI_READY ") {
+                            let _ = port_tx.send(parse_ready(&line, pid));
+                            break;
+                        }
+                        // Non-protocol line (warning/traceback): keep waiting.
+                    }
+                    Err(_) => {
+                        let _ = port_tx.send(Err("Could not read ready protocol"));
+                        break;
+                    }
+                }
+            }
+            // Drain remaining stdout in the background (never log it: may hold secrets).
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
-        tracing::info!(port, "sidecar ready");
+        let port = match port_rx.recv_timeout(Duration::from_secs(60)) {
+            Ok(Ok(port)) => port,
+            Ok(Err(err)) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Sidecar did not become ready in time");
+            }
+        };
         Ok(Self {
             child,
             connection: Connection {

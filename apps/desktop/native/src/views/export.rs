@@ -126,11 +126,16 @@ impl ExportView {
     }
 
     /// Called by the App shell on navigation. Becoming visible resumes the
-    /// active-export poll with an immediate refresh when exports are active.
+    /// active-export poll; if the initial config/capabilities load failed,
+    /// retry the full load so the screen can recover without reopening.
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         if visible && !self.visible {
             self.visible = true;
-            self.refresh_exports(cx);
+            if self.config_error.is_some() || !self.caps_loaded || !self.defaults_loaded {
+                self.refresh_all(cx);
+            } else {
+                self.refresh_exports(cx);
+            }
         } else {
             self.visible = visible;
         }

@@ -9,6 +9,8 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
+import httpx
+
 from ..retrying import EmptyResponseError, TruncatedResponseError
 from ..transport import Messages, ProviderAdapter, RequestContext, ResolvedModel
 from ..usage import UsageSample, make_usage_sample, read_usage_int, read_usage_value
@@ -99,10 +101,18 @@ class OpenAICompatibleBaseClient(ProviderAdapter, Generic[OptionsT]):
 
                 self.validate_credentials()
                 api_key = self.api_key()
+                # Split phases: fail fast on connect/DNS/TLS (10s), allow
+                # long reads for generation (timeout). One total budget
+                # cannot serve both localhost model-load and cloud TLS.
                 self._client = OpenAI(
                     api_key=api_key or "no-key",
                     base_url=self.base_url,
-                    timeout=self.cfg.timeout,
+                    timeout=httpx.Timeout(
+                        connect=self.cfg.connect_timeout,
+                        read=self.cfg.timeout,
+                        write=30.0,
+                        pool=self.cfg.connect_timeout,
+                    ),
                     max_retries=0,
                 )
         return self._client

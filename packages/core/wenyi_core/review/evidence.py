@@ -8,7 +8,7 @@ from hashlib import sha256
 from threading import Lock
 from typing import Any
 
-from ..glossary.store import GlossaryTerm, source_matches_text, term_match_sources
+from ..glossary.store import GlossaryTerm, TermMatcher, term_match_sources
 from ..ingest.models import Chapter
 from .models import SegmentRef, normalize_value
 
@@ -133,10 +133,11 @@ class BookEvidenceIndex:
             return canonical, cached, []
 
         keys = term_match_sources(term) if term is not None else [canonical]
+        matcher = TermMatcher(keys)
         found = tuple(
             segment
             for segment in self.segments
-            if any(source_matches_text(key, segment.source) for key in keys)
+            if matcher.matches(segment.source)
         )
         with self._cache_lock:
             existing = self._occurrence_cache.setdefault(cache_key, found)

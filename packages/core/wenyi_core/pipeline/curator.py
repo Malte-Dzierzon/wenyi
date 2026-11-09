@@ -18,8 +18,7 @@ from ..agents.base import Agent
 from ..glossary.extractor import TranslatedSegmentEvidence
 from ..glossary.store import (
     GlossaryTerm,
-    source_matches_text,
-    term_match_sources,
+    TermMatcher,
 )
 from ..ingest.models import Chapter
 
@@ -51,18 +50,15 @@ def _scan_occurrences(
     history: dict[tuple[int, int], TranslatedSegmentEvidence] | None,
 ) -> list[TermOccurrence]:
     """Scan all chapters for a term; shared core of find/count (no I/O)."""
-    keys = term_match_sources(term)
-    if not keys:
+    matcher = TermMatcher(term)
+    if not matcher:
         return []
     matches: list[TermOccurrence] = []
     for chapter in chapters:
         for segment_index, segment in enumerate(chapter.text_segments):
             if not segment.source:
                 continue
-            hit = next(
-                (key for key in keys if source_matches_text(key, segment.source)),
-                None,
-            )
+            hit = matcher.first_hit(segment.source)
             if hit is None:
                 continue
             target = None
@@ -184,12 +180,16 @@ class CuratorService(Agent):
 
         checked = verified = conflicts = 0
         started = time.monotonic()
-        for term in terms[:CURATOR_BATCH_SIZE]:
-            state = store.read_artifact("curator_state.json") or {}
-            if state.get("stop_requested"):
+        stop_requested = False
+        for index, term in enumerate(terms[:CURATOR_BATCH_SIZE]):
+            # Re-read the stop flag every few terms: per-term artifact I/O
+            # costs 20 reads per pass; a stop still lands within seconds.
+            if index % 5 == 0:
+                state = store.read_artifact("curator_state.json") or {}
+                stop_requested = bool(state.get("stop_requested"))
+            if stop_requested:
                 store.log_event("curator_pass_stopped", checked=checked)
                 break
-            store.log_event("curator_term_started", source=term.source)
             term_started = time.monotonic()
             scanned = _scan_occurrences(term, chapters, history)
             store.set_term_mentions(term.source, len(scanned))

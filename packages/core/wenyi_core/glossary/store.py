@@ -144,19 +144,48 @@ def _source_pattern(key: str) -> re.Pattern[str] | None:
     return re.compile(f"{left_boundary}{re.escape(key)}{right_boundary}")
 
 
+def _matches_normalized(key: str, normalized_text: str) -> bool:
+    """Match one pre-normalized key against pre-normalized text.
+    Same semantics as source_matches_text without re-normalizing either side.
+    The substring prefilter is exact: the boundary regex can only match when
+    the key occurs in the text, so skipping the regex on absence is lossless.
+    """
+    if key not in normalized_text:
+        return False
+    if pattern := _source_pattern(key):
+        return pattern.search(normalized_text) is not None
+    return True
+
+
+def normalize_match_key(source: str) -> str:
+    """Normalize one match key; empty string means unmatchable."""
+    return _match_text(source).strip()
+
+
+def normalize_match_keys(sources: list[str]) -> list[str]:
+    """Normalize match keys once; drop empty results."""
+    return [key for source in sources if (key := normalize_match_key(source))]
+
+
+def sources_match_normalized(keys: list[str], normalized_text: str) -> bool:
+    """Match raw keys against pre-normalized text, normalizing each key once."""
+    return any(
+        _matches_normalized(key, normalized_text)
+        for source in keys
+        if (key := normalize_match_key(source))
+    )
+
+
 def source_matches_text(source: str, text: str) -> bool:
     """Match source terms without matching inside longer words in space-delimited scripts.
     Use normalized substring matching for continuous scripts such as CJK. Check boundaries
     for ASCII, Latin, Greek and Cyrillic to avoid matching Ann inside Anna or a short
     Cyrillic word inside a longer one.
     """
-    key = _match_text(source).strip()
+    key = normalize_match_key(source)
     if not key:
         return False
-    normalized_text = _match_text(text)
-    if pattern := _source_pattern(key):
-        return pattern.search(normalized_text) is not None
-    return key in normalized_text
+    return _matches_normalized(key, _match_text(text))
 
 
 def term_match_sources(term: GlossaryTerm) -> list[str]:
@@ -168,6 +197,46 @@ def term_match_sources(term: GlossaryTerm) -> list[str]:
     if term.type in _SOURCE_ONLY_TYPES:
         return [term.source]
     return [term.source, *term.aliases]
+
+
+class TermMatcher:
+    """Match one term against many texts, normalizing keys once.
+    Same semantics as repeated source_matches_text calls; avoids re-normalizing
+    keys and re-resolving cached patterns per text.
+    """
+
+    def __init__(self, term_or_keys: GlossaryTerm | list[str]):
+        keys = (
+            term_match_sources(term_or_keys)
+            if isinstance(term_or_keys, GlossaryTerm)
+            else term_or_keys
+        )
+        prepared: list[tuple[str, str, re.Pattern[str] | None]] = []
+        for source in keys:
+            key = normalize_match_key(source)
+            if key:
+                prepared.append((source, key, _source_pattern(key)))
+        self._prepared = prepared
+
+    def __bool__(self) -> bool:
+        return bool(self._prepared)
+
+    def first_hit(self, text: str) -> str | None:
+        """Return the first raw key matching text, or None."""
+        normalized = _match_text(text)
+        for source, key, pattern in self._prepared:
+            if key not in normalized:
+                continue
+            if pattern is not None:
+                if pattern.search(normalized) is not None:
+                    return source
+            else:
+                return source
+        return None
+
+    def matches(self, text: str) -> bool:
+        """Return True when any key matches text."""
+        return self.first_hit(text) is not None
 
 
 def _source_occurrence_spans(source: str, normalized_text: str) -> list[tuple[int, int]]:
@@ -438,7 +507,7 @@ class GlossaryStore:
             # Forms of address, verbal habits and fixed expressions carry tone or context. A bare-name alias
             # must not inject their derived translation into an ordinary address.
             keys = term_match_sources(term)
-            if any(source_matches_text(k, normalized_text) for k in keys):
+            if sources_match_normalized(keys, normalized_text):
                 out.append(term)
         return out
 
