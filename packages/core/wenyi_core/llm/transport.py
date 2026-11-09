@@ -105,9 +105,8 @@ class ProviderAdapter(ABC):
         *,
         json_mode: bool,
         context: RequestContext,
-        max_retries: int | None = None,
     ) -> str:
-        attempts = self.cfg.max_retries if max_retries is None else max_retries
+        attempts = self.cfg.max_retries
         reporter = RetryReporter(
             provider=self.cfg.kind,
             tier=context.tier,

@@ -250,20 +250,12 @@ class RoutedLLMClient(LLMClient):
                 self._redact,
             )
             safe_error = None
-            # Share the retry budget across failover: with N routes, each
-            # route retries less so a healthy fallback is reached quickly
-            # instead of burning (fallbacks+1) x (retries+1) generations.
-            per_route_retries = (
-                self.config.providers[route.provider].max_retries if len(routes) == 1
-                else max(0, self.config.providers[route.provider].max_retries - 2)
-            )
             try:
                 result = self.adapter(route.provider).generate(
                     [dict(message) for message in messages],
                     route.request_model(),
                     json_mode=json_mode,
                     context=context,
-                    max_retries=per_route_retries,
                 )
             except Exception as error:
                 emit(
