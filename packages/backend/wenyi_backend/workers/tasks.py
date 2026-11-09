@@ -181,8 +181,10 @@ def _record_terminal_status(
                 return
             storage = _pipeline_storage(pid)
             try:
-                # Wait for a brief API write boundary rather than dropping the terminal status.
-                with storage.lock():
+                # Commit on the job's own lane, not the book-wide lock:
+                # a chapter finishing must not block other chapters' or
+                # the book's admissions while it writes terminal status.
+                with lane_lock_for_job(storage, job["kind"], job.get("params") or {}):
                     siblings_active = any(
                         item["id"] != job["id"]
                         and item["kind"] != "export"
@@ -273,7 +275,10 @@ def _execute(
     emitter = redis_progress_fn(redis, pid, kind=kind, run_id=run_id)
 
     def progress(done, total, label):
-        if stop.is_set() or (dal.get_project(pid) or {}).get("status") in {"pausing", "paused"}:
+        # The 250ms watcher already mirrors pausing/paused into stop;
+        # a catalog read per progress callback would contend with the
+        # worker's own checkpoint writes (sluggish backend under load).
+        if stop.is_set():
             if client is not None:
                 client.cancel()
             raise PauseRequested(pid)

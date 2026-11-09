@@ -685,6 +685,11 @@ impl Client {
         self.get(&format!("/projects/{pid}/events")).await
     }
 
+    /// `GET …/events?since_id=N` — incremental tail for the 2s poll.
+    pub async fn list_events_since(&self, pid: &str, since_id: i64) -> Result<Vec<EventOut>, Error> {
+        self.get(&format!("/projects/{pid}/events?since_id={since_id}&limit=100")).await
+    }
+
     // -- Project config ops (doc 18 §2 screen 9) --
 
     /// `GET …/config` — mirrors `api.getConfig`.

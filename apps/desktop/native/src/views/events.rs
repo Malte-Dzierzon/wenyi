@@ -230,18 +230,41 @@ impl EventsView {
         let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
             return;
         };
+        // Incremental tail: first load fetches full history, later polls
+        // only new rows (2s cadence, cheap since_id query).
+        let since = self.events.as_ref().and_then(|v| v.first().map(|e| e.id));
         cx.spawn(async move |this, cx| {
             // reqwest needs Tokio: run the future on the shared runtime from
             // a background thread, then update the entity on the UI thread.
             let result = cx
-                .background_spawn(async move { crate::client::block_on(client.list_events(&pid)) })
+                .background_spawn(async move {
+                    crate::client::block_on(async {
+                        match since {
+                            Some(id) => client.list_events_since(&pid, id).await,
+                            None => client.list_events(&pid).await,
+                        }
+                    })
+                })
                 .await;
             _ = this.update(cx, |view: &mut EventsView, cx| {
                 match result {
                     Ok(mut events) => {
                         // Backend returns asc; newest first (mirrors `select`).
                         events.sort_by(|a, b| b.id.cmp(&a.id));
-                        if view.events.as_ref() != Some(&events) || view.error.is_some() {
+                        if since.is_some() && !events.is_empty() {
+                            // Merge delta: prepend new rows, cap history.
+                            let mut merged = events;
+                            if let Some(old) = view.events.take() {
+                                merged.extend(old);
+                            }
+                            merged.truncate(500);
+                            view.rows = merged.iter().map(EventRow::new).collect();
+                            view.events = Some(merged);
+                            view.error = None;
+                            cx.notify();
+                        } else if since.is_none()
+                            && (view.events.as_ref() != Some(&events) || view.error.is_some())
+                        {
                             view.rows = events.iter().map(EventRow::new).collect();
                             view.events = Some(events);
                             view.error = None;
@@ -259,11 +282,11 @@ impl EventsView {
             });
         })
         .detach();
-        // 5s refetch like the React query (`refetchInterval: 5000`).
+        // 2s delta poll; full history only on first load or navigation.
         // Only re-arms while visible; navigation resumes via `set_visible`.
         cx.spawn(async move |this, cx| {
             cx.background_executor()
-                .timer(std::time::Duration::from_secs(5))
+                .timer(std::time::Duration::from_secs(2))
                 .await;
             _ = this.update(cx, |view: &mut EventsView, cx| {
                 if view.visible {

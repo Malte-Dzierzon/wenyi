@@ -12,8 +12,9 @@ router = APIRouter(prefix="/projects/{pid}/report", tags=["report"])
 
 
 def _report(project: dict, storage) -> dict:
-    # All read operations share one brief state transaction; there are no model calls.
-    with storage.state_lock():
+    # Pure reads share one snapshot; a writer lock here would serialize
+    # the 3s progress poll against the worker's checkpoint commits.
+    with storage.read_snapshot():
         if project.get("fmt") == "srt":
             cues = SrtRunStore(storage.run_dir, storage=storage).load_cues()
             report = {
@@ -43,7 +44,7 @@ def get_report(pid: str, summary_only: bool = False) -> dict:
         project = require_project(pid)
         storage = storage_for(pid)
         try:
-            with storage.state_lock():
+            with storage.read_snapshot():
                 if project.get("fmt") == "srt":
                     return _report(project, storage)
                 return build_summary(storage, storage)

@@ -191,8 +191,8 @@ class SqliteStorage:
                 self._depth -= 1
 
     @contextmanager
-    def _read_lock(self) -> Iterator[None]:
-        """Capture a WAL read snapshot without competing for SQLite's writer lock."""
+    def read_snapshot(self) -> Iterator[None]:
+        """Capture a WAL read snapshot without competing for the writer lock."""
         with self._mutex:
             conn = self._connection()
             if conn.in_transaction:
@@ -203,6 +203,11 @@ class SqliteStorage:
                 yield
             finally:
                 conn.rollback()
+
+    @contextmanager
+    def _read_lock(self) -> Iterator[None]:
+        with self.read_snapshot():
+            yield
 
     @contextmanager
     def _file_lock(self, filename: str, *, blocking: bool = True) -> Iterator[None]:
@@ -907,6 +912,7 @@ class SqliteStorage:
         event_type: str | None = None,
         chapter: int | None = None,
         limit: int = 200,
+        since_id: int | None = None,
     ) -> list[dict]:
         with self._mutex:
             if self._conn is None and not os.path.isfile(self.database_path):
@@ -922,6 +928,9 @@ class SqliteStorage:
             if chapter is not None:
                 query += "\n                  AND json_extract(value, '$.chapter')=?"
                 args.append(chapter)
+            if since_id is not None:
+                query += "\n                  AND sequence > ?"
+                args.append(since_id)
             query += "\n                ORDER BY sequence DESC LIMIT ?"
             args.append(limit or -1)
             rows = self._connection().execute(query, args).fetchall()

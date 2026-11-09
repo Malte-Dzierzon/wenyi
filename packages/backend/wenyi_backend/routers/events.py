@@ -12,11 +12,14 @@ router = APIRouter(prefix="/projects/{pid}/events", tags=["events"])
 
 @router.get("", response_model=list[EventOut])
 def list_events(
-    pid: str, type: str | None = Query(None), limit: int = Query(200, ge=1, le=1000)
+    pid: str,
+    type: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    since_id: int | None = Query(None, ge=0),
 ) -> list[dict]:
     require_project(pid)
     storage = storage_for(pid)
-    rows = storage.list_events(event_type=type, limit=limit)
+    rows = storage.list_events(event_type=type, limit=limit, since_id=since_id)
     out = []
     for r in rows:
         out.append(

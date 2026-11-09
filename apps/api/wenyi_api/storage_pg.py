@@ -139,6 +139,19 @@ class PostgresStorage:
                 finally:
                     self._local.state_conn = None
 
+    @contextmanager
+    def read_snapshot(self) -> Iterator[None]:
+        """Share one connection for pure reads; no advisory lock (PG MVCC suffices)."""
+        if getattr(self._local, "state_conn", None) is not None:
+            yield
+            return
+        with self._pool.connection() as conn:
+            self._local.state_conn = conn
+            try:
+                yield
+            finally:
+                self._local.state_conn = None
+
     # Initialization is committed only after chapters, analysis, glossary and context.
     def exists(self) -> bool:
         with self._conn as conn:
@@ -681,12 +694,15 @@ class PostgresStorage:
                 (self.project_id, event, Jsonb(data)),
             )
 
-    def list_events(self, *, event_type: str | None = None, limit: int = 200) -> list[dict]:
+    def list_events(
+        self, *, event_type: str | None = None, limit: int = 200, since_id: int | None = None
+    ) -> list[dict]:
         with self._conn as conn:
             rows = conn.execute(
                 """SELECT id,type,payload,created_at FROM events WHERE project_id=%s
-                AND (%s::text IS NULL OR type=%s) ORDER BY id DESC LIMIT %s""",
-                (self.project_id, event_type, event_type, limit or None),
+                AND (%s::text IS NULL OR type=%s)
+                AND (%s::bigint IS NULL OR id>%s) ORDER BY id DESC LIMIT %s""",
+                (self.project_id, event_type, event_type, since_id, since_id, limit or None),
             ).fetchall()
         result = []
         for row in reversed(rows):

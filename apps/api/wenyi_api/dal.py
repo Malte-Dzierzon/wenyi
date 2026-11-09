@@ -279,17 +279,20 @@ def get_job_by_arq_id(arq_job_id: str) -> dict[str, Any] | None:
 def latest_resumable_job(pid: str, chapter: int | None = None) -> dict[str, Any] | None:
     with _conn() as c:
         if chapter is None:
+            # Skip the curator service (desktop parity): global resume
+            # replays real translation work, never a 5-minute curator pass.
             row = c.execute(
                 f"""SELECT {_JOB_COLUMNS} FROM jobs WHERE project_id=%s
-                    AND kind <> 'export' ORDER BY id DESC LIMIT 1""",
+                    AND kind <> 'export' AND kind <> 'glossary_curator'
+                    ORDER BY id DESC LIMIT 1""",
                 (pid,),
             ).fetchone()
         else:
             row = c.execute(
                 f"""SELECT {_JOB_COLUMNS} FROM jobs WHERE project_id=%s
-                    AND kind = 'chapter_translation'
-                    AND (params->>'chapter_index')::int = %s
-                    ORDER BY id DESC LIMIT 1""",
+                AND kind = 'chapter_translation'
+                AND (params->>'chapter_index')::int = %s
+                ORDER BY id DESC LIMIT 1""",
                 (pid, chapter),
             ).fetchone()
     result = _job_row(row)

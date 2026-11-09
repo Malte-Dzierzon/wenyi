@@ -42,6 +42,9 @@ class FileStorage(FileArtifacts):
     def state_lock(self):
         return self._run.state_lock()
 
+    def read_snapshot(self):
+        return self._run.read_snapshot()
+
     def assemble_lock(self):
         return self._run.assemble_lock()
 

@@ -511,6 +511,12 @@ class LocalBackend:
                 continue
             if chapter is not None and (job.get("params") or {}).get("chapter_index") != chapter:
                 continue
+            # Global resume replays real translation work, never the 5-minute
+            # curator service: "latest wins" would otherwise offer curator
+            # passes instead of the interrupted translation (live repro:
+            # Resume admitted glossary_curator while chapter work waited).
+            if chapter is None and job["kind"] == "glossary_curator":
+                continue
             return job if job["status"] in {"paused", "error", "interrupted"} else None
         return None
 
