@@ -1,10 +1,6 @@
 <div align="center">
 
-<h1>
-  <img src="docs/images/wenyi-emblem.png" alt="" width="280">
-  <br>
-  <img src="docs/images/wenyi-wordmark-en.svg" alt="Wenyi" width="180" height="54">
-</h1>
+# Wenyi
 
 **Whole-book understanding · Consistent terminology · Evidence-based review**
 
@@ -12,7 +8,9 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/Malte-Dzierzon/wenyi/tests.yml?style=flat-square&labelColor=070e15)](https://github.com/Malte-Dzierzon/wenyi/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-MIT-D4B56A?style=flat-square&labelColor=070e15)](LICENSE)
 
-<a href="docs/images/web-translation-overview.png"><img src="docs/images/web-translation-overview-thumb.webp" alt="Translation overview screen" width="1200"></a>
+<img src="docs/images/native-translation-overview.webp" alt="Native desktop app: translation overview with usage breakdown, run history, and chapter progress" width="1200">
+
+<img src="docs/images/native-settings.webp" alt="Native desktop app: global settings with theme picker" width="1200">
 
 </div>
 
@@ -22,13 +20,13 @@
 
 | Layer | Software |
 |---|---|
-| Engine | Python `wenyi-core` — pipeline, glossary, review, ingest/assemble |
-| CLI | `wenyi translate` via [uv](https://docs.astral.sh/uv/) (Python 3.10+) |
-| Desktop | Rust `wenyi-native` UI + [Tauri 2](https://tauri.app) shell, private Python sidecar |
+| Engine | Python `wenyi-core` (3.12) — pipeline, parallel chapter workers, glossary curator, review, ingest/assemble |
+| CLI | `wenyi translate` via [uv](https://docs.astral.sh/uv/) |
+| Desktop | Rust `wenyi-native` UI ([gpui-kit 0.8](https://crates.io/crates/gpui-kit)) + [Tauri 2](https://tauri.app) shell, private Python sidecar over loopback REST |
 | Web / API | [React 19](https://react.dev) + [Vite 6](https://vite.dev) frontend, Python API + [Arq](https://github.com/python-arq/arq) workers (PostgreSQL/Redis) |
-| Models | 10 provider kinds — DeepSeek, OpenAI, OpenRouter, Gemini, Ollama, vLLM, llama.cpp, OrcaRouter, opencode-go, OpenAI-compatible |
+| Models | 10 routed provider kinds — DeepSeek, OpenAI, OpenRouter, opencode-go, OrcaRouter, Ollama, vLLM, llama.cpp, Gemini, OpenAI-compatible |
 | Storage | File (CLI) · SQLite (Desktop) · PostgreSQL (Web) |
-| Formats | EPUB/FB2/TXT/Markdown/HTML/PDF/DOCX/SRT in · EPUB/TXT/HTML/Markdown/PDF/DOCX + SRT out |
+| Formats | EPUB/TXT/Markdown/FB2/HTML/PDF/DOCX/SRT in · EPUB/TXT/HTML/Markdown/PDF/DOCX + SRT out |
 
 ---
 
