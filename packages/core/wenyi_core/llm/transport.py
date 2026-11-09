@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import threading
-from urllib.parse import urlsplit
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 

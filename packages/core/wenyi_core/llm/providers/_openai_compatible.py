@@ -7,9 +7,8 @@ import time
 from abc import abstractmethod
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel
-
 import httpx
+from pydantic import BaseModel
 
 from ..retrying import EmptyResponseError, TruncatedResponseError
 from ..transport import Messages, ProviderAdapter, RequestContext, ResolvedModel
