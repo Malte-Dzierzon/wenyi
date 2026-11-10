@@ -1,0 +1,74 @@
+{
+ "bi": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1>T0-0 One</h1><p>T0-1 First body.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">First body.</p></body></html>",
+   "OEBPS/ch2.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1>T1-0 Two</h1><p>T1-1 Second body.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn1_1\">Second body.</p></body></html>",
+   "OEBPS/ch3.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1>T2-0 Three</h1><p>T2-1 Third body.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn2_1\">Third body.</p></body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Degenerate-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch3.xhtml\" id=\"ch3\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"ch1\"/><itemref idref=\"ch2\"/><itemref idref=\"ch3\"/></spine>\n</package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"ch1\"><navLabel><text>TR-One</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch2\"><navLabel><text>TR-Two</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch3\"><navLabel><text>TR-Three</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml",
+   "OEBPS/ch3.xhtml"
+  ]
+ },
+ "bi_src": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1>T0-0 One</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">First body.</p><p>T0-1 First body.</p></body></html>",
+   "OEBPS/ch2.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1>T1-0 Two</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn1_1\">Second body.</p><p>T1-1 Second body.</p></body></html>",
+   "OEBPS/ch3.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1>T2-0 Three</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn2_1\">Third body.</p><p>T2-1 Third body.</p></body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Degenerate-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch3.xhtml\" id=\"ch3\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"ch1\"/><itemref idref=\"ch2\"/><itemref idref=\"ch3\"/></spine>\n</package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"ch1\"><navLabel><text>TR-One</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch2\"><navLabel><text>TR-Two</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch3\"><navLabel><text>TR-Three</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml",
+   "OEBPS/ch3.xhtml"
+  ]
+ },
+ "bi_style": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1>T0-0 One</h1><p>T0-1 First body.</p><p class=\"tn-source\" id=\"tn-source-tn0_1\">First body.</p></body></html>",
+   "OEBPS/ch2.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1>T1-0 Two</h1><p>T1-1 Second body.</p><p class=\"tn-source\" id=\"tn-source-tn1_1\">Second body.</p></body></html>",
+   "OEBPS/ch3.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1>T2-0 Three</h1><p>T2-1 Third body.</p><p class=\"tn-source\" id=\"tn-source-tn2_1\">Third body.</p></body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Degenerate-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch3.xhtml\" id=\"ch3\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"ch1\"/><itemref idref=\"ch2\"/><itemref idref=\"ch3\"/></spine>\n</package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"ch1\"><navLabel><text>TR-One</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch2\"><navLabel><text>TR-Two</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch3\"><navLabel><text>TR-Three</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml",
+   "OEBPS/ch3.xhtml"
+  ]
+ },
+ "mono": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1>T0-0 One</h1><p>T0-1 First body.</p></body></html>",
+   "OEBPS/ch2.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1>T1-0 Two</h1><p>T1-1 Second body.</p></body></html>",
+   "OEBPS/ch3.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1>T2-0 Three</h1><p>T2-1 Third body.</p></body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Degenerate-wenyi-zh</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch3.xhtml\" id=\"ch3\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"ch1\"/><itemref idref=\"ch2\"/><itemref idref=\"ch3\"/></spine>\n</package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"ch1\"><navLabel><text>TR-One</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch2\"><navLabel><text>TR-Two</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n<navPoint id=\"ch3\"><navLabel><text>TR-Three</text></navLabel><content src=\"ch1.xhtml\"/></navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml",
+   "OEBPS/ch3.xhtml"
+  ]
+ }
+}

@@ -1,0 +1,45 @@
+{
+  "B3_glossary_store": {
+    "insert_1000_wall": 0.014,
+    "read_all_wall": 0.003,
+    "terms": 1000
+  },
+  "B6_translate_200para": {
+    "chapters": 1,
+    "peak_rss_mb": 113.7,
+    "total_tokens": 352,
+    "usage_calls": 44,
+    "wall_seconds": 0.144
+  },
+  "B7_matcher_scan": {
+    "by_glossary_size": {
+      "terms_10": {
+        "hits": 2000,
+        "wall_seconds": 0.007
+      },
+      "terms_100": {
+        "hits": 2000,
+        "wall_seconds": 0.047
+      },
+      "terms_500": {
+        "hits": 2000,
+        "wall_seconds": 0.228
+      }
+    },
+    "segments": 1000
+  },
+  "notes": {
+    "B10_provider": "covered by fake-HTTP tests at Rust Slice 3",
+    "B11_export": "covered by round-trip goldens at Rust Slice 2+",
+    "B12_size_build": "record at first Rust build (Slice 1)",
+    "B1_cold_start": "not measurable on oracle (no shipped binary yet); record at Rust Slice 7",
+    "B2_project_list": "N/A to file oracle; Rust must show no N+1 scans",
+    "B5_progress_rate": "Python hub coalesces at 4Hz by design; Rust keeps <=4Hz coarse events"
+  },
+  "oracle": "main@39068fcc",
+  "tokenizer_throughput": {
+    "chars": 54000,
+    "tokens": 34000,
+    "wall_seconds": 0.003
+  }
+}

@@ -1,0 +1,64 @@
+{
+ "manifest_xhtml_hrefs": [
+  "OEBPS/one.xhtml",
+  "OEBPS/two.xhtml",
+  "OEBPS/three.xhtml"
+ ],
+ "opf_path": "OEBPS/content.opf",
+ "spine_hrefs": [
+  "OEBPS/one.xhtml",
+  "OEBPS/two.xhtml",
+  "OEBPS/three.xhtml"
+ ],
+ "title": "Cross",
+ "toc_entries": [
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:0",
+   "external": false,
+   "fragment": "part-1",
+   "kind": "ncx",
+   "node_id": "",
+   "node_index": 0,
+   "parent_index": null,
+   "raw_href": "one.xhtml#part-1",
+   "resource_href": "OEBPS/one.xhtml",
+   "target_key": "OEBPS/one.xhtml#part-1",
+   "title": "PART I",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 1,
+   "entry_id": "OEBPS/toc.ncx:1",
+   "external": false,
+   "fragment": "section-1",
+   "kind": "ncx",
+   "node_id": "",
+   "node_index": 1,
+   "parent_index": 0,
+   "raw_href": "two.xhtml#section-1",
+   "resource_href": "OEBPS/two.xhtml",
+   "target_key": "OEBPS/two.xhtml#section-1",
+   "title": "Section 1",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:2",
+   "external": false,
+   "fragment": "part-2",
+   "kind": "ncx",
+   "node_id": "",
+   "node_index": 2,
+   "parent_index": null,
+   "raw_href": "three.xhtml#part-2",
+   "resource_href": "OEBPS/three.xhtml",
+   "target_key": "OEBPS/three.xhtml#part-2",
+   "title": "PART II",
+   "toc_path": "OEBPS/toc.ncx"
+  }
+ ],
+ "toc_paths": [
+  "OEBPS/toc.ncx"
+ ]
+}

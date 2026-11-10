@@ -1,0 +1,40 @@
+{
+  "output_keys": [
+    "about_page",
+    "bilingual",
+    "bilingual_order",
+    "bilingual_preserve_source_style",
+    "mono",
+    "punctuation_normalize"
+  ],
+  "pipeline_keys": [
+    "align_retry_limit",
+    "annotation_alignment",
+    "annotation_alignment_concurrency",
+    "babeldoc_bridge_url",
+    "babeldoc_pages",
+    "babeldoc_timeout",
+    "book_understanding",
+    "pdf_backend",
+    "polish",
+    "prescan_concurrency",
+    "review",
+    "review_agent_loop",
+    "review_agent_max_evidence_rounds",
+    "review_autofix",
+    "review_clean_confirmations",
+    "review_concurrency",
+    "review_conflict_arbitration",
+    "review_fix_loop",
+    "review_fix_max_rounds",
+    "review_output_retries",
+    "rolling_context_segments",
+    "translation_mode"
+  ],
+  "segment": {
+    "max_tokens_per_batch": 1800,
+    "max_tokens_per_segment": 1200
+  },
+  "source_lang": "auto",
+  "target_lang": "zh"
+}

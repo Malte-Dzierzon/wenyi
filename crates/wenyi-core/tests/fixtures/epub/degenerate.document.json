@@ -1,0 +1,188 @@
+{
+ "chapters": [
+  {
+   "href": "OEBPS/ch1.xhtml",
+   "index": 0,
+   "meta": {
+    "epub_split_strategy": "spine-fallback"
+   },
+   "segments": [
+    {
+     "anchor": "tn0_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": "OEBPS/ch1.xhtml",
+     "source": "One",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn0_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {},
+     "resource_href": "OEBPS/ch1.xhtml",
+     "source": "First body.",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "template": null,
+   "title": "One"
+  },
+  {
+   "href": "OEBPS/ch2.xhtml",
+   "index": 1,
+   "meta": {
+    "epub_split_strategy": "spine-fallback"
+   },
+   "segments": [
+    {
+     "anchor": "tn1_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": "OEBPS/ch2.xhtml",
+     "source": "Two",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn1_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {},
+     "resource_href": "OEBPS/ch2.xhtml",
+     "source": "Second body.",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "template": null,
+   "title": "Two"
+  },
+  {
+   "href": "OEBPS/ch3.xhtml",
+   "index": 2,
+   "meta": {
+    "epub_split_strategy": "spine-fallback"
+   },
+   "segments": [
+    {
+     "anchor": "tn2_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": "OEBPS/ch3.xhtml",
+     "source": "Three",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn2_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {},
+     "resource_href": "OEBPS/ch3.xhtml",
+     "source": "Third body.",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "template": null,
+   "title": "Three"
+  }
+ ],
+ "fmt": "epub",
+ "meta": {
+  "epub_annotation_contexts": {
+   "contexts": {},
+   "version": 1
+  },
+  "epub_resources": [
+   {
+    "href": "OEBPS/ch1.xhtml",
+    "index": 0
+   },
+   {
+    "href": "OEBPS/ch2.xhtml",
+    "index": 1
+   },
+   {
+    "href": "OEBPS/ch3.xhtml",
+    "index": 2
+   }
+  ],
+  "epub_schema": 5,
+  "epub_split_strategy": "spine-fallback",
+  "epub_split_toc_path": "OEBPS/toc.ncx",
+  "opf_path": "OEBPS/content.opf",
+  "toc_entries": [
+   {
+    "boundary_position": 0,
+    "depth": 0,
+    "entry_id": "OEBPS/toc.ncx:0",
+    "external": false,
+    "fragment": "",
+    "kind": "ncx",
+    "node_id": "ch1",
+    "node_index": 0,
+    "parent_index": null,
+    "raw_href": "ch1.xhtml",
+    "resource_href": "OEBPS/ch1.xhtml",
+    "segment_anchor": "tn0_0",
+    "target_key": "OEBPS/ch1.xhtml",
+    "title": "One",
+    "toc_path": "OEBPS/toc.ncx"
+   },
+   {
+    "boundary_position": 0,
+    "depth": 0,
+    "entry_id": "OEBPS/toc.ncx:1",
+    "external": false,
+    "fragment": "",
+    "kind": "ncx",
+    "node_id": "ch2",
+    "node_index": 1,
+    "parent_index": null,
+    "raw_href": "ch1.xhtml",
+    "resource_href": "OEBPS/ch1.xhtml",
+    "segment_anchor": "tn0_0",
+    "target_key": "OEBPS/ch1.xhtml",
+    "title": "Two",
+    "toc_path": "OEBPS/toc.ncx"
+   },
+   {
+    "boundary_position": 0,
+    "depth": 0,
+    "entry_id": "OEBPS/toc.ncx:2",
+    "external": false,
+    "fragment": "",
+    "kind": "ncx",
+    "node_id": "ch3",
+    "node_index": 2,
+    "parent_index": null,
+    "raw_href": "ch1.xhtml",
+    "resource_href": "OEBPS/ch1.xhtml",
+    "segment_anchor": "tn0_0",
+    "target_key": "OEBPS/ch1.xhtml",
+    "title": "Three",
+    "toc_path": "OEBPS/toc.ncx"
+   }
+  ],
+  "toc_paths": [
+   "OEBPS/toc.ncx"
+  ]
+ },
+ "source_lang": "ja",
+ "source_path": "<abs>/degenerate.epub",
+ "target_lang": "zh",
+ "title": "Degenerate"
+}

@@ -1,0 +1,6 @@
+language:
+  source: en
+  target: zh
+pipeline:
+  translation_mode: best_of_three
+  polish: false

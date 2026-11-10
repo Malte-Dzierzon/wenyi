@@ -1,0 +1,59 @@
+{
+  "chapters": [
+    {
+      "index": 0,
+      "segments": [
+        {
+          "chars": 11,
+          "index": 0,
+          "kind": "heading",
+          "tokens": 2
+        },
+        {
+          "chars": 137,
+          "index": 1,
+          "kind": "text",
+          "tokens": 31
+        },
+        {
+          "chars": 74,
+          "index": 2,
+          "kind": "text",
+          "tokens": 15
+        }
+      ],
+      "title": "Chapter One"
+    },
+    {
+      "index": 1,
+      "segments": [
+        {
+          "chars": 11,
+          "index": 0,
+          "kind": "heading",
+          "tokens": 2
+        },
+        {
+          "chars": 137,
+          "index": 1,
+          "kind": "text",
+          "tokens": 29
+        },
+        {
+          "chars": 33,
+          "index": 2,
+          "kind": "text",
+          "tokens": 39
+        }
+      ],
+      "title": "Chapter Two"
+    }
+  ],
+  "first_chapter_batches_1800": [
+    [
+      0,
+      1,
+      2
+    ]
+  ]
+}

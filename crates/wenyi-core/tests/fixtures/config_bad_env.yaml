@@ -1,0 +1,13 @@
+language:
+  source: en
+  target: zh
+llm:
+  providers:
+    default:
+      kind: deepseek
+      api_key_env: "9bad-name!"
+  models:
+    default_strong: {provider: default, model: m}
+    default_cheap: {provider: default, model: m}
+    default_fast: {provider: default, model: m}
+  tiers: {strong: default_strong, cheap: default_cheap, fast: default_fast}

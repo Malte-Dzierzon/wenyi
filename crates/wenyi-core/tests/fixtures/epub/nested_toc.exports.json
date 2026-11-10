@@ -1,0 +1,58 @@
+{
+ "bi": {
+  "members": {
+   "OEBPS/body.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Nested</title><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head>\n<body>\n<h1 id=\"part-1\">T0-0 PART I</h1><p>T0-1 Part I intro.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">Part I intro.</p>\n<h2 id=\"section-1\">T0-2 Section 1</h2><p>T0-3 Section 1 body.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_3\">Section 1 body.</p>\n<h1 id=\"part-2\">T1-0 PART II</h1><p>T1-1 Part II intro.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_5\">Part II intro.</p>\n<h2 id=\"section-2\">T1-2 Section 2</h2><p>T1-3 Section 2 body.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_7\">Section 2 body.</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Nested-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest><item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/><item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine toc=\"toc\"><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"part1\"><navLabel><text>TR-PART I</text></navLabel>\n<content src=\"body.xhtml#part-1\"/>\n<navPoint id=\"section1\"><navLabel><text>TR-Section 1</text></navLabel>\n<content src=\"body.xhtml#section-1\"/>\n</navPoint>\n</navPoint>\n<navPoint id=\"part2\"><navLabel><text>TR-PART II</text></navLabel>\n<content src=\"body.xhtml#part-2\"/>\n<navPoint id=\"section2\"><navLabel><text>TR-Section 2</text></navLabel>\n<content src=\"body.xhtml#section-2\"/>\n</navPoint>\n</navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/body.xhtml",
+   "OEBPS/toc.ncx"
+  ]
+ },
+ "bi_src": {
+  "members": {
+   "OEBPS/body.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Nested</title><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head>\n<body>\n<h1 id=\"part-1\">T0-0 PART I</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">Part I intro.</p><p>T0-1 Part I intro.</p>\n<h2 id=\"section-1\">T0-2 Section 1</h2><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_3\">Section 1 body.</p><p>T0-3 Section 1 body.</p>\n<h1 id=\"part-2\">T1-0 PART II</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_5\">Part II intro.</p><p>T1-1 Part II intro.</p>\n<h2 id=\"section-2\">T1-2 Section 2</h2><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_7\">Section 2 body.</p><p>T1-3 Section 2 body.</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Nested-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest><item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/><item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine toc=\"toc\"><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"part1\"><navLabel><text>TR-PART I</text></navLabel>\n<content src=\"body.xhtml#part-1\"/>\n<navPoint id=\"section1\"><navLabel><text>TR-Section 1</text></navLabel>\n<content src=\"body.xhtml#section-1\"/>\n</navPoint>\n</navPoint>\n<navPoint id=\"part2\"><navLabel><text>TR-PART II</text></navLabel>\n<content src=\"body.xhtml#part-2\"/>\n<navPoint id=\"section2\"><navLabel><text>TR-Section 2</text></navLabel>\n<content src=\"body.xhtml#section-2\"/>\n</navPoint>\n</navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/body.xhtml",
+   "OEBPS/toc.ncx"
+  ]
+ },
+ "bi_style": {
+  "members": {
+   "OEBPS/body.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Nested</title></head>\n<body>\n<h1 id=\"part-1\">T0-0 PART I</h1><p>T0-1 Part I intro.</p><p class=\"tn-source\" id=\"tn-source-tn0_1\">Part I intro.</p>\n<h2 id=\"section-1\">T0-2 Section 1</h2><p>T0-3 Section 1 body.</p><p class=\"tn-source\" id=\"tn-source-tn0_3\">Section 1 body.</p>\n<h1 id=\"part-2\">T1-0 PART II</h1><p>T1-1 Part II intro.</p><p class=\"tn-source\" id=\"tn-source-tn0_5\">Part II intro.</p>\n<h2 id=\"section-2\">T1-2 Section 2</h2><p>T1-3 Section 2 body.</p><p class=\"tn-source\" id=\"tn-source-tn0_7\">Section 2 body.</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Nested-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest><item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/><item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine toc=\"toc\"><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"part1\"><navLabel><text>TR-PART I</text></navLabel>\n<content src=\"body.xhtml#part-1\"/>\n<navPoint id=\"section1\"><navLabel><text>TR-Section 1</text></navLabel>\n<content src=\"body.xhtml#section-1\"/>\n</navPoint>\n</navPoint>\n<navPoint id=\"part2\"><navLabel><text>TR-PART II</text></navLabel>\n<content src=\"body.xhtml#part-2\"/>\n<navPoint id=\"section2\"><navLabel><text>TR-Section 2</text></navLabel>\n<content src=\"body.xhtml#section-2\"/>\n</navPoint>\n</navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/body.xhtml",
+   "OEBPS/toc.ncx"
+  ]
+ },
+ "mono": {
+  "members": {
+   "OEBPS/body.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Nested</title></head>\n<body>\n<h1 id=\"part-1\">T0-0 PART I</h1><p>T0-1 Part I intro.</p>\n<h2 id=\"section-1\">T0-2 Section 1</h2><p>T0-3 Section 1 body.</p>\n<h1 id=\"part-2\">T1-0 PART II</h1><p>T1-1 Part II intro.</p>\n<h2 id=\"section-2\">T1-2 Section 2</h2><p>T1-3 Section 2 body.</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Nested-wenyi-zh</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest><item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/><item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine toc=\"toc\"><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint id=\"part1\"><navLabel><text>TR-PART I</text></navLabel>\n<content src=\"body.xhtml#part-1\"/>\n<navPoint id=\"section1\"><navLabel><text>TR-Section 1</text></navLabel>\n<content src=\"body.xhtml#section-1\"/>\n</navPoint>\n</navPoint>\n<navPoint id=\"part2\"><navLabel><text>TR-PART II</text></navLabel>\n<content src=\"body.xhtml#part-2\"/>\n<navPoint id=\"section2\"><navLabel><text>TR-Section 2</text></navLabel>\n<content src=\"body.xhtml#section-2\"/>\n</navPoint>\n</navPoint>\n</navMap></ncx>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/body.xhtml",
+   "OEBPS/toc.ncx"
+  ]
+ }
+}

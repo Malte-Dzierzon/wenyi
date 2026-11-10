@@ -1,0 +1,58 @@
+{
+ "bi": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第一章</title><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head>\n<body>\n<h1>T0-0 第一章　出会い</h1>\n<p>T0-1 綾小路は教室の窓際に座っていた。</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">綾小路は教室の窓際に座っていた。</p>\n<p>T0-2 「おはよう、綾小路くん」と堀北が声をかけた。</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_2\">「おはよう、綾小路くん」と堀北が声をかけた。</p>\n</body></html>\n",
+   "OEBPS/ch2.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第二章</title><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head>\n<body>\n<h1>T1-0 第二章　放課後</h1>\n<p>T1-1 放課後、二人は屋上で待ち合わせた。風が強かった。</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn1_1\">放課後、二人は屋上で待ち合わせた。風が強かった。</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package unique-identifier=\"bookid\" version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n<dc:title>サンプル小説-wenyi-zh-bi</dc:title>\n<dc:language>zh-Hans</dc:language>\n</metadata>\n<manifest>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine>\n<itemref idref=\"ch1\"/>\n<itemref idref=\"ch2\"/>\n</spine>\n</package>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml"
+  ]
+ },
+ "bi_src": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第一章</title><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head>\n<body>\n<h1>T0-0 第一章　出会い</h1>\n<p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">綾小路は教室の窓際に座っていた。</p><p>T0-1 綾小路は教室の窓際に座っていた。</p>\n<p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_2\">「おはよう、綾小路くん」と堀北が声をかけた。</p><p>T0-2 「おはよう、綾小路くん」と堀北が声をかけた。</p>\n</body></html>\n",
+   "OEBPS/ch2.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第二章</title><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head>\n<body>\n<h1>T1-0 第二章　放課後</h1>\n<p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn1_1\">放課後、二人は屋上で待ち合わせた。風が強かった。</p><p>T1-1 放課後、二人は屋上で待ち合わせた。風が強かった。</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package unique-identifier=\"bookid\" version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n<dc:title>サンプル小説-wenyi-zh-bi</dc:title>\n<dc:language>zh-Hans</dc:language>\n</metadata>\n<manifest>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine>\n<itemref idref=\"ch1\"/>\n<itemref idref=\"ch2\"/>\n</spine>\n</package>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml"
+  ]
+ },
+ "bi_style": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第一章</title></head>\n<body>\n<h1>T0-0 第一章　出会い</h1>\n<p>T0-1 綾小路は教室の窓際に座っていた。</p><p class=\"tn-source\" id=\"tn-source-tn0_1\">綾小路は教室の窓際に座っていた。</p>\n<p>T0-2 「おはよう、綾小路くん」と堀北が声をかけた。</p><p class=\"tn-source\" id=\"tn-source-tn0_2\">「おはよう、綾小路くん」と堀北が声をかけた。</p>\n</body></html>\n",
+   "OEBPS/ch2.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第二章</title></head>\n<body>\n<h1>T1-0 第二章　放課後</h1>\n<p>T1-1 放課後、二人は屋上で待ち合わせた。風が強かった。</p><p class=\"tn-source\" id=\"tn-source-tn1_1\">放課後、二人は屋上で待ち合わせた。風が強かった。</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package unique-identifier=\"bookid\" version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n<dc:title>サンプル小説-wenyi-zh-bi</dc:title>\n<dc:language>zh-Hans</dc:language>\n</metadata>\n<manifest>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine>\n<itemref idref=\"ch1\"/>\n<itemref idref=\"ch2\"/>\n</spine>\n</package>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml"
+  ]
+ },
+ "mono": {
+  "members": {
+   "OEBPS/ch1.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第一章</title></head>\n<body>\n<h1>T0-0 第一章　出会い</h1>\n<p>T0-1 綾小路は教室の窓際に座っていた。</p>\n<p>T0-2 「おはよう、綾小路くん」と堀北が声をかけた。</p>\n</body></html>\n",
+   "OEBPS/ch2.xhtml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第二章</title></head>\n<body>\n<h1>T1-0 第二章　放課後</h1>\n<p>T1-1 放課後、二人は屋上で待ち合わせた。風が強かった。</p>\n</body></html>\n",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package unique-identifier=\"bookid\" version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n<dc:title>サンプル小説-wenyi-zh</dc:title>\n<dc:language>zh-Hans</dc:language>\n</metadata>\n<manifest>\n<item href=\"ch1.xhtml\" id=\"ch1\" media-type=\"application/xhtml+xml\"/>\n<item href=\"ch2.xhtml\" id=\"ch2\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine>\n<itemref idref=\"ch1\"/>\n<itemref idref=\"ch2\"/>\n</spine>\n</package>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/ch1.xhtml",
+   "OEBPS/ch2.xhtml"
+  ]
+ }
+}

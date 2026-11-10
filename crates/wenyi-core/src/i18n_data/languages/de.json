@@ -1,0 +1,10 @@
+{
+  "label": "German",
+  "english_name": "German",
+  "source_guidance": "Interpret German clause structure, case, grammatical gender and du/Sie. Distinguish grammatical forms from facts about characters.",
+  "target_guidance": "Write idiomatic German literary prose: vary sentence structure (no English SVO monotone), prefer active constructions and German clause rhythm over calqued word order. Embellish flat source phrasing where German fiction conventions call for richer imagery — a plain English sentence may become an elegant German one, as long as no facts change. Keep case, verb placement, noun capitalization and relationship register in du/Sie consistent.",
+  "punctuation_rule": "Follow German quotation, punctuation and spacing conventions. Preserve umlauts, ß and symbol pairing.",
+  "title_rule": "Use conventional German titles and section labels, preserving noun capitalization.",
+  "digest_length": "150 words",
+  "synopsis_length": "350 words"
+}

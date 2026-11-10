@@ -1,0 +1,75 @@
+{
+ "manifest_xhtml_hrefs": [
+  "OEBPS/body.xhtml"
+ ],
+ "opf_path": "OEBPS/content.opf",
+ "spine_hrefs": [
+  "OEBPS/body.xhtml"
+ ],
+ "title": "Nested",
+ "toc_entries": [
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:0",
+   "external": false,
+   "fragment": "part-1",
+   "kind": "ncx",
+   "node_id": "part1",
+   "node_index": 0,
+   "parent_index": null,
+   "raw_href": "body.xhtml#part-1",
+   "resource_href": "OEBPS/body.xhtml",
+   "target_key": "OEBPS/body.xhtml#part-1",
+   "title": "PART I",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 1,
+   "entry_id": "OEBPS/toc.ncx:1",
+   "external": false,
+   "fragment": "section-1",
+   "kind": "ncx",
+   "node_id": "section1",
+   "node_index": 1,
+   "parent_index": 0,
+   "raw_href": "body.xhtml#section-1",
+   "resource_href": "OEBPS/body.xhtml",
+   "target_key": "OEBPS/body.xhtml#section-1",
+   "title": "Section 1",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:2",
+   "external": false,
+   "fragment": "part-2",
+   "kind": "ncx",
+   "node_id": "part2",
+   "node_index": 2,
+   "parent_index": null,
+   "raw_href": "body.xhtml#part-2",
+   "resource_href": "OEBPS/body.xhtml",
+   "target_key": "OEBPS/body.xhtml#part-2",
+   "title": "PART II",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 1,
+   "entry_id": "OEBPS/toc.ncx:3",
+   "external": false,
+   "fragment": "section-2",
+   "kind": "ncx",
+   "node_id": "section2",
+   "node_index": 3,
+   "parent_index": 2,
+   "raw_href": "body.xhtml#section-2",
+   "resource_href": "OEBPS/body.xhtml",
+   "target_key": "OEBPS/body.xhtml#section-2",
+   "title": "Section 2",
+   "toc_path": "OEBPS/toc.ncx"
+  }
+ ],
+ "toc_paths": [
+  "OEBPS/toc.ncx"
+ ]
+}

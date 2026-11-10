@@ -1,0 +1,186 @@
+{
+ "chapters": [
+  {
+   "href": null,
+   "index": 0,
+   "meta": {},
+   "segments": [
+    {
+     "anchor": "tn0_0",
+     "cont": false,
+     "index": 0,
+     "kind": "text",
+     "meta": {},
+     "resource_href": null,
+     "source": "Front matter before any heading.",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "title": ""
+  },
+  {
+   "href": null,
+   "index": 1,
+   "meta": {},
+   "segments": [
+    {
+     "anchor": "tn1_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": null,
+     "source": "Chapter One",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn1_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {
+      "epub_inline": {
+       "nodes": [
+        {
+         "id": "tn1_1_inline_0",
+         "offset": 30,
+         "placement": "inline",
+         "tag": "img"
+        }
+       ],
+       "source_length": 36,
+       "version": 1
+      }
+     },
+     "resource_href": null,
+     "source": "First paragraph with bold and image.",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn1_2",
+     "cont": false,
+     "index": 2,
+     "kind": "text",
+     "meta": {},
+     "resource_href": null,
+     "source": "Quoted text.",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "title": "Chapter One"
+  },
+  {
+   "href": null,
+   "index": 2,
+   "meta": {},
+   "segments": [
+    {
+     "anchor": "tn2_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": null,
+     "source": "Section 1.1",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn2_1",
+     "cont": false,
+     "index": 1,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": null,
+     "source": "Deep dive",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn2_2",
+     "cont": false,
+     "index": 2,
+     "kind": "text",
+     "meta": {},
+     "resource_href": null,
+     "source": "Nested heading run body.",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn2_3",
+     "cont": false,
+     "index": 3,
+     "kind": "text",
+     "meta": {},
+     "resource_href": null,
+     "source": "First item",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn2_4",
+     "cont": false,
+     "index": 4,
+     "kind": "text",
+     "meta": {},
+     "resource_href": null,
+     "source": "Second item",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "title": "Section 1.1 / Deep dive"
+  },
+  {
+   "href": null,
+   "index": 3,
+   "meta": {},
+   "segments": [
+    {
+     "anchor": "tn3_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": null,
+     "source": "Chapter Two",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn3_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {},
+     "resource_href": null,
+     "source": "Second chapter body with ruby: 漢〘かん〙字.",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "title": "Chapter Two"
+  }
+ ],
+ "fmt": "html",
+ "meta": {
+  "chapter_tags": [
+   "h2",
+   "h1",
+   "h3",
+   "h5",
+   "h4",
+   "h6"
+  ],
+  "head_html": "<title>Book</title><style>p { color: red; }</style>"
+ },
+ "source_lang": "ja",
+ "source_path": "<abs>/sample.html",
+ "target_lang": "zh",
+ "title": "sample"
+}

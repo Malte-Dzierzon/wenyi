@@ -1,0 +1,64 @@
+{
+ "manifest_xhtml_hrefs": [
+  "OEBPS/ch1.xhtml",
+  "OEBPS/ch2.xhtml",
+  "OEBPS/ch3.xhtml"
+ ],
+ "opf_path": "OEBPS/content.opf",
+ "spine_hrefs": [
+  "OEBPS/ch1.xhtml",
+  "OEBPS/ch2.xhtml",
+  "OEBPS/ch3.xhtml"
+ ],
+ "title": "Degenerate",
+ "toc_entries": [
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:0",
+   "external": false,
+   "fragment": "",
+   "kind": "ncx",
+   "node_id": "ch1",
+   "node_index": 0,
+   "parent_index": null,
+   "raw_href": "ch1.xhtml",
+   "resource_href": "OEBPS/ch1.xhtml",
+   "target_key": "OEBPS/ch1.xhtml",
+   "title": "One",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:1",
+   "external": false,
+   "fragment": "",
+   "kind": "ncx",
+   "node_id": "ch2",
+   "node_index": 1,
+   "parent_index": null,
+   "raw_href": "ch1.xhtml",
+   "resource_href": "OEBPS/ch1.xhtml",
+   "target_key": "OEBPS/ch1.xhtml",
+   "title": "Two",
+   "toc_path": "OEBPS/toc.ncx"
+  },
+  {
+   "depth": 0,
+   "entry_id": "OEBPS/toc.ncx:2",
+   "external": false,
+   "fragment": "",
+   "kind": "ncx",
+   "node_id": "ch3",
+   "node_index": 2,
+   "parent_index": null,
+   "raw_href": "ch1.xhtml",
+   "resource_href": "OEBPS/ch1.xhtml",
+   "target_key": "OEBPS/ch1.xhtml",
+   "title": "Three",
+   "toc_path": "OEBPS/toc.ncx"
+  }
+ ],
+ "toc_paths": [
+  "OEBPS/toc.ncx"
+ ]
+}

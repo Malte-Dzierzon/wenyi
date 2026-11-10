@@ -1,0 +1,24 @@
+[package]
+name = "wenyi-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Wenyi translation engine: store, documents, LLM, pipeline, jobs (no UI deps)."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+rusqlite.workspace = true
+serde_yaml = "0.9"
+sha2.workspace = true
+tiktoken-rs.workspace = true
+zip.workspace = true
+quick-xml.workspace = true
+unicode-normalization = "0.1.26"
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

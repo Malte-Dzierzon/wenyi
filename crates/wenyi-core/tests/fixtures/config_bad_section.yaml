@@ -1,0 +1,5 @@
+language:
+  source: en
+  target: zh
+unknown_section:
+  foo: 1

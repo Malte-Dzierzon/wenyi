@@ -1,0 +1,14 @@
+{
+ "manifest_xhtml_hrefs": [
+  "OEBPS/ch1.xhtml",
+  "OEBPS/ch2.xhtml"
+ ],
+ "opf_path": "OEBPS/content.opf",
+ "spine_hrefs": [
+  "OEBPS/ch1.xhtml",
+  "OEBPS/ch2.xhtml"
+ ],
+ "title": "サンプル小説",
+ "toc_entries": [],
+ "toc_paths": []
+}

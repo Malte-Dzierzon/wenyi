@@ -1,0 +1,74 @@
+{
+ "bi": {
+  "members": {
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Cross-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"one.xhtml\" id=\"one\" media-type=\"application/xhtml+xml\"/>\n<item href=\"two.xhtml\" id=\"two\" media-type=\"application/xhtml+xml\"/>\n<item href=\"three.xhtml\" id=\"three\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"one\"/><itemref idref=\"two\"/><itemref idref=\"three\"/></spine>\n</package>",
+   "OEBPS/one.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1 id=\"part-1\">T0-0 PART I</h1><p>T0-1 One.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">One.</p></body></html>",
+   "OEBPS/three.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1 id=\"part-2\">T1-0 PART II</h1><p>T1-1 Three.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn2_1\">Three.</p></body></html>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint><navLabel><text>TR-PART I</text></navLabel><content src=\"one.xhtml#part-1\"/>\n<navPoint><navLabel><text>TR-Section 1</text></navLabel><content src=\"two.xhtml#section-1\"/></navPoint>\n</navPoint>\n<navPoint><navLabel><text>TR-PART II</text></navLabel><content src=\"three.xhtml#part-2\"/></navPoint>\n</navMap></ncx>",
+   "OEBPS/two.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h2 id=\"section-1\">T0-2 Section 1</h2><p>T0-3 Two.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn1_1\">Two.</p></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/one.xhtml",
+   "OEBPS/two.xhtml",
+   "OEBPS/three.xhtml"
+  ]
+ },
+ "bi_src": {
+  "members": {
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Cross-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"one.xhtml\" id=\"one\" media-type=\"application/xhtml+xml\"/>\n<item href=\"two.xhtml\" id=\"two\" media-type=\"application/xhtml+xml\"/>\n<item href=\"three.xhtml\" id=\"three\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"one\"/><itemref idref=\"two\"/><itemref idref=\"three\"/></spine>\n</package>",
+   "OEBPS/one.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1 id=\"part-1\">T0-0 PART I</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">One.</p><p>T0-1 One.</p></body></html>",
+   "OEBPS/three.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h1 id=\"part-2\">T1-0 PART II</h1><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn2_1\">Three.</p><p>T1-1 Three.</p></body></html>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint><navLabel><text>TR-PART I</text></navLabel><content src=\"one.xhtml#part-1\"/>\n<navPoint><navLabel><text>TR-Section 1</text></navLabel><content src=\"two.xhtml#section-1\"/></navPoint>\n</navPoint>\n<navPoint><navLabel><text>TR-PART II</text></navLabel><content src=\"three.xhtml#part-2\"/></navPoint>\n</navMap></ncx>",
+   "OEBPS/two.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><h2 id=\"section-1\">T0-2 Section 1</h2><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn1_1\">Two.</p><p>T0-3 Two.</p></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/one.xhtml",
+   "OEBPS/two.xhtml",
+   "OEBPS/three.xhtml"
+  ]
+ },
+ "bi_style": {
+  "members": {
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Cross-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"one.xhtml\" id=\"one\" media-type=\"application/xhtml+xml\"/>\n<item href=\"two.xhtml\" id=\"two\" media-type=\"application/xhtml+xml\"/>\n<item href=\"three.xhtml\" id=\"three\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"one\"/><itemref idref=\"two\"/><itemref idref=\"three\"/></spine>\n</package>",
+   "OEBPS/one.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1 id=\"part-1\">T0-0 PART I</h1><p>T0-1 One.</p><p class=\"tn-source\" id=\"tn-source-tn0_1\">One.</p></body></html>",
+   "OEBPS/three.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1 id=\"part-2\">T1-0 PART II</h1><p>T1-1 Three.</p><p class=\"tn-source\" id=\"tn-source-tn2_1\">Three.</p></body></html>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint><navLabel><text>TR-PART I</text></navLabel><content src=\"one.xhtml#part-1\"/>\n<navPoint><navLabel><text>TR-Section 1</text></navLabel><content src=\"two.xhtml#section-1\"/></navPoint>\n</navPoint>\n<navPoint><navLabel><text>TR-PART II</text></navLabel><content src=\"three.xhtml#part-2\"/></navPoint>\n</navMap></ncx>",
+   "OEBPS/two.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h2 id=\"section-1\">T0-2 Section 1</h2><p>T0-3 Two.</p><p class=\"tn-source\" id=\"tn-source-tn1_1\">Two.</p></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/one.xhtml",
+   "OEBPS/two.xhtml",
+   "OEBPS/three.xhtml"
+  ]
+ },
+ "mono": {
+  "members": {
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"2.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Cross-wenyi-zh</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"toc.ncx\" id=\"toc\" media-type=\"application/x-dtbncx+xml\"/>\n<item href=\"one.xhtml\" id=\"one\" media-type=\"application/xhtml+xml\"/>\n<item href=\"two.xhtml\" id=\"two\" media-type=\"application/xhtml+xml\"/>\n<item href=\"three.xhtml\" id=\"three\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine toc=\"toc\"><itemref idref=\"one\"/><itemref idref=\"two\"/><itemref idref=\"three\"/></spine>\n</package>",
+   "OEBPS/one.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1 id=\"part-1\">T0-0 PART I</h1><p>T0-1 One.</p></body></html>",
+   "OEBPS/three.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h1 id=\"part-2\">T1-0 PART II</h1><p>T1-1 Three.</p></body></html>",
+   "OEBPS/toc.ncx": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\"><navMap>\n<navPoint><navLabel><text>TR-PART I</text></navLabel><content src=\"one.xhtml#part-1\"/>\n<navPoint><navLabel><text>TR-Section 1</text></navLabel><content src=\"two.xhtml#section-1\"/></navPoint>\n</navPoint>\n<navPoint><navLabel><text>TR-PART II</text></navLabel><content src=\"three.xhtml#part-2\"/></navPoint>\n</navMap></ncx>",
+   "OEBPS/two.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body><h2 id=\"section-1\">T0-2 Section 1</h2><p>T0-3 Two.</p></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/toc.ncx",
+   "OEBPS/one.xhtml",
+   "OEBPS/two.xhtml",
+   "OEBPS/three.xhtml"
+  ]
+ }
+}

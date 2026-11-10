@@ -1,0 +1,843 @@
+{
+  "bodies": {
+    "base_json": {
+      "messages": [
+        {
+          "content": "You translate.\n\nOutput must be valid json.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world\n\nOutput must be valid json.",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "response_format": {
+        "type": "json_object"
+      },
+      "stream": false
+    },
+    "base_plain": {
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    },
+    "compatible_deepseek": {
+      "extra_body": {
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    },
+    "compatible_none": {
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    },
+    "compatible_openai": {
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "reasoning_effort": "none",
+      "stream": false
+    },
+    "compatible_openrouter": {
+      "extra_body": {
+        "reasoning": {
+          "enabled": false
+        }
+      },
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    },
+    "deepseek": {
+      "extra_body": {
+        "thinking": {
+          "type": "enabled"
+        }
+      },
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "reasoning_effort": "high",
+      "stream": false
+    },
+    "deepseek_json": {
+      "extra_body": {
+        "thinking": {
+          "type": "enabled"
+        }
+      },
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.\n\nOutput must be valid json.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world\n\nOutput must be valid json.",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "reasoning_effort": "high",
+      "response_format": {
+        "type": "json_object"
+      },
+      "stream": false
+    },
+    "deepseek_no_think": {
+      "extra_body": {
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    },
+    "gemini_contents": [
+      "You translate.",
+      [
+        {
+          "parts": [
+            {
+              "text": "Hello world"
+            }
+          ],
+          "role": "user"
+        }
+      ]
+    ],
+    "openai": {
+      "max_completion_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "reasoning_effort": "high",
+      "stream": false
+    },
+    "opencode_go": {
+      "extra_body": {
+        "reasoning_effort": "low"
+      },
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    },
+    "openrouter": {
+      "extra_body": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "max_tokens": 100,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "m",
+      "stream": false
+    }
+  },
+  "fake_calls": [
+    {
+      "json_mode": false,
+      "max_tokens": 8192,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "fake",
+      "operation": "translation.body",
+      "provider": "default",
+      "stage": "translation.body",
+      "tier": "strong"
+    },
+    {
+      "json_mode": true,
+      "max_tokens": 50,
+      "messages": [
+        {
+          "content": "You translate.",
+          "role": "system"
+        },
+        {
+          "content": "Hello world",
+          "role": "user"
+        }
+      ],
+      "model": "fake",
+      "operation": "glossary.curate",
+      "provider": "default",
+      "stage": "glossary.curate",
+      "tier": "cheap"
+    }
+  ],
+  "operations": [
+    "analysis.style",
+    "annotation.align",
+    "autofix.fix",
+    "autofix.verify",
+    "glossary.align_history",
+    "glossary.curate",
+    "glossary.extract",
+    "language.detect",
+    "polish.body",
+    "review.arbitrate",
+    "review.fix",
+    "review.scan",
+    "review.verify",
+    "srt.translate",
+    "synopsis.book",
+    "synopsis.chapter",
+    "translation.body",
+    "translation.title"
+  ],
+  "repairs": {
+    "extra_close": {
+      "kind": "boundary_only",
+      "repaired": true,
+      "value": {
+        "a": 1
+      }
+    },
+    "fenced": {
+      "kind": "boundary_only",
+      "repaired": true,
+      "value": {
+        "a": 1
+      }
+    },
+    "missing_close": {
+      "kind": "boundary_only",
+      "repaired": true,
+      "value": {
+        "a": 1
+      }
+    },
+    "prose": {
+      "error": "JsonParseError"
+    },
+    "strict": {
+      "kind": "none",
+      "repaired": false,
+      "value": {
+        "a": 1
+      }
+    }
+  },
+  "retry": [
+    {
+      "category": "invalid_request",
+      "reason": null,
+      "resumable": false,
+      "status": 400
+    },
+    {
+      "category": "authentication_failed",
+      "reason": null,
+      "resumable": false,
+      "status": 401
+    },
+    {
+      "category": "insufficient_balance",
+      "reason": null,
+      "resumable": true,
+      "status": 402
+    },
+    {
+      "category": "permission_denied",
+      "reason": null,
+      "resumable": false,
+      "status": 403
+    },
+    {
+      "category": "model_or_endpoint_not_found",
+      "reason": null,
+      "resumable": false,
+      "status": 404
+    },
+    {
+      "category": "timeout",
+      "reason": "http_408",
+      "resumable": true,
+      "status": 408
+    },
+    {
+      "category": "http_error",
+      "reason": "http_409",
+      "resumable": true,
+      "status": 409
+    },
+    {
+      "category": "invalid_request",
+      "reason": null,
+      "resumable": false,
+      "status": 422
+    },
+    {
+      "category": "rate_limited",
+      "reason": "http_429",
+      "resumable": true,
+      "status": 429
+    },
+    {
+      "category": "provider_unavailable",
+      "reason": "http_500",
+      "resumable": true,
+      "status": 500
+    },
+    {
+      "category": "provider_unavailable",
+      "reason": "http_503",
+      "resumable": true,
+      "status": 503
+    },
+    {
+      "category": "empty_response",
+      "kind": "empty",
+      "reason": "empty_response",
+      "status": null
+    },
+    {
+      "category": "truncated_response",
+      "kind": "truncated_synopsis",
+      "reason": "truncated_response",
+      "status": null
+    },
+    {
+      "kind": "truncated_translation",
+      "reason": null,
+      "status": null
+    }
+  ],
+  "route_describe": {
+    "endpoint": "https://api.deepseek.com",
+    "fallbacks": [],
+    "fingerprint": "5d5873578859c94af58bcfc9f9568064c12a6a9fd70e4fd87820b8c3d83ecbb4",
+    "max_input_tokens": null,
+    "max_output_tokens": 8192,
+    "model": "deepseek-flash",
+    "model_identity": "67042157dd089b0492c86d397c1a8b3f60b5222f7e5a169ec138183bad7379ca",
+    "operation": "translation.body",
+    "options": {
+      "extra_body": {},
+      "reasoning_effort": "high",
+      "thinking": true
+    },
+    "origin": "default tier strong",
+    "profile": "default_strong",
+    "provider": "default",
+    "provider_identity": "338d258f3b317fff605a2e0c82b48292e907a0b2c76e74f4feff9fac53500b02",
+    "provider_kind": "deepseek",
+    "tier": "strong"
+  },
+  "snapshot": {
+    "analysis.style": {
+      "fallbacks": [],
+      "primary": "3b021abe28785c4394393abfdf256b558b77dd42bd9a3cd3d7c56a2aaf39231f"
+    },
+    "annotation.align": {
+      "fallbacks": [],
+      "primary": "f4011d8cde3ee05bb04ddba821d5373af83b13e8bb848772be366e1349504a88"
+    },
+    "autofix.fix": {
+      "fallbacks": [],
+      "primary": "9c6938c82ed7969e0a7ea52f42be3d8828c9f2013a7526dc7425c50696d133a8"
+    },
+    "autofix.verify": {
+      "fallbacks": [],
+      "primary": "1b5f8a92e5a44ce752fc7073fff82b5cd27474da1048a35e69b521876add832d"
+    },
+    "glossary.align_history": {
+      "fallbacks": [],
+      "primary": "af7bc835ab24077af4a5f22d96b7c9bc9bb6a95a199673850150468ce9ae0757"
+    },
+    "glossary.curate": {
+      "fallbacks": [],
+      "primary": "75718cebf7572ffac51569734497ebc22c6a3904b8d050d8c9f436d06c92a5de"
+    },
+    "glossary.extract": {
+      "fallbacks": [],
+      "primary": "9c690d403cae491f61e01691ceeeece5d4faae1ecaafb7aea968f219a0f63172"
+    },
+    "language.detect": {
+      "fallbacks": [],
+      "primary": "146ea0d3a4d19d7a65a0c39290b8442523df24fb6fe370c619d948155bf584c6"
+    },
+    "polish.body": {
+      "fallbacks": [],
+      "primary": "a36b491dcbd8f92665550f596a4a8a573bf751afee16ea2ee7a28af2b9a104d0"
+    },
+    "review.arbitrate": {
+      "fallbacks": [],
+      "primary": "e82ae352e10861e92dbb000618017cce9508a12361b231c4dcb4b6e40e246c5d"
+    },
+    "review.fix": {
+      "fallbacks": [],
+      "primary": "17af4176524af7cd5bcd6c2734b982533763378dceacf179539bda396b1f6cb4"
+    },
+    "review.scan": {
+      "fallbacks": [],
+      "primary": "0f11309150a5a7a975480e784e8215f533728a6aa8b9f87b0360b0bca9095597"
+    },
+    "review.verify": {
+      "fallbacks": [],
+      "primary": "96501864996c2eac749855b8eb479ad42d83b0922d143cf375658e48b76a4001"
+    },
+    "srt.translate": {
+      "fallbacks": [],
+      "primary": "7c8cd9427d517c325a6fee6a97c5b3b72042af90ea8a8585ae002be7947b30f5"
+    },
+    "synopsis.book": {
+      "fallbacks": [],
+      "primary": "1f3bc1bb2b000b17b8317dea1d70ba8d11ab350b7e5c8b588482cb25c5cfa2c8"
+    },
+    "synopsis.chapter": {
+      "fallbacks": [],
+      "primary": "91ab283c6ed096e9945dc51dbf5f304b4431f6262009271c2aa584df7760b4fe"
+    },
+    "translation.body": {
+      "fallbacks": [],
+      "primary": "5d5873578859c94af58bcfc9f9568064c12a6a9fd70e4fd87820b8c3d83ecbb4"
+    },
+    "translation.title": {
+      "fallbacks": [],
+      "primary": "0e3e1cf29d947e4ed580f2b683ea21ea29fea5243d38dcbb8164845ec4b4e937"
+    }
+  },
+  "usage_delta": {
+    "by_model": {
+      "m1": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 1,
+        "completion_ms": 1200,
+        "completion_tokens": 50,
+        "prompt_tokens": 100,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 150
+      },
+      "m2": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 1,
+        "completion_ms": 0,
+        "completion_tokens": 5,
+        "prompt_tokens": 10,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 15
+      }
+    },
+    "by_provider": {
+      "p1": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 2,
+        "completion_ms": 1200,
+        "completion_tokens": 55,
+        "prompt_tokens": 110,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 165
+      }
+    },
+    "by_stage": {
+      "glossary.curate": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 1,
+        "completion_ms": 0,
+        "completion_tokens": 5,
+        "prompt_tokens": 10,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 15
+      },
+      "translation.body": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 1,
+        "completion_ms": 1200,
+        "completion_tokens": 50,
+        "prompt_tokens": 100,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 150
+      }
+    },
+    "by_tier": {
+      "cheap": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 1,
+        "completion_ms": 0,
+        "completion_tokens": 5,
+        "prompt_tokens": 10,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 15
+      },
+      "strong": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 1,
+        "completion_ms": 1200,
+        "completion_tokens": 50,
+        "prompt_tokens": 100,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 150
+      }
+    },
+    "labels": {
+      "m1": "deepseek / m",
+      "p1": "deepseek x"
+    },
+    "schema_version": 2,
+    "totals": {
+      "cache_hit_rate": 0.2,
+      "cache_hit_tokens": 20,
+      "cache_miss_tokens": 80,
+      "calls": 2,
+      "completion_ms": 1200,
+      "completion_tokens": 55,
+      "prompt_tokens": 110,
+      "timed_calls": 1,
+      "timed_completion_tokens": 50,
+      "total_tokens": 165
+    }
+  },
+  "usage_merged": {
+    "by_model": {
+      "m1": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 40,
+        "cache_miss_tokens": 160,
+        "calls": 2,
+        "completion_ms": 2400,
+        "completion_tokens": 100,
+        "prompt_tokens": 200,
+        "timed_calls": 2,
+        "timed_completion_tokens": 100,
+        "total_tokens": 300
+      },
+      "m2": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 2,
+        "completion_ms": 0,
+        "completion_tokens": 10,
+        "prompt_tokens": 20,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 30
+      }
+    },
+    "by_provider": {
+      "p1": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 40,
+        "cache_miss_tokens": 160,
+        "calls": 4,
+        "completion_ms": 2400,
+        "completion_tokens": 110,
+        "prompt_tokens": 220,
+        "timed_calls": 2,
+        "timed_completion_tokens": 100,
+        "total_tokens": 330
+      }
+    },
+    "by_stage": {
+      "glossary.curate": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 2,
+        "completion_ms": 0,
+        "completion_tokens": 10,
+        "prompt_tokens": 20,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 30
+      },
+      "translation.body": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 40,
+        "cache_miss_tokens": 160,
+        "calls": 2,
+        "completion_ms": 2400,
+        "completion_tokens": 100,
+        "prompt_tokens": 200,
+        "timed_calls": 2,
+        "timed_completion_tokens": 100,
+        "total_tokens": 300
+      }
+    },
+    "by_tier": {
+      "cheap": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 2,
+        "completion_ms": 0,
+        "completion_tokens": 10,
+        "prompt_tokens": 20,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 30
+      },
+      "strong": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 40,
+        "cache_miss_tokens": 160,
+        "calls": 2,
+        "completion_ms": 2400,
+        "completion_tokens": 100,
+        "prompt_tokens": 200,
+        "timed_calls": 2,
+        "timed_completion_tokens": 100,
+        "total_tokens": 300
+      }
+    },
+    "labels": {
+      "m1": "deepseek / m",
+      "p1": "deepseek x"
+    },
+    "schema_version": 2,
+    "totals": {
+      "cache_hit_rate": 0.2,
+      "cache_hit_tokens": 40,
+      "cache_miss_tokens": 160,
+      "calls": 4,
+      "completion_ms": 2400,
+      "completion_tokens": 110,
+      "prompt_tokens": 220,
+      "timed_calls": 2,
+      "timed_completion_tokens": 100,
+      "total_tokens": 330
+    }
+  },
+  "usage_summary": {
+    "by_model": {
+      "m1": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 1,
+        "completion_ms": 1200,
+        "completion_tokens": 50,
+        "prompt_tokens": 100,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 150
+      },
+      "m2": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 1,
+        "completion_ms": 0,
+        "completion_tokens": 5,
+        "prompt_tokens": 10,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 15
+      }
+    },
+    "by_provider": {
+      "p1": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 2,
+        "completion_ms": 1200,
+        "completion_tokens": 55,
+        "prompt_tokens": 110,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 165
+      }
+    },
+    "by_stage": {
+      "glossary.curate": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 1,
+        "completion_ms": 0,
+        "completion_tokens": 5,
+        "prompt_tokens": 10,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 15
+      },
+      "translation.body": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 1,
+        "completion_ms": 1200,
+        "completion_tokens": 50,
+        "prompt_tokens": 100,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 150
+      }
+    },
+    "by_tier": {
+      "cheap": {
+        "cache_hit_rate": 0.0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "calls": 1,
+        "completion_ms": 0,
+        "completion_tokens": 5,
+        "prompt_tokens": 10,
+        "timed_calls": 0,
+        "timed_completion_tokens": 0,
+        "total_tokens": 15
+      },
+      "strong": {
+        "cache_hit_rate": 0.2,
+        "cache_hit_tokens": 20,
+        "cache_miss_tokens": 80,
+        "calls": 1,
+        "completion_ms": 1200,
+        "completion_tokens": 50,
+        "prompt_tokens": 100,
+        "timed_calls": 1,
+        "timed_completion_tokens": 50,
+        "total_tokens": 150
+      }
+    },
+    "labels": {
+      "m1": "deepseek / m",
+      "p1": "deepseek x"
+    },
+    "schema_version": 2,
+    "totals": {
+      "cache_hit_rate": 0.2,
+      "cache_hit_tokens": 20,
+      "cache_miss_tokens": 80,
+      "calls": 2,
+      "completion_ms": 1200,
+      "completion_tokens": 55,
+      "prompt_tokens": 110,
+      "timed_calls": 1,
+      "timed_completion_tokens": 50,
+      "total_tokens": 165
+    }
+  }
+}

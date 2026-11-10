@@ -1,0 +1,92 @@
+[
+ {
+  "href": "OEBPS/ch1.xhtml",
+  "index": 0,
+  "segments": [
+   {
+    "anchor": "tn0_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/ch1.xhtml",
+    "source": "One",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/ch1.xhtml",
+    "source": "First body.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<html><body><h1 data-tn-id=\"tn0_0\">One</h1><p data-tn-id=\"tn0_1\">First body.</p></body></html>",
+  "title": "One"
+ },
+ {
+  "href": "OEBPS/ch2.xhtml",
+  "index": 1,
+  "segments": [
+   {
+    "anchor": "tn1_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/ch2.xhtml",
+    "source": "Two",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn1_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/ch2.xhtml",
+    "source": "Second body.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<html><body><h1 data-tn-id=\"tn1_0\">Two</h1><p data-tn-id=\"tn1_1\">Second body.</p></body></html>",
+  "title": "Two"
+ },
+ {
+  "href": "OEBPS/ch3.xhtml",
+  "index": 2,
+  "segments": [
+   {
+    "anchor": "tn2_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/ch3.xhtml",
+    "source": "Three",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn2_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/ch3.xhtml",
+    "source": "Third body.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<html><body><h1 data-tn-id=\"tn2_0\">Three</h1><p data-tn-id=\"tn2_1\">Third body.</p></body></html>",
+  "title": "Three"
+ }
+]

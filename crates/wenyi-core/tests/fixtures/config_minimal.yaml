@@ -1,0 +1,5 @@
+language:
+  source: auto
+  target: en
+llm:
+  preset: fake

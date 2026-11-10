@@ -1,0 +1,58 @@
+{
+ "bi": {
+  "members": {
+   "OEBPS/body.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body>\n<h2 id=\"section-1\">T0-0 Section 1</h2><p>T0-1 One.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">One.</p>\n<h2 id=\"section-2\">T1-0 Section 2</h2><p>T1-1 Two.</p><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_3\">Two.</p>\n</body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Grouped-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"nav.xhtml\" id=\"nav\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n<item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/>\n</manifest><spine><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/nav.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><nav epub:type=\"toc\"><ol>\n<li><span>TR-PART I</span><ol><li><a href=\"body.xhtml#section-1\">TR-Section 1</a></li></ol></li>\n<li><span>TR-PART II</span><ol><li><a href=\"body.xhtml#section-2\">TR-Section 2</a></li></ol></li>\n</ol></nav></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/nav.xhtml",
+   "OEBPS/body.xhtml"
+  ]
+ },
+ "bi_src": {
+  "members": {
+   "OEBPS/body.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body>\n<h2 id=\"section-1\">T0-0 Section 1</h2><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_1\">One.</p><p>T0-1 One.</p>\n<h2 id=\"section-2\">T1-0 Section 2</h2><p class=\"tn-source ibooks-dark-theme-use-custom-text-color\" id=\"tn-source-tn0_3\">Two.</p><p>T1-1 Two.</p>\n</body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Grouped-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"nav.xhtml\" id=\"nav\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n<item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/>\n</manifest><spine><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/nav.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><style id=\"tn-bilingual-style\">.tn-source {\n  font-size: 0.88em;\n  line-height: 1.55;\n  color: #6b6b6b;\n  background-color: #f4f3f0;\n  padding: 0.5em 0.8em;\n  border-radius: 5px;\n  margin: 0.2em 0 1em;\n}\n@media (prefers-color-scheme: dark) {\n  .tn-source {\n    color: #a8a8a8;\n    background-color: #2a2a2a;\n    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);\n  }\n}\n</style></head><body><nav epub:type=\"toc\"><ol>\n<li><span>TR-PART I</span><ol><li><a href=\"body.xhtml#section-1\">TR-Section 1</a></li></ol></li>\n<li><span>TR-PART II</span><ol><li><a href=\"body.xhtml#section-2\">TR-Section 2</a></li></ol></li>\n</ol></nav></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/nav.xhtml",
+   "OEBPS/body.xhtml"
+  ]
+ },
+ "bi_style": {
+  "members": {
+   "OEBPS/body.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body>\n<h2 id=\"section-1\">T0-0 Section 1</h2><p>T0-1 One.</p><p class=\"tn-source\" id=\"tn-source-tn0_1\">One.</p>\n<h2 id=\"section-2\">T1-0 Section 2</h2><p>T1-1 Two.</p><p class=\"tn-source\" id=\"tn-source-tn0_3\">Two.</p>\n</body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Grouped-wenyi-zh-bi</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"nav.xhtml\" id=\"nav\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n<item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/>\n</manifest><spine><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/nav.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><body><nav epub:type=\"toc\"><ol>\n<li><span>TR-PART I</span><ol><li><a href=\"body.xhtml#section-1\">TR-Section 1</a></li></ol></li>\n<li><span>TR-PART II</span><ol><li><a href=\"body.xhtml#section-2\">TR-Section 2</a></li></ol></li>\n</ol></nav></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/nav.xhtml",
+   "OEBPS/body.xhtml"
+  ]
+ },
+ "mono": {
+  "members": {
+   "OEBPS/body.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\"><body>\n<h2 id=\"section-1\">T0-0 Section 1</h2><p>T0-1 One.</p>\n<h2 id=\"section-2\">T1-0 Section 2</h2><p>T1-1 Two.</p>\n</body></html>",
+   "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package version=\"3.0\" xmlns=\"http://www.idpf.org/2007/opf\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Grouped-wenyi-zh</dc:title><dc:language>zh-Hans</dc:language></metadata>\n<manifest>\n<item href=\"nav.xhtml\" id=\"nav\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n<item href=\"body.xhtml\" id=\"body\" media-type=\"application/xhtml+xml\"/>\n</manifest><spine><itemref idref=\"body\"/></spine></package>",
+   "OEBPS/nav.xhtml": "<html lang=\"zh-Hans\" xml:lang=\"zh-Hans\" xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><body><nav epub:type=\"toc\"><ol>\n<li><span>TR-PART I</span><ol><li><a href=\"body.xhtml#section-1\">TR-Section 1</a></li></ol></li>\n<li><span>TR-PART II</span><ol><li><a href=\"body.xhtml#section-2\">TR-Section 2</a></li></ol></li>\n</ol></nav></body></html>"
+  },
+  "namelist": [
+   "mimetype",
+   "META-INF/container.xml",
+   "OEBPS/content.opf",
+   "OEBPS/nav.xhtml",
+   "OEBPS/body.xhtml"
+  ]
+ }
+}

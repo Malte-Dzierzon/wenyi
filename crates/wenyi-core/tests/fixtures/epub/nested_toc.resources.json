@@ -1,0 +1,98 @@
+[
+ {
+  "href": "OEBPS/body.xhtml",
+  "index": 0,
+  "segments": [
+   {
+    "anchor": "tn0_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "PART I",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "Part I intro.",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_2",
+    "cont": false,
+    "index": 2,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "Section 1",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_3",
+    "cont": false,
+    "index": 3,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "Section 1 body.",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_4",
+    "cont": false,
+    "index": 4,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "PART II",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_5",
+    "cont": false,
+    "index": 5,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "Part II intro.",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_6",
+    "cont": false,
+    "index": 6,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "Section 2",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_7",
+    "cont": false,
+    "index": 7,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/body.xhtml",
+    "source": "Section 2 body.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Nested</title></head>\n<body>\n<h1 data-tn-id=\"tn0_0\" id=\"part-1\">PART I</h1><p data-tn-id=\"tn0_1\">Part I intro.</p>\n<h2 data-tn-id=\"tn0_2\" id=\"section-1\">Section 1</h2><p data-tn-id=\"tn0_3\">Section 1 body.</p>\n<h1 data-tn-id=\"tn0_4\" id=\"part-2\">PART II</h1><p data-tn-id=\"tn0_5\">Part II intro.</p>\n<h2 data-tn-id=\"tn0_6\" id=\"section-2\">Section 2</h2><p data-tn-id=\"tn0_7\">Section 2 body.</p>\n</body></html>\n",
+  "title": "PART I"
+ }
+]

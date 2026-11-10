@@ -1,0 +1,73 @@
+[
+ {
+  "href": "OEBPS/ch1.xhtml",
+  "index": 0,
+  "segments": [
+   {
+    "anchor": "tn0_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/ch1.xhtml",
+    "source": "第一章　出会い",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/ch1.xhtml",
+    "source": "綾小路は教室の窓際に座っていた。",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_2",
+    "cont": false,
+    "index": 2,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/ch1.xhtml",
+    "source": "「おはよう、綾小路くん」と堀北が声をかけた。",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第一章</title></head>\n<body>\n<h1 data-tn-id=\"tn0_0\">第一章　出会い</h1>\n<p data-tn-id=\"tn0_1\">綾小路は教室の窓際に座っていた。</p>\n<p data-tn-id=\"tn0_2\">「おはよう、綾小路くん」と堀北が声をかけた。</p>\n</body></html>\n",
+  "title": "第一章　出会い"
+ },
+ {
+  "href": "OEBPS/ch2.xhtml",
+  "index": 1,
+  "segments": [
+   {
+    "anchor": "tn1_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/ch2.xhtml",
+    "source": "第二章　放課後",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn1_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/ch2.xhtml",
+    "source": "放課後、二人は屋上で待ち合わせた。風が強かった。",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>第二章</title></head>\n<body>\n<h1 data-tn-id=\"tn1_0\">第二章　放課後</h1>\n<p data-tn-id=\"tn1_1\">放課後、二人は屋上で待ち合わせた。風が強かった。</p>\n</body></html>\n",
+  "title": "第二章　放課後"
+ }
+]

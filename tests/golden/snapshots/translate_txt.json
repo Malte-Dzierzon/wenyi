@@ -1,0 +1,75 @@
+{
+  "chapters": [
+    {
+      "index": 0,
+      "segments": [
+        {
+          "has_polish_baseline": true,
+          "index": 0,
+          "target": "润0"
+        },
+        {
+          "has_polish_baseline": true,
+          "index": 1,
+          "target": "润1"
+        },
+        {
+          "has_polish_baseline": true,
+          "index": 2,
+          "target": "润2"
+        }
+      ],
+      "title": "Chapter One"
+    },
+    {
+      "index": 1,
+      "segments": [
+        {
+          "has_polish_baseline": true,
+          "index": 0,
+          "target": "润0"
+        },
+        {
+          "has_polish_baseline": true,
+          "index": 1,
+          "target": "润1"
+        },
+        {
+          "has_polish_baseline": true,
+          "index": 2,
+          "target": "润2"
+        }
+      ],
+      "title": "Chapter Two"
+    }
+  ],
+  "events": [
+    {
+      "allow_empty_translations": false,
+      "chapters": [
+        0,
+        1
+      ],
+      "event": "translate_run_started",
+      "only_chapter": null,
+      "total_segments": 6
+    },
+    {
+      "event": "translate_run_finished",
+      "total_segments": 6
+    }
+  ],
+  "translated_segments": 6,
+  "usage_totals": {
+    "cache_hit_rate": 0.0,
+    "cache_hit_tokens": 0,
+    "cache_miss_tokens": 65,
+    "calls": 13,
+    "completion_ms": 0,
+    "completion_tokens": 39,
+    "prompt_tokens": 65,
+    "timed_calls": 0,
+    "timed_completion_tokens": 0,
+    "total_tokens": 104
+  }
+}

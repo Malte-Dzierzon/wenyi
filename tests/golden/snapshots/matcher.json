@@ -1,0 +1,89 @@
+{
+  "aliases": {
+    "alias_hit": "Elias",
+    "miss": null,
+    "source_hit": "Keeper Vance"
+  },
+  "cases": [
+    {
+      "first_hit": "Elias Vance",
+      "matches": true,
+      "normalized_key": "elias vance",
+      "note": "latin full name",
+      "term": "Elias Vance",
+      "text": "keeper Elias Vance lit the lamp"
+    },
+    {
+      "first_hit": null,
+      "matches": false,
+      "normalized_key": "ann",
+      "note": "no match inside longer word",
+      "term": "Ann",
+      "text": "baker Anna Berger prepared bread"
+    },
+    {
+      "first_hit": "Ann",
+      "matches": true,
+      "normalized_key": "ann",
+      "note": "standalone short name",
+      "term": "Ann",
+      "text": "Her daughter Ann helped shape"
+    },
+    {
+      "first_hit": "猫",
+      "matches": true,
+      "normalized_key": "猫",
+      "note": "cjk single char substring",
+      "term": "猫",
+      "text": "吾輩は猫である"
+    },
+    {
+      "first_hit": "名前",
+      "matches": true,
+      "normalized_key": "名前",
+      "note": "cjk word",
+      "term": "名前",
+      "text": "名前はまだ無い"
+    },
+    {
+      "first_hit": "ｌａｍｐ",
+      "matches": true,
+      "normalized_key": "lamp",
+      "note": "full-width normalization",
+      "term": "ｌａｍｐ",
+      "text": "lit the lamp again"
+    },
+    {
+      "first_hit": "LAMP",
+      "matches": true,
+      "normalized_key": "lamp",
+      "note": "unicode case folding",
+      "term": "LAMP",
+      "text": "lit the lamp again"
+    },
+    {
+      "first_hit": null,
+      "matches": false,
+      "normalized_key": "storm,",
+      "note": "punctuation-insensitive key",
+      "term": "storm,",
+      "text": "Another storm coming"
+    },
+    {
+      "first_hit": null,
+      "matches": false,
+      "normalized_key": "",
+      "note": "empty term never matches",
+      "term": "",
+      "text": "anything"
+    },
+    {
+      "first_hit": null,
+      "matches": false,
+      "normalized_key": "lamp",
+      "note": "empty text never matches",
+      "term": "lamp",
+      "text": ""
+    }
+  ]
+}

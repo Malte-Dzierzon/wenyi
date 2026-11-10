@@ -1,0 +1,6 @@
+[
+ "\n<p data-tn-id=\"tn0_0\">Front matter before any heading.</p>\n",
+ "<h1 data-tn-id=\"tn1_0\">Chapter One</h1>\n<p data-tn-id=\"tn1_1\">First paragraph with <b>bold</b> and <img data-tn-inline-id=\"tn1_1_inline_0\" src=\"pic.png\"/> image.</p>\n<blockquote data-tn-id=\"tn1_2\">Quoted text.</blockquote>\n",
+ "<h2 data-tn-id=\"tn2_0\">Section 1.1</h2>\n<h3 data-tn-id=\"tn2_1\">Deep dive</h3>\n<p data-tn-id=\"tn2_2\">Nested heading run body.</p>\n<ul><li data-tn-id=\"tn2_3\">First item</li><li data-tn-id=\"tn2_4\">Second item</li></ul>\n",
+ "<h1 data-tn-id=\"tn3_0\">Chapter Two</h1>\n<p data-tn-id=\"tn3_1\">Second chapter body with ruby: <ruby>漢<rt>かん</rt></ruby>字.</p>\n<div class=\"cover\"></div>\n"
+]

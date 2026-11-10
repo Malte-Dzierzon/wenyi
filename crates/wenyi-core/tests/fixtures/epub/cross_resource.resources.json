@@ -1,0 +1,92 @@
+[
+ {
+  "href": "OEBPS/one.xhtml",
+  "index": 0,
+  "segments": [
+   {
+    "anchor": "tn0_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/one.xhtml",
+    "source": "PART I",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn0_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/one.xhtml",
+    "source": "One.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<html><body><h1 data-tn-id=\"tn0_0\" id=\"part-1\">PART I</h1><p data-tn-id=\"tn0_1\">One.</p></body></html>",
+  "title": "PART I"
+ },
+ {
+  "href": "OEBPS/two.xhtml",
+  "index": 1,
+  "segments": [
+   {
+    "anchor": "tn1_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/two.xhtml",
+    "source": "Section 1",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn1_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/two.xhtml",
+    "source": "Two.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<html><body><h2 data-tn-id=\"tn1_0\" id=\"section-1\">Section 1</h2><p data-tn-id=\"tn1_1\">Two.</p></body></html>",
+  "title": "Section 1"
+ },
+ {
+  "href": "OEBPS/three.xhtml",
+  "index": 2,
+  "segments": [
+   {
+    "anchor": "tn2_0",
+    "cont": false,
+    "index": 0,
+    "kind": "heading",
+    "meta": {},
+    "resource_href": "OEBPS/three.xhtml",
+    "source": "PART II",
+    "target": null,
+    "target_before_polish": null
+   },
+   {
+    "anchor": "tn2_1",
+    "cont": false,
+    "index": 1,
+    "kind": "text",
+    "meta": {},
+    "resource_href": "OEBPS/three.xhtml",
+    "source": "Three.",
+    "target": null,
+    "target_before_polish": null
+   }
+  ],
+  "template": "<html><body><h1 data-tn-id=\"tn2_0\" id=\"part-2\">PART II</h1><p data-tn-id=\"tn2_1\">Three.</p></body></html>",
+  "title": "PART II"
+ }
+]

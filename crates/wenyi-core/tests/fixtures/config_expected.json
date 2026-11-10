@@ -1,0 +1,124 @@
+{
+  "config_bad_env": {
+    "error": "ValidationError: 1 validation error for LLMConfig\nproviders.default.api_key_env\n  Value error, api_key_env must be an environment variable name [type=value_error]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+    "ok": false
+  },
+  "config_bad_mode": {
+    "error": "ValidationError: 1 validation error for PipelineConfig\n  Value error, best_of_three translation mode requires pipeline.polish=true [type=value_error, input_value={'translation_mode': 'bes...three', 'polish': False}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/",
+    "ok": false
+  },
+  "config_bad_section": {
+    "error": "ValueError: Unknown configuration sections: unknown_section",
+    "ok": false
+  },
+  "config_full": {
+    "honorific_strategy": "keep_style",
+    "llm_models": [
+      "default_cheap",
+      "default_fast",
+      "default_strong"
+    ],
+    "llm_providers": [
+      "default"
+    ],
+    "llm_tiers": {
+      "cheap": "default_cheap",
+      "fast": "default_fast",
+      "strong": "default_strong"
+    },
+    "output": {
+      "about_page": true,
+      "bilingual": false,
+      "bilingual_order": "target_first",
+      "bilingual_preserve_source_style": false,
+      "mono": true,
+      "punctuation_normalize": true
+    },
+    "pipeline": {
+      "align_retry_limit": 2,
+      "annotation_alignment": true,
+      "annotation_alignment_concurrency": 4,
+      "babeldoc_bridge_url": "http://127.0.0.1:8765",
+      "babeldoc_pages": null,
+      "babeldoc_timeout": 600.0,
+      "book_understanding": true,
+      "pdf_backend": "mineru",
+      "polish": true,
+      "prescan_concurrency": 4,
+      "review": true,
+      "review_agent_loop": true,
+      "review_agent_max_evidence_rounds": 2,
+      "review_autofix": true,
+      "review_clean_confirmations": 2,
+      "review_concurrency": 4,
+      "review_conflict_arbitration": true,
+      "review_fix_loop": true,
+      "review_fix_max_rounds": 2,
+      "review_output_retries": 2,
+      "rolling_context_segments": 6,
+      "translation_mode": "standard"
+    },
+    "segment": {
+      "max_tokens_per_batch": 1800,
+      "max_tokens_per_segment": 1200
+    },
+    "source_lang": "ja",
+    "state_dir": "state",
+    "target_lang": "zh"
+  },
+  "config_minimal": {
+    "honorific_strategy": "keep_style",
+    "llm_models": [
+      "default_cheap",
+      "default_fast",
+      "default_strong"
+    ],
+    "llm_providers": [
+      "default"
+    ],
+    "llm_tiers": {
+      "cheap": "default_cheap",
+      "fast": "default_fast",
+      "strong": "default_strong"
+    },
+    "output": {
+      "about_page": true,
+      "bilingual": false,
+      "bilingual_order": "target_first",
+      "bilingual_preserve_source_style": false,
+      "mono": true,
+      "punctuation_normalize": true
+    },
+    "pipeline": {
+      "align_retry_limit": 2,
+      "annotation_alignment": true,
+      "annotation_alignment_concurrency": 4,
+      "babeldoc_bridge_url": "http://127.0.0.1:8765",
+      "babeldoc_pages": null,
+      "babeldoc_timeout": 600.0,
+      "book_understanding": true,
+      "pdf_backend": "mineru",
+      "polish": true,
+      "prescan_concurrency": 4,
+      "review": true,
+      "review_agent_loop": true,
+      "review_agent_max_evidence_rounds": 2,
+      "review_autofix": true,
+      "review_clean_confirmations": 2,
+      "review_concurrency": 4,
+      "review_conflict_arbitration": true,
+      "review_fix_loop": true,
+      "review_fix_max_rounds": 2,
+      "review_output_retries": 2,
+      "rolling_context_segments": 6,
+      "translation_mode": "standard"
+    },
+    "segment": {
+      "max_tokens_per_batch": 1800,
+      "max_tokens_per_segment": 1200
+    },
+    "source_lang": "auto",
+    "state_dir": "state",
+    "target_lang": "en"
+  }
+}

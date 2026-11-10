@@ -1,0 +1,108 @@
+{
+ "chapters": [
+  {
+   "href": "OEBPS/ch1.xhtml",
+   "index": 0,
+   "meta": {
+    "epub_split_strategy": "spine-fallback"
+   },
+   "segments": [
+    {
+     "anchor": "tn0_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": "OEBPS/ch1.xhtml",
+     "source": "第一章　出会い",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn0_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {},
+     "resource_href": "OEBPS/ch1.xhtml",
+     "source": "綾小路は教室の窓際に座っていた。",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn0_2",
+     "cont": false,
+     "index": 2,
+     "kind": "text",
+     "meta": {},
+     "resource_href": "OEBPS/ch1.xhtml",
+     "source": "「おはよう、綾小路くん」と堀北が声をかけた。",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "template": null,
+   "title": "第一章　出会い"
+  },
+  {
+   "href": "OEBPS/ch2.xhtml",
+   "index": 1,
+   "meta": {
+    "epub_split_strategy": "spine-fallback"
+   },
+   "segments": [
+    {
+     "anchor": "tn1_0",
+     "cont": false,
+     "index": 0,
+     "kind": "heading",
+     "meta": {},
+     "resource_href": "OEBPS/ch2.xhtml",
+     "source": "第二章　放課後",
+     "target": null,
+     "target_before_polish": null
+    },
+    {
+     "anchor": "tn1_1",
+     "cont": false,
+     "index": 1,
+     "kind": "text",
+     "meta": {},
+     "resource_href": "OEBPS/ch2.xhtml",
+     "source": "放課後、二人は屋上で待ち合わせた。風が強かった。",
+     "target": null,
+     "target_before_polish": null
+    }
+   ],
+   "template": null,
+   "title": "第二章　放課後"
+  }
+ ],
+ "fmt": "epub",
+ "meta": {
+  "epub_annotation_contexts": {
+   "contexts": {},
+   "version": 1
+  },
+  "epub_resources": [
+   {
+    "href": "OEBPS/ch1.xhtml",
+    "index": 0
+   },
+   {
+    "href": "OEBPS/ch2.xhtml",
+    "index": 1
+   }
+  ],
+  "epub_schema": 5,
+  "epub_split_strategy": "spine-fallback",
+  "epub_split_toc_path": "",
+  "opf_path": "OEBPS/content.opf",
+  "toc_entries": [],
+  "toc_paths": []
+ },
+ "source_lang": "ja",
+ "source_path": "<abs>/sample.epub",
+ "target_lang": "zh",
+ "title": "サンプル小説"
+}
