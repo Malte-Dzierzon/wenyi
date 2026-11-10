@@ -2,32 +2,26 @@
 
 [简体中文](zh/configuration.md)
 
-The Wenyi CLI reads `config.yaml` from the current working directory. If the file is missing, running the CLI creates a documented default configuration.
+Wenyi reads `config.yaml` from the current working directory. If the file is missing, the default configuration template is used.
 
 Top-level sections are `language`, `llm`, `segment`, `pipeline`, `output`, `honorific`, and `paths`. Unknown sections are rejected; removed settings are not translated to a newer schema.
 
-## Web/Desktop settings and model registration
+## Desktop settings and model registration
 
-The CLI continues to read `config.yaml`. Web **Settings** manages a shared registry
-of provider connections and model profiles, default tiers and operation routes, and
-new-project workflow defaults. The Web server reads its initial defaults from
-`WENYI_CONFIG` (default `config.yaml`); after the first save, Web settings are stored in
-PostgreSQL and survive restarts. Saving Web settings does not rewrite the CLI file.
-API keys remain server environment variables; enter only their variable names.
+Desktop **Settings** manages provider connections and model profiles, default tiers and
+operation routes, and new-project workflow defaults in an independent SQLite workspace,
+initialized from built-in defaults. Desktop accepts manually entered API keys: it
+automatically uses the OS credential store when available, otherwise keeps them only for
+the current session and clearly asks for re-entry after restart. Environment variables
+remain supported. See [Desktop credentials](desktop.md#api-keys); keys never belong in
+configuration YAML.
 
-Desktop uses the same settings workflow in an independent SQLite workspace, initialized
-from built-in defaults rather than the CLI's current-directory file. It does not import
-Web settings or projects. Desktop also accepts manually entered API keys: it automatically
-uses the OS credential store when available, otherwise keeps them only for the current
-session and clearly asks for re-entry after restart. Environment variables remain supported.
-See [Desktop credentials](desktop.md#api-keys); keys never belong in configuration YAML.
-
-Standard or precision translation is selected only when creating a Web/Desktop book project.
-Global Settings has no translation-mode or workflow-template selector; Quick draft is
-retired for new requests. Projects copy shared defaults at creation, so later default
-changes do not reset an existing project's workflow or model selections. The saved
-mode cannot be changed in project settings or YAML; create another project to change it.
-Existing historical projects and frozen jobs retain their saved workflow.
+Standard or precision translation is selected only when creating a Desktop book project.
+Global Settings has no translation-mode or workflow-template selector. Projects copy shared
+defaults at creation, so later default changes do not reset an existing project's workflow
+or model selections. The saved mode cannot be changed in project settings or YAML; create
+another project to change it. Existing historical projects and frozen jobs retain their
+saved workflow.
 
 Project configuration accepts registered model IDs through `llm.tiers`, `llm.routes`
 and route fallbacks, plus `llm.budget`. Provider connections, model names/options,
@@ -62,7 +56,7 @@ language:
   target: zh
 ```
 
-`source: auto` asks the model to identify the source language; alternatively, select a language below. Translation runs directly between source and target without pivoting through Chinese. Multilingual quality is experimental. The default CLI, configuration comments, and prompt instructions use English independently of the translation target. The generated configuration still defaults to `target: zh`; choose `en` for English translations.
+`source: auto` asks the model to identify the source language; alternatively, select a language below. Translation runs directly between source and target without pivoting through Chinese. Multilingual quality is experimental. Configuration comments and prompt instructions use English independently of the translation target. The generated configuration still defaults to `target: zh`; choose `en` for English translations.
 
 Detection request failures are distinct from unsupported language results. HTTP 402 reports
 insufficient provider balance and asks you to recharge or change provider; authentication,
@@ -82,26 +76,21 @@ All generated descriptive metadata, including glossary `note`, style guidance, c
 | `pt`, `pt-BR`, `pt-PT`, `ru` | Portuguese, Brazilian/European Portuguese, Russian |
 | `vi` | Vietnamese |
 
-Run `uv run wenyi languages` to list built-in profiles without an API key. `target` cannot be `auto`; unsupported codes fail configuration validation. Registered aliases include `zh-Hans` / `zh-CN` → `zh`, `zh-TW` → `zh-Hant`, `ja-JP` → `ja`, `ko-KR` → `ko`, and `vi-VN` → `vi`. Registered script/region variants are preserved rather than truncated to two letters.
+The Desktop app lists built-in profiles without an API key. `target` cannot be `auto`; unsupported codes fail configuration validation. Registered aliases include `zh-Hans` / `zh-CN` → `zh`, `zh-TW` → `zh-Hant`, `ja-JP` → `ja`, `ko-KR` → `ko`, and `vi-VN` → `vi`. Registered script/region variants are preserved rather than truncated to two letters.
 
-Each invocation selects one direction. For example, `source: zh`, `target: en` translates Chinese directly into English; `source: ja`, `target: en` translates Japanese directly into English. Identical languages after detection/normalization are rejected. Changing the target creates separate state. Use the corresponding `language.target` for `prepare`, `translate`, `review`, `assemble`, `status`, `report`, and glossary commands. An explicit source conflicting with saved state is rejected on resume.
+Each invocation selects one direction. For example, `source: zh`, `target: en` translates Chinese directly into English; `source: ja`, `target: en` translates Japanese directly into English. Identical languages after detection/normalization are rejected. Changing the target creates separate state. An explicit source conflicting with saved state is rejected on resume.
 
-See the [pipeline guide](pipeline.md) for prompt resources and state isolation, and [Web interface language](web.md#interface-language) for display-language settings. Multilingual long-form blind evaluation, native-language review and RTL/layout certification remain future work; interface language support does not certify translation quality. The CLI and prompt instructions remain English; there are no `ui_locale` or `prompt_locale` configuration fields.
+See the [pipeline guide](pipeline.md) for prompt resources and state isolation. Multilingual long-form blind evaluation, native-language review and RTL/layout certification remain future work; interface language support does not certify translation quality. Prompt instructions remain English; there are no `ui_locale` or `prompt_locale` configuration fields.
 
 ## Built-in language policies
 
-Language policies are implementation details defined in `packages/core/wenyi_core/i18n/policy/` and `i18n/data/languages/` / `pairs/`. Developers change these resources, operation specifications and domain implementations in source, with the corresponding tests. YAML accepts only `source` and `target` under `language`; there are no operation overrides or revision-acceptance switches, and Web settings do not display policy plans.
+Language policies are implementation details defined in `packages/core/wenyi_core/i18n/policy/` and `i18n/data/languages/` / `pairs/`. Developers change these resources, operation specifications and domain implementations in source, with the corresponding tests. YAML accepts only `source` and `target` under `language`; there are no operation overrides or revision-acceptance switches, and settings screens do not display policy plans.
 
 Source markup follows the source language; target punctuation, font and metadata follow the target. Profiles inherit root-to-leaf and exact registered language-pair bindings take precedence. `zh-Hant` disables the Simplified Chinese normalizer and retains the English about-page fallback. Existing `output.punctuation_normalize`, `honorific.strategy` and workflow options remain authoritative.
 
-Developers can inspect the same built-in resolver without credentials or model calls:
-
-```bash
-uv run wenyi language-policy --source ja --format docx --backend native
-uv run wenyi language-policy --source en --subtitles --format srt
-```
-
-Diagnostics report selections, resource hashes, versions, model routes and fingerprints; they do not modify the policy. Automatic source detection remains unresolved until the source is known; use `--source` to inspect a specific direction. Unknown built-in IDs/options or unavailable handlers fail before consuming work.
+Developers can inspect the same built-in resolver without credentials or model calls through the
+engine's policy API (previously the `language-policy` developer command). Example inspections:
+`--source ja --format docx`, `--source en --subtitles --format srt`.
 
 On resume, changed semantic policies automatically rebuild affected chapter/style/synopsis analysis before pending work continues. Missing policy identities also require rebuilding derived analysis. Completed targets and glossary remain saved; unchanged task caches are reused, and interrupted rebuilds resume safely. Rebuilding analysis may make model calls. SRT preserves completed cues and ignores incompatible pending-window caches. Font, ruby and export punctuation changes require only a fresh export; Review uses a new policy-bound session. Export fingerprints bind the actual format/backend and consistent source/target snapshot.
 
@@ -173,7 +162,7 @@ Compatible endpoints accept `reasoning_style: none` (default), `deepseek`, `open
 Provider SDK retries are disabled. Wenyi retries transient connections/timeouts, HTTP 408/409/429 and 5xx responses, and empty responses through one shared policy. Retry backoff releases the connection permit and responds to cancellation. Ordinary 4xx errors are not retried. PDF's default MinerU import uses a separate `MINERU_API_KEY`; the optional BabelDOC HTTP bridge is independent of model routing.
 
 The global **MinerU PDF parsing** settings card is separate from model connections.
-Web and CLI use `MINERU_API_KEY` from the deployment/process environment. Desktop checks
+`MINERU_API_KEY` comes from the process environment. Desktop checks
 the same variable first and, when absent, uses the manual key saved in that card through
 the OS credential store or session-only memory. The Desktop card has one input and one
 Save button; both are disabled when the environment key is active. Saving does not change
@@ -207,23 +196,18 @@ DeepSeek accepts `reasoning_effort: low`, `high`, or `max`; `thinking: false` ex
 
 ### Preview, limits and explicit failover
 
-```bash
-uv run wenyi models list
-uv run wenyi models list --json
-uv run wenyi models explain --operation review.verify
-uv run wenyi models check --for translate
-```
+The Desktop app's model screens preview routing without keys (`list`/`explain` semantics) and
+validate credentials only for reachable operations (`check --for prepare|translate|review|srt`
+semantics), respecting the configuration's stage switches. Preview and validation construct no
+SDK clients and send no requests.
 
-`list` and `explain` need no keys. `check --for prepare|translate|review|srt` validates credentials only for reachable operations, respecting the configuration's stage switches. These three commands construct no SDK clients and send no requests. Translation commands apply their CLI stage overrides before credential validation.
-
-To confirm that providers are actually reachable, run a live connectivity test:
-
-```bash
-uv run wenyi models ping --for translate
-uv run wenyi models ping --for review --timeout 10 --json
-```
-
-`ping` sends one short request (`max_output_tokens` 16, or the provider minimum such as 4096 with thinking enabled) to every model profile reachable by the workflow, including explicit fallbacks. It never retries, caps each request at `--timeout` seconds (default 30), does not record usage in any run, and exits with status 1 if any profile fails. Failures are reported by category, such as `authentication_failed`, `model_or_endpoint_not_found`, `connection_failed` or `missing_credential`, without echoing provider responses. A truncated or empty reply counts as reachable.
+To confirm that providers are actually reachable, the app offers a live connectivity test
+(`ping` semantics): it sends one short request (`max_output_tokens` 16, or the provider minimum
+such as 4096 with thinking enabled) to every model profile reachable by the workflow, including
+explicit fallbacks. It never retries, caps each request at the configured timeout (default 30 s),
+does not record usage in any run, and reports failures by category, such as
+`authentication_failed`, `model_or_endpoint_not_found`, `connection_failed` or
+`missing_credential`, without echoing provider responses. A truncated or empty reply counts as reachable.
 
 Optional local controls, illustrated with an offline provider:
 
@@ -265,33 +249,26 @@ Events record the routing plan and request operation, model, provider, profile, 
 
 Changing translation, analysis, synopsis or SRT models keeps completed work and uses the new route for pending calls. Review starts a new run when a reachable review model, endpoint, options or protocol changes; unrelated routes, credential rotation, alias renaming and concurrency changes do not invalidate it. Old Review caches lacking inference identity are retained but not reused. Autofix has its own fingerprint: pending indexed publication finishes from saved candidates; unfinished inference planning requires restoring its original routes before continuing.
 
-Retired configuration and nonempty old usage ledgers require explicit conversion:
-
-```bash
-uv run wenyi models migrate-config old-config.yaml --out routed-config.yaml
-uv run wenyi models migrate-usage state/BOOK/targets/zh
-```
-
-The config converter creates a separate file. The usage converter backs up each selected ledger, preserves totals and old tier/stage attribution, and assigns missing provider/model history to `unknown`. It never processes source books. Run ledger conversion while that target's workflows are stopped. Review directories are preserved. `pipeline.review_agent_tier` is replaced by the separate verification, arbitration and fix routes.
+Retired configuration and nonempty old usage ledgers require explicit conversion through the
+engine's migration API (previously the `models migrate-config` / `migrate-usage` commands).
 
 Use isolated public-domain fixtures before choosing a mixed-model setup. No new quality-ranked model preset is implied by routing support.
 
 ## Pipeline
 
-`pipeline.translation_mode` accepts `standard` (default) or `best_of_three`.
 Precision mode requires `pipeline.polish: true`; invalid combinations are rejected,
-including project YAML settings. In Web, choose the translation mode
+including project YAML settings. In the app, choose the translation mode
 when creating a book project; new projects default to `standard`, independently of
 global settings. Selecting precision enables polishing for that project. Its mode is
 fixed at creation; project settings can adjust other fields but cannot disable the
 polishing required by precision. Restoring defaults also preserves the saved mode.
-Translation mode is not a global Web setting; global YAML rejects it. SRT does not
+Translation mode is not a global setting; global YAML rejects it. SRT does not
 support precision; project YAML and source replacement enforce this boundary.
 
 Precision always creates three drafts with built-in three-branch concurrency; it is
 not a user option. Existing configurations and frozen jobs containing the retired
 `pipeline.precision_concurrency` field remain readable, but the value is ignored
-and omitted from new configuration documents. New Web YAML writes reject it.
+and omitted from new configuration documents. New YAML writes reject it.
 One comprehensive source-aware polishing combines their useful parts and outputs
 final text directly. It uses the existing `translation.body` and `polish.body`
 routes, profiles and provider behavior, with no precision-specific output-token
@@ -328,7 +305,7 @@ pipeline:
   babeldoc_timeout: 600
 ```
 
-- `review`: enabled by default; automatically run the evidence-driven whole-book review after the complete book has been translated. Pass `--no-review` or set this to `false` to skip it in the one-command workflow. The explicit `wenyi review` command remains available.
+- `review`: enabled by default; automatically run the evidence-driven whole-book review after the complete book has been translated. Set this to `false` to skip it in the workflow. Independent review remains available from the Desktop app.
 - `align_retry_limit`: additional attempts for invalid model-output structure; the default `2` allows three attempts including the initial request, and `0` disables these retries. Standard translation falls back to individual paragraphs after exhaustion. Precision uses the same budget for each initial draft and synthesis, retries only the failing stage with unchanged context, and pauses after exhaustion without paragraph splitting. Actual requests, including failed attempts, incur provider usage; transport retries remain separate.
 - `polish`: run the strong model over translated batches again for style. This may improve quality but significantly increases runtime and cost.
 - `rolling_context_segments`: number of recent translated segments included with each translation batch. Translation and polishing also receive one following source segment from the same chapter as a read-only reference, including when this setting is zero. This built-in lookahead does not change output counts or saved translation context; see [whole-book context](pipeline.md#whole-book-understanding-and-context).
@@ -344,26 +321,24 @@ pipeline:
 - `review_fix_loop`: generate complete provisional segment replacements for confirmed issues in a run-local shadow translation, then blindly review the whole book again. Disabling it keeps the single-pass recommendation-only behavior.
 - `review_fix_max_rounds`: maximum number of provisional Fix rounds, from `0` to `4`; this is not the total number of Review passes.
 - `review_clean_confirmations`: consecutive issue-free whole-book Review passes required after shadow fixing, from `1` to `2`; the default is `2`.
-- `review_autofix`: enabled by default. After the read-only Review engine finishes, publish its folded `changes` to a working translation, run the existing bounded Review Agent Loop once more over each remaining issue against that updated text, and pass confirmed issues to the existing Review Fixer. Pass `--no-autofix` or set this to `false` to keep Review from writing formal `target` values. The resulting complete segments replace only the formal chapter `target`; the manifest and glossary remain unchanged. Full before/after chains, issue IDs, decisions, failures, and write status are kept in the Review run's `autofix/index.json` instead of adding history fields to chapter JSON.
+- `review_autofix`: enabled by default. After the read-only Review engine finishes, publish its folded `changes` to a working translation, run the existing bounded Review Agent Loop once more over each remaining issue against that updated text, and pass confirmed issues to the existing Review Fixer. Set this to `false` to keep Review from writing formal `target` values. The resulting complete segments replace only the formal chapter `target`; the manifest and glossary remain unchanged. Full before/after chains, issue IDs, decisions, failures, and write status are kept in the Review run's `autofix/index.json` instead of adding history fields to chapter JSON.
 - `pdf_backend`: default `mineru` converts PDF via MinerU HTML. Use `babeldoc` for layout-preserving export through the external AGPL HTTP bridge. PDF state created with BabelDOC defaults to PDF output for both `translate` and `assemble`; MinerU state retains EPUB output. Explicit `--format` overrides this choice, and saved state determines the default on resume.
 - `babeldoc_bridge_url`: BabelDOC bridge base URL; default `http://127.0.0.1:8765`.
 - `babeldoc_timeout`: HTTP timeout in seconds for bridge extract and fillback.
 - `babeldoc_pages`: optional 1-based page selection such as `"15"` or `"6-8"`; omit it to process the whole file.
 
-The command-line flags `--polish`, `--no-polish`, `--review`, and `--no-review`
-override the corresponding configuration values for a `translate` run.
+Workflow overrides for polish and review are available per operation in the Desktop app.
 
 Body translation and fresh Reviewer requests always receive the full glossary; there
 is no scope selector. Remove `pipeline.glossary_scope` from existing YAML or project
 configuration: the retired key is rejected, including `full`. See [glossary policy](pipeline.md#glossary)
 for snapshot refresh, resume behavior, and the prompt-size tradeoff.
 
-Run final review independently with `wenyi review INPUT`. Matching content,
+Run final review independently from the Desktop app. Matching content,
 configuration, full-glossary policy, and glossary fingerprints reuse completed results
 or resume unfinished work. Otherwise, Review starts a new run. By default, Review
-publishes folded changes after the shadow loop. Use `--no-autofix` to keep that
-invocation read-only, or `--autofix` to force publishing when the config is off.
-Autofix first applies folded Review changes, then reuses the same Agent
+publishes folded changes after the shadow loop; disable autofix to keep an
+invocation read-only. Autofix first applies folded Review changes, then reuses the same Agent
 Loop and Fixer for final unresolved issues; there is no separate Autofix loop or
 prompt. The consolidated result and internal round records are written under
 `state/<book>/targets/<target-language>/reviews/review-<timestamp>/`. Review usage is stored both as the
@@ -390,7 +365,7 @@ output:
 
 The former top-level `punctuation.normalize` key is not accepted; remove it and configure only `output.punctuation_normalize`.
 
-Only the monolingual edition is enabled by default. `--bilingual` enables both editions, and configuration plus command-line switches can be combined to produce only the bilingual edition.
+Only the monolingual edition is enabled by default. The bilingual option enables both editions, and configuration plus per-operation switches can be combined to produce only the bilingual edition.
 
 ## Segmentation, honorifics, and paths
 

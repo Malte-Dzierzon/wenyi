@@ -68,7 +68,7 @@ class PipelineRuntime:
         self.annotation_aligner = AnnotationAligner(self.client, config)
 
     def get_store(self, run_dir: str, *, create: bool = True) -> Storage:
-        """Bind injected Web storage or construct CLI file storage at the boundary."""
+        """Bind injected storage or construct file storage at the boundary."""
         if self.storage is not None:
             return self.storage
         from ..storage.file import FileStorage

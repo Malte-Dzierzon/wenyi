@@ -15,7 +15,7 @@ from .llm.configuration import LLMConfig
 
 
 def parse_config_yaml(text: str) -> Any:
-    """Parse CLI and Web configuration with the same safe scalar semantics."""
+    """Parse Desktop configuration with the same safe scalar semantics."""
     return yaml.safe_load(text)
 
 
@@ -25,13 +25,13 @@ _DEFAULT_CONFIG_YAML = """\
 
 language:
   source: auto # auto detects the source language; use an explicit code such as ja / en / ko / ru / de / vi to override
-  target: zh # Target: zh / zh-Hant / en / ja / ko / fr / de / es / it / pt / ru / vi; run languages for the full list
+  target: zh # Target: zh / zh-Hant / en / ja / ko / fr / de / es / it / pt / ru / vi; the Desktop app lists the full set
 
 # ── LLM ──────────────────────────────────────────────────────────────────
 llm:
   preset: deepseek # All tiers: deepseek-flash, thinking enabled, reasoning_effort high
   # Add providers, models and routes to override individual operations.
-  # Inspect effective settings with: wenyi models list
+  # Inspect effective settings in the Desktop app's model screens.
 
 # ── Segmentation ─────────────────────────────────────────────────────────────────
 segment:

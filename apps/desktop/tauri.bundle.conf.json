@@ -1,8 +1,0 @@
-{
-  "bundle": {
-    "active": true,
-    "resources": {
-      "sidecar/wenyi-engine/": "sidecar/wenyi-engine/"
-    }
-  }
-}

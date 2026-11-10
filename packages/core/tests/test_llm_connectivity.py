@@ -7,10 +7,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-import yaml
 from openai import APIConnectionError, APIStatusError
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
+from wenyi_core.config import Config
 from wenyi_core.llm.configuration import LLMConfig
 from wenyi_core.llm.connectivity import (
     PROBE_OUTPUT_TOKENS,
@@ -18,6 +16,7 @@ from wenyi_core.llm.connectivity import (
     probe_profiles,
     probe_targets,
 )
+from wenyi_core.llm.operations import configured_operations
 from wenyi_core.llm.providers._openai_compatible import OpenAICompatibleBaseClient
 from wenyi_core.llm.router import RoutedLLMClient
 
@@ -203,31 +202,21 @@ def test_invalid_timeout_is_rejected():
         probe_connections(_config(), ("translation.body",), timeout=0)
 
 
-def _invoke(tmp_path, raw, *arguments):
-    path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump(raw))
-    return CliRunner().invoke(app, ["--config", str(path), "models", "ping", *arguments])
-
-
-def test_cli_ping_reports_results_and_exit_code(tmp_path, sdk):
-    raw = {"llm": _config().model_dump(mode="json", exclude_none=True)}
-    passed = _invoke(tmp_path, raw, "--for", "srt", "--json")
-    assert passed.exit_code == 0, passed.output
-    assert [item["profile"] for item in json.loads(passed.output)] == ["strong"]
+def test_probe_workflow_reports_results_per_profile(sdk):
+    config = Config.from_dict({"llm": _config().model_dump(mode="json", exclude_none=True)})
+    operations = configured_operations(config, "srt")
+    results = probe_connections(config.llm, operations)
+    assert [result.profile for result in results] == ["strong"]
 
     sdk.behaviors["big"] = _status_error(401)
-    failed = _invoke(tmp_path, raw, "--for", "srt", "--json")
-    assert failed.exit_code == 1
-    assert json.loads(failed.output)[0]["category"] == "authentication_failed"
-    table = _invoke(tmp_path, raw, "--for", "srt")
-    assert table.exit_code == 1
-    assert "1 of 1 model profiles unreachable" in table.output
-    for output in (failed.output, table.output):
-        assert SECRET not in output
-        assert "Traceback" not in output
+    failed = probe_connections(config.llm, operations)
+    assert not failed[0].ok
+    assert failed[0].category == "authentication_failed"
+    for result in failed:
+        assert SECRET not in json.dumps(result.describe())
 
 
-def test_cli_ping_rejects_unknown_workflow(tmp_path):
-    result = _invoke(tmp_path, {"llm": {"preset": "fake"}}, "--for", "publish")
-    assert result.exit_code == 1
-    assert "Unknown model workflow" in result.output
+def test_probe_rejects_unknown_workflow():
+    config = Config.from_dict({"llm": {"preset": "fake"}})
+    with pytest.raises(ValueError, match="Unknown model workflow"):
+        configured_operations(config, "publish")

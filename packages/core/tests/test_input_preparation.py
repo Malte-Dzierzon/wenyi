@@ -3,8 +3,6 @@
 from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.config import Config
 from wenyi_core.ingest.fb2_reader import peek_fb2_title, read_fb2
 from wenyi_core.ingest.models import Chapter, Document, Segment
@@ -16,7 +14,7 @@ from wenyi_core.storage.file import FileStorage
 from tests.fake_llm import routing_handler
 
 
-def test_cli_parse_without_credentials_or_orchestrator(tmp_path, monkeypatch):
+def test_parse_without_credentials_or_orchestrator(tmp_path):
     source = tmp_path / "book.txt"
     source.write_text("# First chapter\n\nA short story.\n", encoding="utf-8")
     config = Config.from_dict(
@@ -25,33 +23,25 @@ def test_cli_parse_without_credentials_or_orchestrator(tmp_path, monkeypatch):
             "paths": {"state_dir": str(tmp_path / "state")},
         }
     )
-    monkeypatch.setattr(
-        "wenyi_cli.commands.context.CommandContext.load_config", lambda self: config
-    )
-    with (
-        patch("wenyi_core.config.Config.create_default_file"),
-        patch("wenyi_core.pipeline.orchestrator.Orchestrator", side_effect=AssertionError),
-        patch(
-            "wenyi_cli.commands.context.CommandContext.validate_api_configuration",
-            side_effect=AssertionError,
-        ),
-    ):
-        result = CliRunner().invoke(app, ["parse", str(source)])
-    assert result.exit_code == 0, result.output
-    assert "First chapter" in result.output
-    assert "State directory:" in result.output
+    store, digest = input_preparation.locate_input_storage(str(source), config, FileStorage)
+    with store.lock():
+        parsed = input_preparation.parse_document(
+            store, str(source), config, expected_sha256=digest
+        )
+    assert parsed.title == "book"
+    assert parsed.chapters[0].title == "First chapter"
     artifacts = list((tmp_path / "state").rglob("parsed_document.json"))
     assert len(artifacts) == 1
-    store = FileStorage(str(artifacts[0].parent))
+    assert store.run_dir == str(artifacts[0].parent)
     assert not store.exists()
     assert store.load_analysis() is None
-    parsed = store.read_artifact("parsed_document.json")
-    assert parsed is not None
-    assert parsed["source_sha256"]
-    assert parsed["ingest_config"]["source_lang"] == "auto"
+    cached = store.read_artifact("parsed_document.json")
+    assert cached is not None
+    assert cached["source_sha256"]
+    assert cached["ingest_config"]["source_lang"] == "auto"
     assert any(
         segment["source"] == "A short story."
-        for chapter in parsed["document"]["chapters"]
+        for chapter in cached["document"]["chapters"]
         for segment in chapter["segments"]
     )
     assert not list((tmp_path / "state").rglob(".initializing.json"))
@@ -304,15 +294,10 @@ def test_parse_then_prepare_reuses_artifact_and_preserves_initialized_state(tmp_
     assert store.load_chapter(0) == chapter
 
 
-def test_cli_parse_rejects_subtitles_without_creating_state(tmp_path, monkeypatch):
+def test_parse_rejects_subtitles_without_creating_state(tmp_path):
     _, config, _ = inputs(tmp_path)
     source = tmp_path / "captions.srt"
     source.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "wenyi_cli.commands.context.CommandContext.load_config", lambda self: config
-    )
-    with patch("wenyi_core.config.Config.create_default_file"):
-        result = CliRunner().invoke(app, ["parse", str(source)])
-    assert result.exit_code == 1
-    assert "wenyi translate" in result.output
+    with pytest.raises(ValueError, match="subtitle workflow"):
+        input_preparation.locate_input_storage(str(source), config, FileStorage)
     assert not (tmp_path / "state").exists()

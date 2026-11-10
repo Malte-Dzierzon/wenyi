@@ -1,8 +1,8 @@
 # Wenyi Desktop
 
-[English](../desktop.md) · [Web 部署与开发](web.md)
+[English](../desktop.md) · [Rust 重写规划](RUST-REWRITE.md)
 
-Desktop 是使用 Tauri、React 和现有 Python 翻译内核的**本地翻译应用**。它自行启动私有后端，使用独立 SQLite 工作区，不需要部署 Web、PostgreSQL、Redis 或 Docker。发行包包含 Python 运行时，用户无需另外安装 Python。
+Desktop 是使用原生 Rust 界面和现有 Python 翻译内核的**本地翻译应用**。它自行启动私有后端，使用独立 SQLite 工作区。发行包包含 Python 运行时，用户无需另外安装 Python。
 
 翻译仍需访问所配置的模型提供商。可选 MinerU、BabelDOC 服务保留各自的使用条件；“本地应用”不意味着外部模型或文档服务可以离线使用。
 
@@ -65,7 +65,7 @@ Desktop 优先使用系统凭据库；不可用时，界面会提示密钥仅在
 
 ## 独立数据
 
-Desktop 不接管或迁移已有 Web 项目，也不读取或修改 CLI 的 `config.yaml`、`state/`、`output/`。CLI 的行为保持不变。
+Desktop 使用独立 SQLite 工作区，不读取其他应用的配置或状态文件。
 
 默认桌面工作区：
 
@@ -98,63 +98,57 @@ Desktop 不接管或迁移已有 Web 项目，也不读取或修改 CLI 的 `con
 
 ## 从源码运行
 
-准备 Python 3.10+、`uv`、Node 22、pnpm 9、Rust stable 和 [Tauri 平台前置依赖](https://v2.tauri.app/start/prerequisites/)。这些是开发及构建环境要求，不代表发行包用户需要额外安装 Python。
-
-Debian/Ubuntu 还需安装 `libdbus-1-dev`，用于原生托盘可用性检查
-（`sudo apt-get install libdbus-1-dev`）；其他 Linux 发行版安装对应的 D-Bus 开发包。
+准备 Python 3.10+、`uv` 和 Rust stable。这些是开发及构建环境要求，
+不代表发行包用户需要额外安装 Python。
 
 在仓库根目录执行：
 
 ```bash
-uv sync --locked --package wenyi-desktop --group dev
-pnpm install --frozen-lockfile
-pnpm desktop
+uv sync --locked --all-packages --group dev
+cargo run --manifest-path apps/desktop/native/Cargo.toml
 ```
 
 使用隔离的预览工作区：
 
 ```bash
-pnpm desktop --data-dir /path/to/desktop-test-workspace
+cargo run --manifest-path apps/desktop/native/Cargo.toml -- --data-dir /path/to/desktop-test-workspace
 ```
 
-启动脚本先构建界面，再启动原生应用。Debug 构建使用仓库 `.venv`，也可用 `WENYI_DESKTOP_PYTHON` 显式指定开发解释器。不再提供远程 `--url` 模式，也不会悄悄回退连接 Web 服务。
-
-启动脚本兼容 JavaScript 入口及独立原生可执行形式的 pnpm，包括 Linux 上没有扩展名的二进制程序。
+原生应用构建界面，并使用仓库 `.venv` 的 sidecar 启动；
+也可用 `WENYI_DESKTOP_PYTHON` 显式指定开发解释器。不提供远程 `--url` 模式，
+也不会悄悄回退连接其他服务。
 
 在目标平台构建原生发行包：
 
 ```bash
-pnpm desktop:build
+cargo build --release --manifest-path apps/desktop/native/Cargo.toml
 ```
 
-构建先将 Python 引擎冻结为 onedir sidecar，再与界面和原生程序一起打包。Onedir 避免每次启动都解压完整运行时。每次发行仍需验证安装包、签名和平台运行依赖；Linux 构建成功不代表 Windows/macOS 已验证。
+构建先将 Python 引擎冻结为 onedir sidecar，再与界面和原生程序一起打包。
+每次发行仍需验证安装包、签名和平台运行依赖；Linux 构建成功不代表
+Windows/macOS 已验证。
 
 macOS 安装包分别在 Apple Silicon 和 Intel runner 上原生构建。本地构建时，
-Python 解释器和 Rust 工具链均应与 Mac 的架构一致；仅交叉编译 Rust 主程序
+Python 解释器和 Rust 工具链均应与 Mac 的架构一致；仅交叉编译 Rust 应用
 不会将 Python sidecar 重建为另一种架构。
 
 Windows 发行包只打开应用窗口，不弹出控制台。本地引擎也不打开控制台窗口，
 但保留内部通信管道。Debug/源码启动仍保留开发终端，便于诊断。
 
 原生包分别为 Linux、Windows 和 macOS 使用 PNG、ICO 与 ICNS 图标。
-需要从共享徽标重新生成原生图标时，在仓库根目录运行
-`pnpm exec tauri icon packages/ui/src/assets/wenyi-emblem.png --output /path/to/temporary-icons`，
-然后仅将 `icon.ico` 与 `icon.icns` 复制到 `apps/desktop/icons`。
 
 ### 版本与发行下载
 
-Python 元数据继续使用 `hatch-vcs`；`scripts/release_version.py` 使用相同的
-setuptools-scm Git 来源派生原生应用和产物版本。例如，`v1.2.3` 对应 `1.2.3`，
-`v1.2.3rc1` 对应 Python `1.2.3rc1` / 原生 `1.2.3-rc.1`。非标签提交和已跟踪
-文件的本地修改保留明确的开发身份，例如 `1.2.4-dev.2+gabc123`。Cargo 私有 crate
-的版本不代表应用版本。原生可执行文件的 `--version` 选项输出
+Python 元数据继续使用 `hatch-vcs`；原生应用和产物版本从同一 Git 来源派生。
+例如，`v1.2.3` 对应 `1.2.3`，`v1.2.3rc1` 对应 Python `1.2.3rc1` / 原生
+`1.2.3-rc.1`。非标签提交和已跟踪文件的本地修改保留明确的开发身份，
+例如 `1.2.4-dev.2+gabc123`。原生可执行文件的 `--version` 选项输出
 `Wenyi Desktop <version>`，不启动界面。
 
-当前发行面向正式稳定 tag。开发/预发行身份用于构建诊断，但尚未规范化 Linux
-包管理器的升级排序：例如 Debian 会将 `1.2.4-rc.1` 排在 `1.2.4` 之后。
+当前发行面向正式稳定 tag。开发/预发行身份用于构建诊断。
 不要将这些构建视为已支持的预发行更新渠道。
 
-在对应标签的干净 checkout 上使用 `WENYI_BUILD_TAG=v1.2.3 pnpm desktop:build`
+在对应标签的干净 checkout 上设置 `WENYI_BUILD_TAG=v1.2.3` 后执行发行构建
 （PowerShell 先设置 `$env:WENYI_BUILD_TAG = "v1.2.3"`）。明确指定的标签必须存在、
 指向 HEAD、与 Python 版本一致，且不能有已跟踪文件修改；未跟踪笔记不改变
 setuptools-scm 的 dirty 状态。禁止覆盖版本。发行标签支持数字版本及 `a`、`b`、
@@ -163,19 +157,17 @@ setuptools-scm 的 dirty 状态。禁止覆盖版本。发行标签支持数字�
 使用三段发行版本，应用版本保留预发行/开发信息。Windows 使用 NSIS `.exe`，不使用
 无法完整表达这些预发行/开发身份的 MSI。
 
-**CLI packages** 和 **Desktop packages** workflow 均支持通过 `workflow_dispatch`
+**Desktop packages** workflow 支持通过 `workflow_dispatch`
 指定可选 `tag`；留空构建选定的 checkout。运行名称显示组件与标签（或开发 ref）。
-GitHub release 发布事件构建该 release 的标签，仅上传各自组件的附件。
+GitHub release 发布事件构建该 release 的标签，仅上传该组件的附件。
 手动运行只生成 workflow artifact，不发布 release。
 
-- 所有平台 CLI 下载均为 `wenyi-cli-<version>-<platform>-<arch>.zip`。ZIP 条目
-  保留 Unix 可执行权限；需使用支持该权限的解压工具，或解压后执行 `chmod +x wenyi`。
 - Desktop 下载为 `wenyi-desktop-<version>-<platform>-<arch>.<extension>`：
   Linux AppImage（单文件应用）、`.deb` 和 `.rpm`；Windows NSIS 安装程序 `.exe`；
   macOS `.dmg`。这些文件直接上传，不额外套 ZIP。AppImage 下载后需赋予可执行权限
   （`chmod +x <file>.AppImage`）；裸 Rust 可执行文件不是可独立发行的应用。
 - GitHub artifact 服务可能为 CI 下载额外打包；真正的 GitHub Release 附件是上述文件。
-  校验和分别为 `wenyi-cli-SHA256SUMS.txt` 与 `wenyi-desktop-SHA256SUMS.txt`。
+  校验和为 `wenyi-desktop-SHA256SUMS.txt`。
   不覆盖已有 release 附件，重复上传会失败。
 
 Sidecar 构建会重新构建本地 Python 包，而不是复用其缓存 wheel，并在冻结前核对
@@ -184,9 +176,9 @@ Sidecar 构建会重新构建本地 Python 包，而不是复用其缓存 wheel�
 
 这些 workflow 不执行操作系统代码签名或公证；平台签名与终端用户安装验证仍是发行前的责任。
 
-已在 KDE Wayland 下使用临时工作区和无效的开发 Python 路径启动 AppImage：包内引擎成功启动，带鉴权的 loopback 请求正常，旧版关闭即退出流程的引擎退出与回收已验证。独立冻结引擎检查还覆盖了离线合成 TXT 上传、解析、预览及新旧格式事件读取。当前托盘流程另在 KDE Wayland 下使用 debug 原生构建、生产 UI、源码 Python 引擎和临时空工作区验证：最小化/恢复及关闭到托盘/恢复期间引擎保持运行，显式托盘退出后引擎被回收。打包后的托盘行为、真实文件管理器拖放、系统保存对话框、Windows/macOS 运行及可移动介质行为仍需平台验收。
+已在 KDE Wayland 下使用临时工作区和无效的开发 Python 路径启动 AppImage：包内引擎成功启动，带鉴权的 loopback 请求正常，旧版关闭即退出流程的引擎退出与回收已验证。独立冻结引擎检查还覆盖了离线合成 TXT 上传、解析、预览及新旧格式事件读取。当前托盘流程另在 KDE Wayland 下使用 debug 原生构建、源码 Python 引擎和临时空工作区验证：最小化/恢复及关闭到托盘/恢复期间引擎保持运行，显式托盘退出后引擎被回收。打包后的托盘行为、真实文件管理器拖放、系统保存对话框、Windows/macOS 运行及可移动介质行为仍需平台验收。
 
-原生单实例行为另在 KDE Wayland 的 XWayland 下使用 debug 构建、生产 UI、
+原生单实例行为另在 KDE Wayland 的 XWayland 下使用 debug 构建、
 源码 Python 引擎和临时空工作区验证：启动中再次打开时，即使第二次启动使用无效的显示服务
 和 Python 路径，也会直接退出，不初始化第二套界面或引擎。
 关闭到托盘/最小化后，通过工作区别名路径再次打开，恢复的是同一个原生窗口和引擎。
@@ -212,61 +204,10 @@ Sidecar 构建会重新构建本地 Python 包，而不是复用其缓存 wheel�
 检查不会静默下载、强制安装或重启应用。安装需要明确确认；请先完成或取消运行中的任务，
 并保存或放弃编辑器及设置中的未保存修改。应用在安装并重启前会再次检查这些限制。
 
-已签名的 Windows NSIS、macOS Apple Silicon／Intel 应用和 Linux **AppImage**
-支持应用内安装更新。macOS 更新保持已安装应用的架构，不跨架构切换。
-Linux `.deb`/`.rpm` 始终通过手动下载及包安装升级，不会用 AppImage 替换。
-开发、本地及未配置签名的构建仍可检查公开发行版并手动下载。
-网络或检查失败会明确显示，不影响继续使用 Desktop。
-应用内安装必须验证更新签名；它与 **Windows/macOS 操作系统代码签名及公证是独立机制**。
-签名还必须绑定公告中的应用版本（`requireSignedVersion`），旧的已签名产物不能冒充新版。
-
-### 维护者签名配置
-
-无需部署更新服务。原生更新器使用固定 HTTPS 端点：
-`https://github.com/BigDawnGhost/wenyi/releases/latest/download/latest.json`。
-不要在仓库内生成密钥。在仓库根目录执行以下命令，将 Tauri signer 密钥写入
-**checkout 之外**的安全位置：
-
-```bash
-pnpm exec tauri signer generate --write-keys /secure/path/outside-checkout/wenyi-updater.key
-```
-
-通过交互提示输入密码，不要将真实密码放入命令历史。安全备份私钥和密码；
-禁止提交、粘贴到 issue/日志，或在 PR workflow 中使用。不同发行版应保留同一密钥：
-已安装应用信任内置公钥，更换密钥需要规划迁移或手动升级。
-
-在 GitHub Actions 仓库中配置：
-
-| 名称 | 类型 | 值 |
-| --- | --- | --- |
-| `WENYI_UPDATER_PUBLIC_KEY` | Variable | 生成的 `.pub` 文件完整内容，不是路径 |
-| `TAURI_SIGNING_PRIVATE_KEY` | Secret | 私钥文件完整内容 |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Secret | 私钥密码（有意使用无密码密钥时为空） |
-
-本地签名构建从安全环境或 secret manager 提供同名三个环境变量（公钥不是秘密），
-在对应干净标签 checkout 执行 `WENYI_BUILD_TAG=v1.2.3 pnpm desktop:build`。
-macOS 添加 `--bundles dmg,app` 以生成额外的更新归档。
-启动脚本仅为已配置的稳定签名构建启用 Tauri v2 `bundle.createUpdaterArtifacts`。
-部分配置、公钥路径/格式错误，或为开发/预发行版本签名都会明确失败。
-本地密码变量必须定义，即使值为空。普通 `cargo test`、`cargo run`、PR 构建及未签名的
-`pnpm desktop:build` 不需要签名秘密。
-
-Desktop workflow 仅向稳定 release 构建提供签名秘密；
-PR、开发/预发行构建和手动 workflow 运行保持未签名。
-签名配置全部缺失时，稳定发行仍生成手动安装包，并明确记录**不发布 `latest.json`**。
-部分签名配置则失败，不发布误导性的更新元数据。
-
-签名发行在 Windows `.exe` 和 Linux `.AppImage` 旁增加 `.sig`；
-macOS 为每种架构在现有 `.dmg` 之外增加 `.app.tar.gz` 及 `.sig`，不额外套安装包 ZIP。
-`scripts/desktop_updates.py` 校验完整四平台集合，生成正式 SemVer manifest，
-包含 `windows-x86_64`、`linux-x86_64`、`darwin-aarch64`、`darwin-x86_64`、
-实际重命名后的发行 URL 和签名内容。所有更新包及签名构建、上传成功后才**最后上传**
-含发行说明的 `latest.json`。
-发行上传不覆盖已有附件；同名附件已存在时重试会失败。缺失或错误签名不能发布部分 manifest。
-没有 manifest 的发行不能通过应用内更新器安装，请手动下载。
-产物收集和 manifest 生成需要 `WENYI_UPDATER_PUBLIC_KEY`，并拒绝 key ID 与公钥不一致的签名。
-因此 Tauri 的密钥不匹配警告会导致发布失败，避免发布客户端无法安装的更新。
-这项发布检查不等同于密码学验签；原生更新器会在安装前验证下载产物及签名绑定的版本。
+> **注意：** 原生 GPUI 应用的应用内自动更新正在随 [Rust 重写](RUST-REWRITE.md)
+> 重新实现（开放问题 Q4）。在此之前，请从 GitHub Releases 手动下载发行版。
+> 绝不发布未签名的自动更新器：签名必须绑定公告的应用版本，
+> 旧的已签名产物不能冒充新版。
 
 ## API 密钥
 
@@ -288,7 +229,7 @@ macOS 为每种架构在现有 `.dmg` 之外增加 `.app.tar.gz` 及 `.sig`，�
 
 凭据变更对新建客户端生效；运行中的任务保留配置和凭据快照。重命名连接会迁移凭据引用，删除连接后新连接不能继承它的密钥。
 
-SQLite 仅保存来源模式和不透明凭据引用。密钥不会保存到 YAML/JSON、项目状态或浏览器存储，除上述需认证的本地读取接口外，不会出现在任何 API 响应中。Web 和 CLI 保留原有环境变量方式。
+SQLite 仅保存来源模式和不透明凭据引用。密钥不会保存到 YAML/JSON、项目状态或浏览器存储，除上述需认证的本地读取接口外，不会出现在任何 API 响应中。
 
 **重新检查**只检查本地配置，不联系提供商，也不发送模型请求验证密钥。
 
@@ -335,7 +276,7 @@ SQLite 仅保存来源模式和不透明凭据引用。密钥不会保存到 YAM
 
 实例按工作区隔离，不按可执行文件路径或应用版本区分。
 不同 `--data-dir` 工作区可以独立运行；指向同一目录的不同路径写法共用一个实例。
-原生层在创建 WebView、启动 Python 之前完成实例仲裁；现有后端工作区锁仍独立保留，保护数据安全。
+原生层在创建窗口、启动 Python 之前完成实例仲裁；现有后端工作区锁仍独立保留，保护数据安全。
 
 已有应用正在退出、上次的引擎尚未关闭，或窗口无法恢复时，原生提示框会说明处理方式，
 而不是再打开一个连接失败的界面。可尝试托盘中的 **Show Wenyi**，或等待退出完成后重新打开。
@@ -360,14 +301,13 @@ Windows 的 debug Python 覆盖值必须是现有可执行文件路径，不能�
 - 窗口隐藏，或平台报告窗口已最小化后，暂停 UI 周期轮询、进度事件触发的刷新和实时用时计时器。
   进度订阅与 Python 引擎继续运行，不取消已发出的请求或正在进行的原生保存。
   恢复窗口时立即同步已保存状态，包括后台完成的任务。普通失焦不视为最小化。
-- 隐藏会保留 WebView、未保存的编辑器草稿和仅会话内存中的凭据。
-  这减少的是无用 UI 工作，不会释放 Python 引擎或 WebView 的常驻内存，
+- 隐藏会保留窗口状态、未保存的编辑器草稿和仅会话内存中的凭据。
+  这减少的是无用 UI 工作，不会释放 Python 引擎的常驻内存，
   也不会阻止计算机休眠。
 
-Linux/GTK Wayland 无法可靠地向应用报告合成器侧的最小化状态。
+Linux/Wayland 无法可靠地向应用报告合成器侧的最小化状态。
 此时任务仍继续运行，但 UI 轮询和计时器可能继续工作。
 需要可靠触发后台降耗时，请使用关闭到托盘；不会把普通失焦误判为最小化。
-托盘恢复会重新映射同一个原生窗口，兼容 GTK/Wayland 的恢复限制，不替换 WebView 或其中的草稿。
 
 Linux 和 Windows 隐藏原生窗口顶部菜单栏，但始终注册菜单事件和 **Ctrl+Q** 退出快捷键，
 不依赖托盘是否可用。多次从托盘恢复或再次打开运行中的应用后，菜单栏仍保持隐藏，
@@ -379,14 +319,6 @@ Linux 和 Windows 隐藏原生窗口顶部菜单栏，但始终注册菜单事�
 重启后可从已保存进度续跑。退出前请保存编辑器草稿；尚未保存的内存草稿不属于持久化检查点。
 后台翻译仍会向配置的模型服务发送请求，直到任务完成或被暂停，期间可能继续产生用量费用。
 
-Linux 有 Wayland 时优先使用原生 Wayland；X11 仅是连接阶段的回退，不是全局强制设置。针对 NVIDIA 专有驱动，原生 Wayland 使用进程级显式同步兼容设置并保持 DMA-BUF；NVIDIA/X11、NVIDIA/Hyprland 使用独立 DMA-BUF 回退。用户显式设置的图形环境变量优先。
+Linux 有 Wayland 时优先使用原生 Wayland；X11 仅是连接阶段的回退，不是全局强制设置。用户显式设置的图形环境变量优先。
 
-窗口仍异常时，可仅对一次启动尝试以下诊断，不要全局设置：
-
-```bash
-WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm desktop
-```
-
-已用原生 GTK/WebKit 探针复现 NVIDIA/KDE Wayland 的 `Gdk Error 71`，并确认针对性显式同步设置可以避免该错误。这仅验证该兼容场景，不代表所有 GPU 的性能结论。界面性能测量与正确性测试分开记录。
-
-Rust 后端重写仍暂缓。Desktop 通过共享后端接口复用现有 Python 引擎；Rust 仅负责原生应用能力和进程生命周期。
+Desktop 在 [Rust 重写](RUST-REWRITE.md) 期间继续通过 sidecar 契约复用现有 Python 引擎；原生应用负责窗口、应用能力与进程生命周期。

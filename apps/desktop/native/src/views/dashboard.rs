@@ -17,26 +17,7 @@ use crate::{
     theme,
 };
 
-/// Status → badge (fill, text). Mirrors `badge.tsx` variants: `secondary`
-/// uses the neutral pair; tones use a translucent tint fill with the tone
-/// itself as text (ref: `bg-emerald-50 text-emerald-700`, …). Alpha over the
-/// card derives the tint in both modes without extra palette roles.
-fn status_badge(status: &str, palette: &theme::Palette) -> (Hsla, Hsla) {
-    let tone = match status {
-        "prepared" | "done" | "completed" | "reviewed" | "applied" | "published" => {
-            Some(palette.success)
-        }
-        "pausing" | "paused" | "interrupted" => Some(palette.warning),
-        "failed" | "error" => Some(palette.destructive),
-        "running" | "parsing" | "preparing" | "translating" | "reviewing" | "autofixing"
-        | "postprocessing" => Some(palette.info),
-        _ => None,
-    };
-    match tone {
-        Some(t) => (Hsla { a: 0.12, ..t }, t),
-        None => (palette.secondary, palette.secondary_foreground),
-    }
-}
+use super::ui;
 /// Display the `created_at` timestamp as a plain date. ISO `YYYY-MM-DD…`
 /// values render as the date part (mirrors the React `toLocaleDateString`
 /// day precision); anything already short — or unparseable — renders raw
@@ -259,60 +240,66 @@ impl Dashboard {
         div()
             .id(SharedString::from(format!("project-card-{}", project.id)))
             .flex()
-            .flex_col()
-            .gap_2()
-            .p_5()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.border)
-            .bg(palette.card)
-            .hover(|this| this.border_color(palette.accent).bg(palette.accent_soft.opacity(0.25)))
+            .items_center()
+            .gap_4()
+            .px_4()
+            .py_3()
+            .border_b_1()
+            .border_color(palette.separator)
+            .hover(|this| this.bg(palette.hover))
+            .cursor_pointer()
             .when_some(on_open, |this, on_open| {
                 // Card body click = overlay Link in the source. Delete button
                 // stops at its own handler (GPUI hit-testing: innermost first).
                 this.on_click(move |_, window, cx| on_open(project_for_open.clone(), window, cx))
             })
+            .child(ui::book_cover(
+                project.title.as_deref().unwrap_or(&project.name),
+                &project.id,
+                project.banner.as_deref(),
+                &palette,
+            ))
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap_2()
+                    .flex_col()
+                    .gap_0()
                     .child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(div().font_medium().child(project.name.clone()))
-                            .child(div().text_xs().text_color(palette.muted_foreground).child(title)),
+                            .text_size(px(16.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .font(theme::fonts::serif())
+                            .truncate()
+                            .child(project.name.clone()),
                     )
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .px_2()
-                                    .py_px()
-                                    .rounded_sm()
-                                    .bg(status_badge(&project.status, &palette).0)
-                                    .text_color(status_badge(&project.status, &palette).1)
-                                    .text_xs()
-                                    .child(project.status.clone()),
-                            )
-                            .child(
-                                Button::new(format!("delete-{}", project.id))
-                                    .ghost()
-                                    .label(delete_label)
-                                    .disabled(busy_deleting || self.deleting.is_some())
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.request_delete(project_for_delete.clone(), window, cx);
-                                    })),
-                            ),
+                            .text_sm()
+                            .text_color(palette.muted_foreground)
+                            .truncate()
+                            .child(title),
+                    )
+                    .child(div().text_xs().text_color(palette.muted_foreground).child(meta)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .flex_none()
+                    .child(ui::status_pill(&project.status, &palette))
+                    .child(
+                        Button::new(format!("delete-{}", project.id))
+                            .ghost()
+                            .label(delete_label)
+                            .disabled(busy_deleting || self.deleting.is_some())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.request_delete(project_for_delete.clone(), window, cx);
+                            })),
                     ),
             )
-            .child(div().text_xs().text_color(palette.muted_foreground).child(meta))
     }
 }
 
@@ -329,17 +316,11 @@ impl Render for Dashboard {
             .gap_3()
             .p_6()
             .overflow_y_scrollbar()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("My projects"));
+            .font(theme::fonts::ui())
+            .child(ui::page_title("My projects", None::<Div>));
 
         if let Some(err) = &self.error {
-            col = col.child(
-                div()
-                    .p_3()
-                    .rounded_md()
-                    .bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(ui::error_box(err, &palette));
         }
 
 
@@ -353,17 +334,10 @@ impl Render for Dashboard {
                 );
             }
             Some(projects) if projects.is_empty() => {
-                col = col.child(
-                    div()
-                        .py_24()
-                        .text_center()
-                        .text_sm()
-                        .text_color(palette.muted_foreground)
-                        .child("No projects yet."),
-                );
+                col = col.child(ui::empty_state("No projects yet.", &palette));
             }
             Some(projects) => {
-                let mut grid = div().flex().flex_col().gap_3();
+                let mut grid = ui::list_container(&palette).w_full().max_w(px(1040.0));
                 for project in projects {
                     grid = grid.child(self.render_card(project, palette, cx));
                 }

@@ -341,20 +341,16 @@ impl Render for Create {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .gap_3()
+            .w_full()
+            .max_w(px(820.0))
+            .gap_4()
             .p_6()
             .overflow_y_scrollbar()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Create project"));
+            .font(theme::fonts::ui())
+            .child(super::ui::page_title("Create project", None::<Div>));
 
         if let Some(err) = &self.error {
-            col = col.child(
-                div()
-                    .p_3()
-                    .rounded_md()
-                    .bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
         col = col

@@ -14,20 +14,20 @@ state/
 *.txt
 !packages/core/wenyi_core/i18n/data/tasks/*.txt
 !packages/core/wenyi_core/i18n/data/shared/*.txt
+!tests/golden/corpus/*.txt
 
 # Input books and generated artifacts (do not commit)
 output/
 explore/
 *.epub
+!crates/wenyi-core/tests/fixtures/epub/*.epub
 *.fb2
 *.mobi
 *.azw3
 *.pdf
 *.html
-!/apps/web/tests/select-harness.html
-!/apps/desktop/frontend/tests/select-harness.html
 *.srt
-*.docx
+!tests/golden/corpus/*.srt
 
 # Web workspace artifacts.
 node_modules/
@@ -49,7 +49,9 @@ local_references
 
 # Generated TypeScript build metadata and compiled tooling configuration.
 *.tsbuildinfo
-/apps/web/vite.config.js
-/apps/web/vite.config.d.ts
-/apps/web/playwright.config.js
-/apps/web/playwright.config.d.ts
+
+# Rust build artifacts (Cargo.lock stays committed per the rewrite plan).
+target/
+**/target/
+# Local native-build helper (system library symlinks, machine-specific).
+target-link/

@@ -13,7 +13,6 @@ import pathlib
 import unittest
 
 TRANS_NOVEL_DIR = pathlib.Path(__file__).resolve().parent.parent / "wenyi_core"
-CLI_DIR = pathlib.Path(__file__).resolve().parents[2] / "cli" / "wenyi_cli"
 PIPELINE_DIR = TRANS_NOVEL_DIR / "pipeline"
 AGENTS_DIR = TRANS_NOVEL_DIR / "agents"
 
@@ -90,27 +89,6 @@ class TestArchitectureBoundaries(unittest.TestCase):
                     ),
                     f"{path}: {module}",
                 )
-
-    def test_command_modules_do_not_import_cli_entry_point(self):
-        """Command helpers receive dependencies instead of importing application globals."""
-        paths = list((CLI_DIR / "commands").rglob("*.py"))
-        self.assertTrue(paths, "The command architecture check must inspect actual CLI modules")
-        for path in paths:
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.ImportFrom):
-                    module = node.module or ""
-                    self.assertFalse(
-                        (node.level == 2 and module == "cli")
-                        or module == "wenyi_cli.cli"
-                        or (
-                            node.level == 2
-                            and not module
-                            and any(alias.name == "cli" for alias in node.names)
-                        ),
-                        str(path),
-                    )
-                elif isinstance(node, ast.Import):
-                    self.assertFalse(any(alias.name == "wenyi_cli.cli" for alias in node.names))
 
     def test_orchestrator_has_no_domain_imports(self):
         """Allow the orchestrator to depend only on config and sibling pipeline services."""

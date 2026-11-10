@@ -6,7 +6,7 @@ Simple API usage:
     from pdf_to_html import convert_pdf_to_html
     output_path = convert_pdf_to_html("document.pdf")
 
-CLI usage:
+Direct usage:
     uv run python pdf_to_html.py document.pdf [output.html]
 """
 

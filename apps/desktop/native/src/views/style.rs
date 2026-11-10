@@ -292,11 +292,20 @@ impl Render for StyleView {
         let read_only = self.read_only();
         // Single scrollable overview: synopsis + guide hero, voice grid,
         // cast/terms tables, chapter digests. No tabs — one document.
-        let mut col = div().flex().flex_col().flex_1().min_h_0().gap_4().p_6()
+        let mut col = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .max_w(px(1180.0))
+            .gap_5()
+            .p_6()
             .overflow_y_scrollbar()
+            .font(theme::fonts::ui())
             .child(
                 div().flex().items_center().justify_between()
-                    .child(div().text_xl().font_weight(FontWeight::BOLD).child("Book knowledge"))
+                    .child(super::ui::page_title("Book knowledge", None::<Div>))
                     .child(
                         div().flex().items_center().gap_2()
                             .child(
@@ -321,11 +330,7 @@ impl Render for StyleView {
             );
 
         if let Some(err) = &self.error {
-            col = col.child(
-                div().p_3().rounded_md().bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
         if self.loading && self.data.is_none() {
             col = col.child(div().text_sm().text_color(palette.muted_foreground).child("Loading…"));

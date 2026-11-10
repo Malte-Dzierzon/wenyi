@@ -1,117 +1,39 @@
-# CLI 使用指南
+# 无界面行为规范
 
 [English](../cli.md) · [项目介绍](README.md)
 
-Web（React/Vite + FastAPI）部署与开发见 [Web 部署](web.md)。
+> `wenyi` 命令行产品已在 Rust 重写清理中删除（见 git 历史）。本文档保留其
+> **行为规范**：Desktop 应用与未来 Rust 引擎必须遵守的格式、状态布局、
+> 流程阶段与选项。下文命令名（`parse`、`translate`、`review`、`assemble` 等）
+> 描述引擎操作，不代表仍存在的 CLI。
 
-## 安装与运行
+引擎入口：`packages/core/wenyi_core/pipeline/orchestrator.py`。配置默认值来自
+`config.yaml`（`packages/core/wenyi_core/config.py`）。
 
-从源码运行需要 Python 3.10+ 与 [uv](https://docs.astral.sh/uv/)。
+## 模型路由检查
 
-```bash
-uv sync
-export DEEPSEEK_API_KEY=sk-...
-uv run wenyi --version
-uv run wenyi translate book.epub
-```
-
-在仓库根目录执行 `uv sync` 会安装本地 CLI（`wenyi-cli`）和翻译内核（`wenyi-core`）。
-命令为 `wenyi`，模块入口为 `python -m wenyi_cli`。开发包含 Web API 的完整 Python
-工作区时，使用 `uv sync --locked --all-packages --group dev`。
-
-从使用 `trans-novel` 的旧版工作区升级时，执行 `uv sync --locked` 刷新已安装命令，
-之后使用 `uv run wenyi ...`。安装时不再提供旧命令。
-
-显示的版本号由仓库 Git 标签自动生成：标签构建显示正式版本，开发构建还会包含距标签的提交数与提交哈希。
-CLI、Core 与 API 包使用同一版本来源，OpenAPI 读取已安装 API 包的版本。
-根虚拟工作区和私有前端包不维护独立发布版本。
-
-每次启动程序都会检查当前目录的 `config.yaml`；文件不存在时会创建一份带注释的默认配置。开始正式翻译前请检查模型配置。
-
-## 检查模型路由
-
-```bash
-uv run wenyi models list
-uv run wenyi models explain --operation review.fix
-uv run wenyi models check --for translate
-uv run wenyi models ping --for translate
-```
-
-前三个命令只做本地预览与密钥检查，不发送请求。`models ping` 会对每个可达模型配置发送一次简短的真实请求，确认端点、密钥与模型名可用，会消耗少量 token。三个档位仍可作为默认入口；在 `llm.routes` 中独立配置操作即可混用模型。旧配置与用量账本的显式转换及预算设置见[配置说明](configuration.md#模型与操作路由)。
+引擎提供无请求的路由预览与密钥检查（`models list` / `explain` / `check` 语义）
+及真实连通性探测（`ping` 语义：每个可达配置一次简短请求，不重试，失败按类别
+报告）。旧配置与用量账本的显式转换及预算设置见[配置说明](configuration.md#模型与操作路由)。
 
 ## 多语言互译（实验性）
 
-先运行 `uv run wenyi languages` 查看内置语言。将以下片段写入自己的配置文件（模型配置沿用已有设置），即可直接中译英：
+每次运行选择一个方向（`language.source`/`target`）；`source: auto` 用模型识别，
+已知 ISO 代码可避免一次模型调用。输出遵循
+`output/<书名>.<目标>.<扩展名>`，双语版为 `output/<书名>.<目标>-bi.<扩展名>`。
+`--out` 仍遵循显式命名及 `-bi` 派生规则。
 
-```yaml
-language:
-  source: zh
-  target: en
-```
+以下 `.zh.*` 示例指默认简体中文目标。所有目标的书籍状态均位于
+`state/<书名>/targets/<目标语言>/`，字幕位于
+`state/srt/<slug>/targets/<目标语言>/`。续跑和独立阶段使用同一目标配置，
+完成的译文不会因切换回原目标而重新翻译。EPUB 说明页在简体中文目标下为中文，
+其它目标暂用标记为英语的英文页，可通过 `about_page: false` 关闭。
 
-```bash
-uv run wenyi --config config.yaml translate book.epub --bilingual
-```
-
-输出为 `output/book.en.epub` 和 `output/book.en-bi.epub`。日译英改为 `source: ja`、`target: en`；英译日用 `source: en`、`target: ja`。反向翻译以对应语言的文件为输入，每次选择一个方向。`--out` 仍遵循显式命名及 `-bi` 派生规则。
-
-以下 `.zh.*` 示例指默认简体中文目标。所有目标的书籍状态均位于 `state/<书名>/targets/<目标语言>/`，字幕位于 `state/srt/<slug>/targets/<目标语言>/`。续跑和独立阶段命令使用同一目标配置，完成的译文不会因切换回原目标而重新翻译。EPUB 说明页在简体中文目标下为中文，其它目标暂用标记为英语的英文页，可通过 `about_page: false` 关闭。
-
-CLI 的帮助、进度、表格和错误提示统一使用英语。译文和模型生成的说明性元数据使用 `language.target`；`source` 和 `aliases` 中的原文姓名保留用于匹配。续跑复用已有分析和术语备注，本次更新不会自动翻译旧数据。当前不支持阿拉伯语、希伯来语等 RTL 目标；PDF 字体和外部 bridge 的语言支持仍需单独验证。真实长篇翻译质量尚未完成新旧盲评。
-
-## Windows
-
-CLI 发行文件名包含 Git tag 版本、组件、平台和架构。以下示例使用 tag `v1.2.3`，
-请将 `1.2.3` 替换为下载版本。Desktop 安装包使用独立的 `wenyi-desktop-*` 名称，
-详见 [Desktop](desktop.md)。
-
-Windows Release 提供 `wenyi-cli-1.2.3-windows-x64.zip`，请使用
-`wenyi-cli-SHA256SUMS.txt` 校验文件，再将 `wenyi.exe` 解压到目录中运行。
-
-使用打包版 `wenyi.exe` 时，在 PowerShell 中设置 API Key：
-
-```powershell
-# 仅当前窗口有效
-$env:DEEPSEEK_API_KEY = "sk-..."
-.\wenyi.exe translate .\book.epub
-```
-
-要永久保存环境变量，执行下列命令后重新打开 PowerShell：
-
-```powershell
-setx DEEPSEEK_API_KEY "sk-..."
-```
-
-也可把 `language.source` 设为已知的语言代码，避免调用模型自动识别源语言。
-
-## Linux
-
-Release 提供 `wenyi-cli-1.2.3-linux-x64.zip` 和 `wenyi-cli-1.2.3-linux-arm64.zip`。
-请下载与处理器架构匹配的压缩包，使用 `wenyi-cli-SHA256SUMS.txt` 校验后执行：
-
-```bash
-unzip wenyi-cli-1.2.3-linux-arm64.zip  # x64 系统请改用 linux-x64
-chmod +x wenyi
-export DEEPSEEK_API_KEY=sk-...
-./wenyi translate book.epub
-```
-
-## macOS
-
-Release 分别提供适用于 Apple Silicon 的 `wenyi-cli-1.2.3-macos-arm64.zip` 和适用于
-Intel Mac 的 `wenyi-cli-1.2.3-macos-x64.zip` 终端程序。下载与处理器匹配的压缩包，
-先用 `wenyi-cli-SHA256SUMS.txt` 核对文件，再执行：
-
-```bash
-unzip wenyi-cli-1.2.3-macos-arm64.zip  # Intel Mac 请改用 macos-x64
-chmod +x wenyi
-export DEEPSEEK_API_KEY=sk-...
-./wenyi translate book.epub
-```
-
-这些命令行程序由 PyInstaller 做 ad-hoc 签名，但没有使用 Apple 开发者证书完成
-notarization。macOS 仍可能隔离下载的程序；确认校验和无误后，如系统提示拦截，
-可在 **系统设置 → 隐私与安全性** 中批准运行。
+帮助、进度、表格和错误提示统一使用英语。译文和模型生成的说明性元数据使用
+`language.target`；`source` 和 `aliases` 中的原文姓名保留用于匹配。续跑复用
+已有分析和术语备注，本次更新不会自动翻译旧数据。当前不支持阿拉伯语、
+希伯来语等 RTL 目标；PDF 字体和外部 bridge 的语言支持仍需单独验证。
+真实长篇翻译质量尚未完成新旧盲评。
 
 ## 输入与输出
 
@@ -122,7 +44,7 @@ notarization。macOS 仍可能隔离下载的程序；确认校验和无误后�
 - `--format epub|txt|html|markdown|pdf|docx`：书籍导出格式；未指定时 BabelDOC PDF 状态→`pdf`，`.docx`→`docx`，其它书籍（含 MinerU PDF 状态）→`epub`。显式格式始终优先；PDF 默认格式依据已保存的后端信息，即使当前 `pdf_backend` 配置改变也不会改用另一套默认值。该选项不适用于 SRT。
 - EPUB 输入会尽量按原 XHTML 模板回填译文，保留样式、图片、目录和锚点。
 - 双语版按段展示译文与原文，原文默认淡化；设置 `output.bilingual_preserve_source_style: true` 可改为继承书籍正文样式。排列顺序由 `output.bilingual_order` 控制。
-- EPUB 中未翻译的段落只保留一份原文及其注音、链接。Web 导出和部分已译章节同样遵循此规则，双语排列顺序与原文样式选项不会额外生成重复段落。
+- EPUB 中未翻译的段落只保留一份原文及其注音、链接。部分已译章节同样遵循此规则，双语排列顺序与原文样式选项不会额外生成重复段落。
 - EPUB 默认在书末附加“关于此翻译”说明，可通过 `output.about_page: false` 关闭。
 - 书籍状态位于 `state/<书名>/targets/<目标语言>/`，含章节中间结果、术语 SQLite 库、用量和报告。字幕运行使用独立目录树 `state/srt/`（见 [SRT 字幕](#srt-字幕)）。
 
@@ -144,8 +66,8 @@ pipeline:
   # babeldoc_pages: "15"   # 可选，1-based
 ```
 
-3. `uv run wenyi translate book.pdf` 会自动经 bridge `/fillback` 导出 PDF。之后执行 `assemble book.pdf` 也会根据已保存的 BabelDOC 状态默认导出 PDF，无需指定 `--format pdf`；需要其它格式时显式指定 `--format`。
-   回填 PDF 默认不绘制 BabelDOC 的版面定位框，也不输出 plain text / title 等角色标签。  
+3. 翻译 `book.pdf` 会自动经 bridge `/fillback` 导出 PDF。之后执行 assemble 操作也会根据已保存的 BabelDOC 状态默认导出 PDF；需要其它格式时显式指定格式。
+   回填 PDF 默认不绘制 BabelDOC 的版面定位框，也不输出 plain text / title 等角色标签。
    bridge 会把抽取后的原始 IL 冻结为持久 session 快照；只要保留 session 目录并使用完全
    相同的 Python/BabelDOC 版本，服务重启后可按原 session ID 懒恢复，不会重跑版面识别。
    长时间翻译建议用 `WENYI_BABELDOC_STATE_DIR` 指定持久目录；默认系统临时目录可能在重启
@@ -155,34 +77,16 @@ pipeline:
 BabelDOC 只适合带可提取文本层的 PDF。选择该后端时，Wenyi 会在请求 bridge 前检查所选页面；
 若页面只有扫描图片而没有文本层，会停止并提示改用默认 MinerU，或先进行 OCR。
 
-首次读取 PDF（MinerU）需设置 `MINERU_API_KEY`：
-
-```bash
-export MINERU_API_KEY=...
-uv run wenyi translate book.pdf
-```
-
-MinerU 转换生成的 HTML 会保存到
+首次读取 PDF（MinerU）需设置 `MINERU_API_KEY`。MinerU 转换生成的 HTML 会保存到
 `state/<书名>/targets/<目标语言>/source/<源文件 SHA-256>/converted.html`。按内容隔离缓存，可避免
 初始化中断后把另一份 PDF 的转换结果误用于当前文件。
 后续运行会直接复用该文件，也可人工修正后再续跑。
 
 #### PDF 导出
 
-默认 PDF 引擎为 WeasyPrint。安装对应的可选依赖后，无需指定
-`--pdf-engine`：
-
-```bash
-uv sync --extra pdf-output
-uv run wenyi assemble book.html --format pdf
-```
-
-如需不依赖系统排版库的跨平台轻量引擎，可使用 `fpdf2`：
-
-```bash
-uv sync --extra pdf-output-lite
-uv run wenyi assemble book.html --format pdf --pdf-engine fpdf2
-```
+默认 PDF 引擎为 WeasyPrint（可选依赖 `pdf-output`）。
+如需不依赖系统排版库的跨平台轻量引擎，可使用 `fpdf2`
+（可选依赖 `pdf-output-lite`，`--pdf-engine fpdf2`）。
 
 `fpdf2` 可处理基础排版和图片，但只支持有限的 HTML/CSS；与文字混排的图片
 会作为独立区块输出。它会查找系统中的中文字体；如果未找到，请用
@@ -191,7 +95,7 @@ Windows。
 
 ## DOCX（Word）
 
-`translate book.docx` 走完整书籍 Orchestrator（术语、润色、审校、`state/<slug>/targets/<目标语言>/` 续跑）。
+DOCX 书籍走完整书籍 Orchestrator（术语、润色、审校、`state/<slug>/targets/<目标语言>/` 续跑）。
 
 **结构**
 
@@ -214,26 +118,14 @@ Windows。
 
 - 默认：`output/<stem>.zh.docx`（标题大纲可供 Word 导航窗格）。可用 `--format epub` 等覆盖。
 
-```bash
-uv run wenyi translate book.docx
-uv run wenyi translate book.docx --bilingual
-uv run wenyi translate book.docx --format epub
-```
-
 ## SRT 字幕
 
-`translate` 会按扩展名自动分流 `.srt`。字幕路径比书籍管线更轻：
+`.srt` 按扩展名自动分流。字幕路径比书籍管线更轻：
 
 - 滑窗 20 条、重叠 10，最多 100 路并发 strong 档调用；
 - 无术语库、润色或全书审校；
-- `--chapter`、`--polish`、`--review`、`--format` 在不适用时会被忽略或拒绝；
-- 默认写出单语 `output/<stem>.zh.srt`；加 `--bilingual` 可生成 `.zh-bi.srt`。
-
-```bash
-uv run wenyi translate movie.srt
-uv run wenyi translate movie.srt --bilingual
-uv run wenyi translate movie.srt --no-mono --bilingual
-```
+- 章节/润色/审校/格式选项在不适用时会被忽略或拒绝；
+- 默认写出单语 `output/<stem>.zh.srt`；加双语选项可生成 `.zh-bi.srt`。
 
 再次对同一源文件执行即可续跑；已缓存的
 `state/srt/<slug>/targets/<目标语言>/batches/` 会跳过。目录布局：
@@ -248,71 +140,45 @@ state/srt/<slug>/targets/<目标语言>/
   events.jsonl     # 运行事件与 LLM 重试观察
 ```
 
-字幕路径不会生成 `glossary.db` 或 `reviews/`。包代码在 `trans_novel.srt`
+字幕路径不会生成 `glossary.db` 或 `reviews/`。包代码在 `wenyi_core.srt`
 （store + translate），读写分别在 `ingest.srt_reader` 与 `assemble.srt_writer`。
 
 ## 用量与事件日志
 
-每个目标目录的 `usage.json` 保存跨续跑累计的 token 用量，`events.jsonl` 追加记录阶段事件与重试。Review 目录另存本次审校用量，其增量只合并到总账一次。
+每个目标目录在 `usage.json` 保存累计 token 用量，在 `events.jsonl` 追加阶段事件与重试记录。Review 目录的账本增量会且只会合并一次到累计账本。
 
-进度条时钟显示本次工作流的总用时，覆盖解析、等待模型响应、翻译、润色、审校和导出。
-切换阶段、章节或审校轮次不会归零；一个阶段完成后，如果后续工作仍在进行，时钟仍继续走动。
-并发模型请求按实际经过时间计时，不累加各请求的耗时。
+运行计时覆盖当前整个流程：解析、模型等待、翻译、润色、审校和导出。
+切换章节、阶段或 Review 轮次时不重置；只有全部工作完成后才停止。
+并发模型请求按墙钟时间累计，不按请求耗时加总。
 
-`prepare`、`translate`（包括 `--chapter` 和 SRT）、`review` 或 `assemble` 结束后，CLI 显示
-最近一次运行用时和累计执行时长。每个目标目录的 `timing.json` 保存 `total_seconds`，以及
-包含运行 ID、操作、起止时间、用时和完成状态的 `runs` 列表。重复执行命令只追加本次实际
-执行时长，不计入两次运行之间的停机时间；嵌套流程只计一次。分别启动的命令各自计时，
-即使它们有重叠执行的时间。书籍也可通过 `wenyi status book.epub` 查看计时记录；
-查看状态和重新生成报告不会增加累计时长。
+`prepare`、`translate`（含单章和 SRT）、`review`、`assemble` 执行后，
+运行会记录本次耗时与累计执行时长。每个目标的 `timing.json` 保存
+`total_seconds` 和每次运行的 ID、操作、时间戳、耗时与完成状态。
+重复执行只累计本次运行时间，不含两次运行之间的停机；嵌套阶段只计一次。
+单独启动的操作即使时间重叠也各自计时。书籍用时可通过状态/报告操作查看；
+检查与报告重建不计时。
 
-书籍状态初始化成功或通过身份校验后，异常退出和正常 Ctrl+C 中断也会保存本次用时。
-计时使用独立锁和原子写入，不影响 token 用量账本。旧版本没有可恢复的计时历史，
-累计从本版本开始；强制杀死进程或状态初始化前的失败无法保存本次用时。
+书籍状态初始化或校验通过后，失败与正常 Ctrl+C 退出也会保存本次运行用时。
+用时在独立锁下原子提交，与用量账本分离。旧运行无历史可恢复，
+只能从当前版本开始累计。若被强杀，或状态初始化前就已失败，
+无法保存本次运行用时。
 
-manifest 通过 `source_sha256` 绑定输入内容。同名文件内容不同或状态缺少有效哈希时会拒绝续跑，必须重新建立翻译状态。
+manifest 用 `source_sha256` 绑定输入内容；同名不同内容的文件或缺失合法哈希
+的状态不能续跑，请建立新的翻译状态。
 
-## 常用命令
+## 流程阶段
 
-```bash
-# Parse and list the source chapters without model calls
-uv run wenyi parse book.epub
-
-# 一键完整翻译、只翻指定章节，或只准备而不翻译
-uv run wenyi translate book.epub
-uv run wenyi translate book.epub --chapter 3
-uv run wenyi translate book.epub --format txt
-uv run wenyi prepare book.epub
-uv run wenyi translate book.pdf
-uv run wenyi translate movie.srt
-
-# 覆盖配置中的润色与最终审校开关
-uv run wenyi translate book.epub --polish --review
-uv run wenyi translate book.epub --no-polish --no-review
-
-# 同时生成单语和双语版 / 仅生成双语版
-uv run wenyi translate book.epub --bilingual
-uv run wenyi translate book.epub --no-mono --bilingual
-```
-
-`parse` 列出从零开始的章节编号、原文标题与段落数，并将完整解析原文保存到所显示目标语言状态目录的 `parsed_document.json`。它不需要 LLM 凭据，不调用模型识别语言，不生成梗概、风格或术语，也不把翻译状态标记为初始化成功。`language.source: auto` 留到预处理时识别。PDF 解析仍需要配置的 MinerU/BabelDOC 服务；SRT 使用独立字幕流程，不经过此书籍命令。
+- `parse`：无模型调用的解析与章节列表。列出从零开始的章节编号、原文标题与段落数，并将完整解析原文保存到所显示目标语言状态目录的 `parsed_document.json`。它不需要 LLM 凭据，不调用模型识别语言，不生成梗概、风格或术语，也不把翻译状态标记为初始化成功。`language.source: auto` 留到预处理时识别。PDF 解析仍需要配置的 MinerU/BabelDOC 服务；SRT 使用独立字幕流程，不经过此书籍操作。
+- `translate` / `prepare`：完整流程、只翻指定章节，或只准备而不翻译。`prepare` 会解析书籍、识别语言、在启用时生成逐章梗概，再生成风格指南和初始术语表，最后在启用时生成全书概览，但不翻译任何正文。
+- 阶段覆盖：`--polish`/`--no-polish`、`--review`/`--no-review`、`--chapter N`、`--format`、`--bilingual`/`--no-mono --bilingual`、`--translation-mode best_of_three --polish`。
 
 之后对同一源文件和配置运行 `prepare` 或 `translate`。匹配的解析缓存会复用，包括 PDF 转换；内容或解析参数变化会使缓存失效。已有初始化状态会拒绝不同源内容，保留已保存译文、分析和用量。
 
-`prepare` 会解析书籍、识别语言、在启用时生成逐章梗概，再生成风格指南和初始术语表，最后在启用时生成全书概览，但不翻译任何正文。之后对同一源文件运行 `translate`，即可复用状态继续翻译。
-
 ## 三选一精翻
 
-仅在 Web 创建书籍项目时选择**三译合润精翻**，之后不在总设置或项目配置中提供切换选项；
-更换翻译方式需创建新项目。CLI 执行：
-
-```bash
-uv run wenyi translate book.epub --translation-mode best_of_three --polish
-```
-
-等价配置为 `pipeline.translation_mode: best_of_three` 与
-`pipeline.polish: true`。`--translation-mode standard` 将待译批次恢复为默认流程。
-精翻与 `--no-polish` 的组合会被拒绝；该选项不适用于 SRT。
+精翻模式（`pipeline.translation_mode: best_of_three` 与
+`pipeline.polish: true`）先生成三份独立初稿，再做一次原文优先综合润色。
+精翻与关闭润色的组合会被拒绝；该选项不适用于 SRT。
 续跑时保留相同模式与配置，以复用精翻检查点。已有译文不会自动重新处理。
 三份独立初稿后一次原文优先综合润色、续跑及成本/质量限制见[精翻流程](pipeline.md#三选一精翻)。
 正常批次调用模型四次，标准翻译加润色为两次，沿用相同路由与输出限制。
@@ -321,37 +187,27 @@ uv run wenyi translate book.epub --translation-mode best_of_three --polish
 
 ## 中断与续跑
 
-已完成的批次会写入状态目录。中断后使用同一个源文件执行：
-
-```bash
-uv run wenyi translate book.epub
-uv run wenyi status book.epub
-```
+已完成的批次会写入状态目录。中断后对同一源文件重新执行即可续跑。
 
 更改润色设置不会自动重跑已经完成的翻译批次。Review 不同：每次执行
-`review` 都会全量重审完整译文，并创建新的时间戳审校目录。默认保持只读；使用
-`--autofix` 时可以发布最终修订。只有需要从头翻译时
+`review` 都会全量重审完整译文，并创建新的时间戳审校目录。默认保持只读；
+autofix 可发布最终修订。只有需要从头翻译时
 才应使用新的状态目录或清理对应状态。
 
 语言策略内置于源码。策略变更或保存的状态缺少策略身份时，`prepare`/`translate` 会自动重建受影响的分析，再继续待完成工作；重建可能调用模型。已完成译文继续保留，字体等仅影响导出的变更只需重新导出。书籍／字幕行为和开发者诊断见[内置语言策略](configuration.md#内置语言策略)。
 
 ## 独立阶段与术语管理
 
-```bash
-uv run wenyi review book.epub
-uv run wenyi review book.epub --autofix
-uv run wenyi glossary list book.epub
-uv run wenyi glossary conflicts book.epub
-uv run wenyi glossary resolve book.epub "原文术语" "指定译名"
-uv run wenyi report book.epub
-uv run wenyi assemble book.epub
-```
+- `review` / `review --autofix`：使用最终术语库检查完整译文。
+- `glossary list` / `glossary conflicts` / `glossary resolve <原文> <译名>`：查看与裁决术语。
+- `report`：汇总当前翻译状态和最新 Review 结果，不修改正文。
+- `assemble`：不重新调用模型，直接重新导出已有译文。若另一个终端仍在翻译，导出会读取调用时已经落盘的一致快照；之后新完成的批次需再次导出才会进入成品。
 
 `review` 会使用最终术语库检查完整译文。原有 Reviewer 提示词先并发检查连续
 文本块；候选问题随后可进入有界取证循环，互相矛盾的跨块一致性建议还可获得
 终局建议。确认的问题可以生成仅限本次运行的完整单段影子替换；同轮 Fixer 都读取
 同一份不可变快照，下一轮全书 Review 不接收旧问题说明，只盲审更新后的影子译文。
-默认情况下，这些替换不会写回。使用 `--autofix`（或设置
+默认情况下，这些替换不会写回。autofix（或设置
 `pipeline.review_autofix: true`）时，会先叠加折叠后的 `changes`；剩余 issues
 基于更新后的译文复用同一个有界 Review Agent Loop，确认项再复用同一个 Review
 Fixer。最终完整段落只写入章节 `target`，不会给章节 JSON 增加 Review 历史字段，
@@ -360,7 +216,3 @@ Fixer。最终完整段落只写入章节 `target`，不会给章节 JSON 增加
 本书累计 `usage.json`。Autofix 的完整前后版本链、issue 判定、失败原因和幂等
 写回日志保存在 `autofix/index.json`；发布后会刷新注释与 DOCX 样式偏移。
 `report.json` 保存简短的 Review 与 Autofix 摘要。
-
-`report` 汇总当前翻译状态和最新 Review 结果，不会修改正文；`assemble` 可在
-不重新调用模型的情况下重新导出已有译文。若另一个终端仍在翻译，导出会读取
-调用时已经落盘的一致快照，不必等到整本书结束；之后新完成的批次需再次导出才会进入成品。

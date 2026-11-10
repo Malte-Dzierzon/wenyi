@@ -53,7 +53,7 @@ class Project(BaseModel):
     initialized: bool = False
     strategy: Optional[dict[str, Any]] = None
     created_at: Optional[str] = None
-
+    banner: Optional[str] = None
 
 class ProjectDetail(Project):
     book_title: Optional[str] = None
@@ -240,6 +240,10 @@ class EventOut(BaseModel):
 # Style and synopsis editing.
 class AnalysisUpdate(RequestModel):
     analysis: dict[str, Any]
+
+
+class BannerUpdate(RequestModel):
+    banner: str | None = Field(default=None, max_length=64)
 
 
 # Shared responses.

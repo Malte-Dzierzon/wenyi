@@ -20,31 +20,32 @@
 
 | Layer | Software |
 |---|---|
-| Engine | Python `wenyi-core` (3.12) — pipeline, parallel chapter workers, glossary curator, review, ingest/assemble |
-| CLI | `wenyi translate` via [uv](https://docs.astral.sh/uv/) |
-| Desktop | Rust `wenyi-native` UI ([gpui-kit 0.8](https://crates.io/crates/gpui-kit)) + [Tauri 2](https://tauri.app) shell, private Python sidecar over loopback REST |
-| Web / API | [React 19](https://react.dev) + [Vite 6](https://vite.dev) frontend, Python API + [Arq](https://github.com/python-arq/arq) workers (PostgreSQL/Redis) |
+| Desktop UI | Rust `wenyi-native` ([gpui-kit 0.8](https://crates.io/crates/gpui-kit)), private Python sidecar over loopback REST (until the Rust engine lands) |
+| Engine reference | Python `wenyi-core` — pipeline, parallel chapter workers, glossary curator, review, ingest/assemble (read-only oracle for the rewrite) |
 | Models | 10 routed provider kinds — DeepSeek, OpenAI, OpenRouter, opencode-go, OrcaRouter, Ollama, vLLM, llama.cpp, Gemini, OpenAI-compatible |
-| Storage | File (CLI) · SQLite (Desktop) · PostgreSQL (Web) |
+| Storage | SQLite workspace (`local.sqlite3` + per-project `state.sqlite3`) |
 | Formats | EPUB/TXT/Markdown/FB2/HTML/PDF/DOCX/SRT in · EPUB/TXT/HTML/Markdown/PDF/DOCX + SRT out |
+
+Target: one native Rust app end to end — see [Rust rewrite plan](docs/RUST-REWRITE.md).
 
 ---
 
 ## Quick start
 
-The CLI runs the full pipeline locally; `uv` installs the workspace, one env var connects a model.
-
 ```bash
 uv sync --locked
 export DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
-uv run wenyi translate book.epub
+cargo run --manifest-path apps/desktop/native/Cargo.toml
 ```
+
+The native UI spawns the Python sidecar automatically in dev (`WENYI_DESKTOP_PYTHON`
+selects the interpreter). Packaged builds need no Python once the Rust engine lands.
 
 Special cases:
 
-- Desktop app: [releases + run from source](docs/desktop.md#quick-start) (packaged builds need no Python).
-- Native Rust UI preview: [`apps/desktop/native/`](apps/desktop/native/) talks to the same sidecar contract ([parity plan](docs-next/18-desktop-parity.md)).
-- Self-hosted web workspace (PostgreSQL/Redis/Docker): [Web deployment](docs/web.md).
+- Desktop behavior, settings, workspace layout: [Desktop](docs/desktop.md).
+- Engine behavior reference: [Pipeline](docs/pipeline.md) · [Configuration](docs/configuration.md) · [Architecture](docs/architecture.md).
+- Fork change log: [`docs/roadmap-custom.md`](docs/roadmap-custom.md).
 
 ---
 
@@ -75,30 +76,25 @@ Special cases:
 <details>
 <summary><b>Apps</b></summary>
 
-- `apps/desktop/` — Tauri shell + React frontend + `wenyi_desktop` sidecar + `native/` Rust UI
-- `apps/web/` — React browser workspace
-- `apps/api/` — Python API + Arq workers
+- `apps/desktop/native/` — Rust GPUI desktop UI (`wenyi-native`)
+- `apps/desktop/backend/` — `wenyi_desktop` Python sidecar (temporary reference)
 
 </details>
 
 <details>
 <summary><b>Packages</b></summary>
 
-- `packages/core/` — `wenyi-core` engine: pipeline, glossary, LLM routing, ingest/assemble
-- `packages/cli/` — `wenyi` command
-- `packages/backend/` — shared HTTP routes and app services
-- `packages/ui/` — shared React pages and components
-- `packages/shared-schema/` — generated API types
+- `packages/core/` — `wenyi-core` engine reference: pipeline, glossary, LLM routing, ingest/assemble
+- `packages/backend/` — HTTP routes and app services used by the sidecar
 
 </details>
 
 <details>
 <summary><b>Docs</b></summary>
 
-- [Desktop](docs/desktop.md) · [CLI](docs/cli.md) · [Configuration](docs/configuration.md) · [Pipeline](docs/pipeline.md) · [Architecture](docs/architecture.md) · [Web](docs/web.md)
-- [`docs-next/`](docs-next/) — Rust rewrite plan (vision → migration roadmap)
+- [Rust rewrite plan](docs/RUST-REWRITE.md) · [Desktop](docs/desktop.md) · [Configuration](docs/configuration.md) · [Pipeline](docs/pipeline.md) · [Architecture](docs/architecture.md)
 - [`docs/roadmap-custom.md`](docs/roadmap-custom.md) — this fork's change log
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — upstream development guidelines
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development guidelines
 
 </details>
 
@@ -108,7 +104,7 @@ Special cases:
 
 Fork of [BigDawnGhost/wenyi](https://github.com/BigDawnGhost/wenyi) with full history; upstream stays the reference for the shipped codebase.
 
-Direction: single native Rust desktop app, no web product ([vision](docs-next/01-project-vision.md)). Current state: the Rust UI runs beside Tauri on the same sidecar contract while the backend stays Python with targeted extensions — parallel chapter workers, glossary curator, llama.cpp provider. Tracked in [`docs/roadmap-custom.md`](docs/roadmap-custom.md).
+Direction: single native Rust desktop app, no web product ([rewrite plan](docs/RUST-REWRITE.md)). Current state: the Rust UI runs on a Python sidecar while the Rust engine is built — parallel chapter workers, glossary curator, llama.cpp provider. Tracked in [`docs/roadmap-custom.md`](docs/roadmap-custom.md).
 
 ---
 

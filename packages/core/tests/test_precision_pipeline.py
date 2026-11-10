@@ -326,30 +326,13 @@ def test_publication_refuses_manual_target_changes(tmp_path):
     assert store.load_chapter(0).segments[0].target == "人工编辑"
 
 
-def test_cli_exports_and_resumes_with_four_body_calls(tmp_path, monkeypatch):
-    from typer.testing import CliRunner
-    from wenyi_cli.cli import app
-
+def test_precision_exports_and_resumes_with_four_body_calls(tmp_path):
     source, output = tmp_path / "sample.txt", tmp_path / "translated.txt"
     source.write_text("one\n\ntwo\n", encoding="utf-8")
     config, handler = _config(tmp_path / "state"), Handler()
     client = MeteredFakeClient(handler=handler)
-    monkeypatch.setattr("wenyi_cli.commands.context.CommandContext.load_config", lambda *_: config)
-    monkeypatch.setattr("wenyi_core.pipeline.runtime.build_client", lambda *_: client)
-    arguments = [
-        "translate",
-        str(source),
-        "--translation-mode",
-        "best_of_three",
-        "--polish",
-        "--no-review",
-        "--format",
-        "txt",
-        "--out",
-        str(output),
-    ]
+    orch = Orchestrator(config, client)
     for _ in range(2):
-        result = CliRunner().invoke(app, arguments)
-        assert result.exit_code == 0, result.output
+        orch.run_all(str(source), out_format="txt", out_path=str(output))
     assert "润" in output.read_text(encoding="utf-8")
     assert handler.counts == {"translate": 3, "synthesis": 1}

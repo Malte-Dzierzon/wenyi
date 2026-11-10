@@ -2,7 +2,7 @@
 
 
 class IngestError(RuntimeError):
-    """An input-processing error suitable for direct CLI display."""
+    """An input-processing error suitable for direct user display."""
 
 
 class MinerUError(IngestError):

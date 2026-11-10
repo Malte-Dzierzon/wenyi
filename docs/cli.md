@@ -1,123 +1,29 @@
-# CLI guide
+# Headless behavior specification
 
 [简体中文](zh/cli.md) · [README](../README.md)
 
-For the React/Vite + FastAPI stack, see [Web deployment](web.md).
+> The `wenyi` command-line product was removed during the Rust-rewrite cleanup
+> (see git history). This document preserves its **behavioral specification**:
+> formats, state layout, workflow stages, and options that the Desktop app and
+> the future Rust engine must honor. Command names below (`parse`, `translate`,
+> `review`, `assemble`, …) describe engine operations, not an existing CLI.
 
-## Installation and first run
+Engine entry: `packages/core/wenyi_core/pipeline/orchestrator.py`. Configuration
+defaults come from `config.yaml` (`packages/core/wenyi_core/config.py`).
 
-Running from source requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
+## Model routing inspection
 
-```bash
-uv sync
-export DEEPSEEK_API_KEY=sk-...
-uv run wenyi --version
-uv run wenyi translate book.epub
-```
-
-From the repository root, `uv sync` installs the local CLI (`wenyi-cli`) and translation
-engine (`wenyi-core`). The command is `wenyi`; `python -m wenyi_cli` is the
-module entry point. To develop the complete Python workspace, including the Web API,
-use `uv sync --locked --all-packages --group dev`.
-
-When upgrading from a checkout that used `trans-novel`, run `uv sync --locked` to
-refresh the installed command, then use `uv run wenyi ...`. The old command is no
-longer installed.
-
-The displayed version is generated from the repository's Git tags. Tagged builds show the
-release version; development builds include their commit distance and hash.
-CLI, Core and API packages use this same version source; OpenAPI reads the installed API
-package version. The virtual workspace root and private frontend packages do not maintain
-separate release versions.
-
-Whenever the program starts, it checks for `config.yaml` in the current directory and creates a documented default file when it is missing. Review the model settings before starting a real translation.
-
-## Inspect model routing
-
-```bash
-uv run wenyi models list
-uv run wenyi models explain --operation review.fix
-uv run wenyi models check --for translate
-uv run wenyi models ping --for translate
-```
-
-The first three commands preview routes and check credentials locally without requests. `models ping` sends one short live request per reachable model profile to confirm the endpoint, key and model name work; it uses a few tokens. Keep the three default tiers or select models independently through `llm.routes`. See [configuration](configuration.md#models-and-operation-routing) for explicit config/usage conversion and budgets.
+The engine exposes route preview and credential checks without requests
+(`models list` / `explain` / `check` semantics), plus a live connectivity probe
+(`ping` semantics: one short request per reachable profile, no retries, failures
+by category). See [configuration](configuration.md#models-and-operation-routing).
 
 ## Multilingual translation (experimental)
 
-Run `uv run wenyi languages` to list built-in languages. Use this fragment in your configuration, retaining your existing model settings, for direct Chinese-to-English translation:
-
-```yaml
-language:
-  source: zh
-  target: en
-```
-
-```bash
-uv run wenyi --config config.yaml translate book.epub --bilingual
-```
-
-Outputs are `output/book.en.epub` and `output/book.en-bi.epub`. For Japanese-to-English use `source: ja`, `target: en`; for English-to-Japanese use `source: en`, `target: ja`. A reverse run takes a file in the corresponding source language; each run selects one direction. Explicit `--out` names and their `-bi` derivatives retain their existing behavior.
-
-The `.zh.*` examples below describe the default Simplified Chinese target. All book targets use `state/<book>/targets/<target-language>/`; subtitles use `state/srt/<slug>/targets/<target-language>/`. Resume and standalone stages use the same target configuration; switching back does not retranslate completed work. The EPUB about page is Chinese for Simplified Chinese targets and otherwise temporarily falls back to an English page tagged as English; disable it with `about_page: false`.
-
-The CLI uses English for help, progress, tables, and errors. Translation and generated descriptive metadata follow `language.target`; original names in `source` and `aliases` remain available for matching. Existing analysis and glossary notes are reused when resuming and are not automatically translated by this update. This version does not support RTL targets such as Arabic or Hebrew. PDF fonts and external bridge language capabilities require separate validation. Real-model long-form before/after quality evaluation remains outstanding.
-
-## Windows
-
-CLI release filenames include the Git-tag version, component, platform and architecture.
-The examples below use tag `v1.2.3`; replace `1.2.3` with the version you download.
-Desktop installers are separate `wenyi-desktop-*` assets; see [Desktop](desktop.md).
-
-Windows releases provide `wenyi-cli-1.2.3-windows-x64.zip`. Verify the archive against
-`wenyi-cli-SHA256SUMS.txt`, then extract `wenyi.exe` into a directory before running it.
-
-When using a packaged `wenyi.exe`, set the API key in PowerShell:
-
-```powershell
-# Current PowerShell session only
-$env:DEEPSEEK_API_KEY = "sk-..."
-.\wenyi.exe translate .\book.epub
-```
-
-To save the environment variable permanently, run the following command and then open a new PowerShell window:
-
-```powershell
-setx DEEPSEEK_API_KEY "sk-..."
-```
-
-You may also set `language.source` to a known ISO language code to avoid an additional model call for language detection.
-
-## Linux
-
-Releases provide `wenyi-cli-1.2.3-linux-x64.zip` and `wenyi-cli-1.2.3-linux-arm64.zip`.
-Download the archive matching your processor, verify it against `wenyi-cli-SHA256SUMS.txt`,
-and run:
-
-```bash
-unzip wenyi-cli-1.2.3-linux-arm64.zip  # use linux-x64 on x64 systems
-chmod +x wenyi
-export DEEPSEEK_API_KEY=sk-...
-./wenyi translate book.epub
-```
-
-## macOS
-
-Releases provide separate terminal executables for Apple Silicon
-(`wenyi-cli-1.2.3-macos-arm64.zip`) and Intel (`wenyi-cli-1.2.3-macos-x64.zip`) Macs.
-Download the archive matching your processor, verify it against `wenyi-cli-SHA256SUMS.txt`,
-and run:
-
-```bash
-unzip wenyi-cli-1.2.3-macos-arm64.zip  # use macos-x64 on Intel Macs
-chmod +x wenyi
-export DEEPSEEK_API_KEY=sk-...
-./wenyi translate book.epub
-```
-
-These command-line executables are ad-hoc signed by PyInstaller but are not notarized with an
-Apple Developer certificate. macOS may quarantine a downloaded build; after verifying the
-checksum, approve it in **System Settings → Privacy & Security** if prompted.
+Each run selects one direction (`language.source`/`target`); `source: auto` detects
+with a model call unless a known ISO code is given. Outputs follow
+`output/<book>.<target>.<ext>` and `output/<book>.<target>-bi.<ext>` for bilingual.
+Explicit `--out` names and their `-bi` derivatives retain their existing behavior.
 
 ## Input and output
 
@@ -128,7 +34,7 @@ checksum, approve it in **System Settings → Privacy & Security** if prompted.
 - `--format epub|txt|html|markdown|pdf|docx`: export the selected format for book inputs. When omitted, BabelDOC PDF state → `pdf`, `.docx` → `docx`, and other books (including MinerU PDF state) → `epub`. An explicit format always takes precedence; PDF defaults follow the saved backend, even if the current `pdf_backend` setting has changed. This flag does not apply to SRT.
 - For EPUB input, Wenyi attempts to write translated text back into the original XHTML templates while preserving styles, images, the table of contents, and anchors.
 - The bilingual edition displays the translation and source text together. The source is visually subdued by default; set `output.bilingual_preserve_source_style: true` to inherit the book's normal text style. Their order is controlled by `output.bilingual_order`.
-- Untranslated EPUB paragraphs appear once as the original text, retaining ruby readings and links. This also applies to Web exports and partially translated chapters; bilingual ordering and source styling do not add a second copy.
+- Untranslated EPUB paragraphs appear once as the original text, retaining ruby readings and links. This also applies to partially translated chapters; bilingual ordering and source styling do not add a second copy.
 - EPUB output includes an “About this translation” page by default. Set `output.about_page: false` to disable it.
 - Book runtime data is stored under `state/<book>/targets/<target-language>/`, including chapter intermediates, the SQLite glossary, usage data, and reports. Subtitle runs use a separate tree under `state/srt/` (see [SRT subtitles](#srt-subtitles)).
 
@@ -151,7 +57,7 @@ pipeline:
   # babeldoc_pages: "15"   # optional, 1-based
 ```
 
-3. `translate book.pdf` automatically exports PDF through bridge `/fillback`. Later, `assemble book.pdf` also defaults to PDF for that saved BabelDOC state; `--format pdf` is optional. Use an explicit `--format` to select another format.
+3. Translating `book.pdf` automatically exports PDF through bridge `/fillback`. Later, assembling `book.pdf` also defaults to PDF for that saved BabelDOC state. Use an explicit format to select another format.
    The fillback PDF omits BabelDOC layout overlay boxes and role labels
    such as ``plain text`` / ``title`` by default.
    The bridge freezes the post-extraction IL as a durable session snapshot. It can
@@ -166,35 +72,16 @@ BabelDOC is intended for PDFs with an extractable text layer. Before contacting 
 bridge, Wenyi checks the selected pages and stops with a suggestion to use the default
 MinerU backend or run OCR first when it finds only scanned images and no text layer.
 
-The first MinerU PDF import requires `MINERU_API_KEY`:
-
-```bash
-export MINERU_API_KEY=...
-uv run wenyi translate book.pdf
-```
-
-MinerU's converted HTML is saved at
+The first MinerU PDF import requires `MINERU_API_KEY`. MinerU's converted HTML is saved at
 `state/<book>/targets/<target-language>/source/<source-sha256>/converted.html`. The content-addressed
 directory prevents an interrupted run from reusing another PDF's conversion.
-Later runs reuse this file, and you may correct it manually before resuming.
+Later runs reuse this file, and it may be corrected manually before resuming.
 
 #### PDF output
 
-WeasyPrint is the default PDF engine. Install its optional dependency and omit
-`--pdf-engine`:
-
-```bash
-uv sync --extra pdf-output
-uv run wenyi assemble book.html --format pdf
-```
-
+WeasyPrint is the default PDF engine (optional `pdf-output` dependency).
 For a lightweight cross-platform engine without system rendering libraries,
-use `fpdf2`:
-
-```bash
-uv sync --extra pdf-output-lite
-uv run wenyi assemble book.html --format pdf --pdf-engine fpdf2
-```
+use `fpdf2` (optional `pdf-output-lite` dependency, `--pdf-engine fpdf2`).
 
 `fpdf2` supports basic layout and images, but only a limited HTML/CSS subset.
 Images mixed with text are placed as separate blocks. It uses a discoverable
@@ -203,7 +90,7 @@ TTC font file. This option also works on Windows.
 
 ## DOCX (Word)
 
-`translate book.docx` uses the full book Orchestrator (glossary, polish, review, resume under `state/<slug>/targets/<target-language>/`).
+DOCX books use the full book Orchestrator (glossary, polish, review, resume under `state/<slug>/targets/<target-language>/`).
 
 **Structure**
 
@@ -226,27 +113,15 @@ TTC font file. This option also works on Windows.
 
 - Default: `output/<stem>.zh.docx` (Navigation pane via heading outline). Override with `--format epub` (etc.).
 
-```bash
-uv run wenyi translate book.docx
-uv run wenyi translate book.docx --bilingual
-uv run wenyi translate book.docx --format epub
-```
-
 ## SRT subtitles
 
-`translate` routes `.srt` files automatically. The subtitle path is intentionally
+`.srt` files route automatically. The subtitle path is intentionally
 lighter than the book pipeline:
 
 - sliding windows of 20 cues with overlap 10, up to 100 concurrent strong-tier calls;
 - no glossary, polishing, or whole-book review;
-- `--chapter`, `--polish`, `--review`, and `--format` are ignored or rejected where they do not apply;
-- monolingual `output/<stem>.zh.srt` by default; add `--bilingual` for `.zh-bi.srt`.
-
-```bash
-uv run wenyi translate movie.srt
-uv run wenyi translate movie.srt --bilingual
-uv run wenyi translate movie.srt --no-mono --bilingual
-```
+- chapter/polish/review/format options are ignored or rejected where they do not apply;
+- monolingual `output/<stem>.zh.srt` by default; bilingual `.zh-bi.srt` optional.
 
 Resume by running the same source file again. Cached batches under
 `state/srt/<slug>/targets/<target-language>/batches/` are skipped. Layout:
@@ -262,25 +137,25 @@ state/srt/<slug>/targets/<target-language>/
 ```
 
 There is no `glossary.db` or `reviews/` tree for subtitles. Package code lives in
-`trans_novel.srt` (store + translate), with I/O in `ingest.srt_reader` and
+`wenyi_core.srt` (store + translate), with I/O in `ingest.srt_reader` and
 `assemble.srt_writer`.
 
 ## Usage and event logs
 
 Each target directory stores cumulative token usage in `usage.json` and appends stage events and retries to `events.jsonl`. Review directories also record session usage; each increment is merged into the cumulative ledger once.
 
-The progress-bar clock measures the entire current workflow, including parsing, model
+The run clock measures the entire current workflow, including parsing, model
 waits, translation, polishing, review and export. Switching stages, chapters or review
 rounds does not reset it; completing one stage does not stop it while subsequent work
 is pending. Concurrent model requests contribute wall time, not the sum of request durations.
 
-After `prepare`, `translate` (including `--chapter` and SRT), `review` or `assemble`,
-the CLI prints the last run's duration and cumulative execution time. Each target's
+After `prepare`, `translate` (including single-chapter and SRT), `review` or `assemble`,
+the run records the last run's duration and cumulative execution time. Each target's
 `timing.json` stores `total_seconds` and a `runs` list with invocation IDs, operations,
-timestamps, durations and completion statuses. Repeating a command adds only that
+timestamps, durations and completion statuses. Repeating an operation adds only that
 invocation's execution time, excluding downtime between runs; nested pipeline stages
-are counted once. Separately launched commands contribute their own durations, even
-when they overlap. Book timing can also be inspected with `wenyi status book.epub`;
+are counted once. Separately launched operations contribute their own durations, even
+when they overlap. Book timing can also be inspected via status/report operations;
 inspection and report regeneration do not add time.
 
 Once book state has been initialized or validated, failures and normal Ctrl+C exits
@@ -291,53 +166,22 @@ initialization cannot save the current invocation's duration.
 
 Manifests bind input content with `source_sha256`. A different file with the same name, or state without a valid hash, cannot resume; create new translation state.
 
-## Common commands
+## Workflow stages
 
-```bash
-# Parse and list the source chapters without model calls
-uv run wenyi parse book.epub
+- `parse`: list the source chapters without model calls. Reports zero-based chapter indices, source titles and paragraph counts, and saves the source document in `parsed_document.json` under the target-language state directory. It does not require LLM credentials, detect language with a model, generate digests/style/terms, or mark translation state initialized. `language.source: auto` remains unresolved until preparation. PDF parsing still needs the configured MinerU/BabelDOC service. SRT uses the independent subtitle workflow, not this book operation.
+- `translate` / `prepare`: run the complete workflow, translate one chapter, or prepare without translating. `prepare` parses the book, detects its language, generates chapter digests when enabled, builds the style guide and initial glossary, and then generates the whole-book synopsis when enabled, without translating any body text.
+- Stage overrides: `--polish`/`--no-polish`, `--review`/`--no-review`, `--chapter N`, `--format`, `--bilingual`/`--no-mono --bilingual`, `--translation-mode best_of_three --polish`.
 
-# Run the complete workflow, translate one chapter, or prepare without translating
-uv run wenyi translate book.epub
-uv run wenyi translate book.epub --chapter 3
-uv run wenyi translate book.epub --format txt
-uv run wenyi prepare book.epub
-uv run wenyi translate book.pdf
-uv run wenyi translate movie.srt
-
-# Override polishing and final review settings
-uv run wenyi translate book.epub --polish --review
-uv run wenyi translate book.epub --no-polish --no-review
-
-# Produce both editions, or only the bilingual edition
-uv run wenyi translate book.epub --bilingual
-uv run wenyi translate book.epub --no-mono --bilingual
-```
-
-`parse` lists zero-based chapter indices, source titles and paragraph counts, and saves the source document in `parsed_document.json` under the printed target-language state directory. It does not require LLM credentials, detect language with a model, generate digests/style/terms, or mark translation state initialized. `language.source: auto` remains unresolved until preparation. PDF parsing still needs the configured MinerU/BabelDOC service. SRT uses the independent subtitle workflow, not this book command.
-
-Use `prepare` or `translate` afterward with the same source and configuration. Matching cached parsing is reused, including PDF conversion; changed content or parsing options invalidate it. An existing initialized run rejects different source content and keeps saved translations, analysis and usage unchanged.
-
-`prepare` parses the book, detects its language, generates chapter digests when enabled, builds the style guide and initial glossary, and then generates the whole-book synopsis when enabled, without translating any body text. Run `translate` with the same source file to continue from the saved state.
+Matching cached parsing is reused, including PDF conversion; changed content or parsing options invalidate it. An existing initialized run rejects different source content and keeps saved translations, analysis and usage unchanged.
 
 ## Best-of-three precision translation
 
-Select **Three-draft precision** when creating a Web book project. The choice is
-fixed for that project and does not appear as an option in global or project settings.
-Create another project to use a different mode. For CLI, use:
-
-```bash
-uv run wenyi translate book.epub --translation-mode best_of_three --polish
-```
-
-The equivalent configuration is `pipeline.translation_mode: best_of_three`
-with `pipeline.polish: true`. `--translation-mode standard` restores the default
-workflow for pending batches. Precision with `--no-polish` is rejected; the option
-does not apply to SRT. When resuming, keep the same mode/configuration to reuse
-precision checkpoints. Existing translations are not automatically reprocessed.
-See [precision workflow](pipeline.md#best-of-three-precision-translation) for
-three independent drafts followed by one source-first synthesis, resume and
-cost/quality limitations. A normal batch uses four model calls versus two for
+Precision mode (`pipeline.translation_mode: best_of_three` with `pipeline.polish: true`)
+runs three independent drafts followed by one source-first synthesis. Precision with
+polish disabled is rejected; the option does not apply to SRT. When resuming, keep the
+same mode/configuration to reuse precision checkpoints. Existing translations are not
+automatically reprocessed. See [precision workflow](pipeline.md#best-of-three-precision-translation) for
+resume and cost/quality limitations. A normal batch uses four model calls versus two for
 standard translation with polishing, with the same routes and output limits.
 The final synthesis is structurally validated, not independently accuracy-judged.
 In comparisons, `target_before_polish` is the first initial draft, not a selected
@@ -345,33 +189,22 @@ accurate draft. Quality improvement is not guaranteed.
 
 ## Interrupting and resuming
 
-Every completed batch is written to the state directory. To resume after an interruption, run the same source file again:
-
-```bash
-uv run wenyi translate book.epub
-uv run wenyi status book.epub
-```
+Every completed batch is written to the state directory. Resume by running the same source file again.
 
 Changing polishing settings does not automatically rerun translation batches that
 are already complete. Review is different: every `review` invocation rechecks the
 complete translated book and creates a new timestamped Review run. Runs are
-read-only by default; `--autofix` may publish their final revisions.
-Use a new state directory or remove the corresponding state only when you
-intentionally want a fresh translation.
+read-only by default; autofix may publish their final revisions.
+Start new state only when intentionally wanting a fresh translation.
 
 Language policies are built into the source code. When they change or saved state lacks a policy identity, `prepare`/`translate` automatically rebuilds affected analysis before pending work resumes; this may call models. Completed translations remain saved. Font and other export-only changes need a fresh export only. See [built-in language policies](configuration.md#built-in-language-policies) for book/SRT behavior and developer diagnostics.
 
 ## Independent stages and glossary management
 
-```bash
-uv run wenyi review book.epub
-uv run wenyi review book.epub --autofix
-uv run wenyi glossary list book.epub
-uv run wenyi glossary conflicts book.epub
-uv run wenyi glossary resolve book.epub "source term" "chosen translation"
-uv run wenyi report book.epub
-uv run wenyi assemble book.epub
-```
+- `review` / `review --autofix`: check the complete translated book using the final glossary.
+- `glossary list` / `glossary conflicts` / `glossary resolve <source> <translation>`: inspect and resolve terms.
+- `report`: summarize the current translation and latest Review result without modifying text.
+- `assemble`: rebuild output from existing state without calling the model again. If translation is still running elsewhere, export uses a consistent snapshot of the batches already persisted when the operation starts; run it again to include batches completed afterward.
 
 `review` checks the complete translated book using the final glossary. Its
 unchanged initial Reviewer runs over contiguous chunks concurrently; candidates
@@ -380,7 +213,7 @@ suggestions can receive a final recommendation. Confirmed issues may generate
 provisional full-segment replacements in a run-local shadow translation. Every
 Fixer in a round reads the same immutable snapshot; the next whole-book pass
 blindly reviews the resulting shadow text without receiving prior issue
-explanations. By default these replacements remain read-only. With `--autofix`
+explanations. By default these replacements remain read-only. With autofix
 (or `pipeline.review_autofix: true`), folded `changes` are applied first; remaining
 issues then reuse the same bounded Review Agent Loop against that updated text,
 and confirmed issues reuse the same Review Fixer. The final complete segments are
@@ -393,9 +226,3 @@ to the book's cumulative `usage.json`. Autofix keeps its full before/after chain
 issue decisions, failures, and idempotent write journal in `autofix/index.json`;
 annotation and DOCX style offsets are refreshed after publishing. `report.json`
 contains a compact Review and Autofix summary.
-
-`report` summarizes the current translation and latest Review result without
-modifying translated text. `assemble` rebuilds output from existing state without
-calling the model again. If another terminal is still translating, export uses a
-consistent snapshot of the batches already persisted when the command starts; run
-it again to include batches completed afterward.

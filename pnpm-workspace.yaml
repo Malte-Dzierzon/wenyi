@@ -1,7 +1,0 @@
-packages:
-  - "apps/web"
-  - "apps/desktop/frontend"
-  - "packages/ui"
-  - "packages/shared-schema"
-allowBuilds:
-  esbuild: true

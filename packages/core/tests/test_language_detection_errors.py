@@ -5,8 +5,6 @@ import json
 import httpx
 import pytest
 from openai import APIStatusError
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.config import Config
 from wenyi_core.llm.json_parser import JsonParseError
 from wenyi_core.llm.providers.fake import FakeClient
@@ -61,24 +59,23 @@ def test_provider_failure_is_not_mislabeled_as_unknown_source_language(tmp_path,
     assert len(client.calls) == 1
 
 
-def test_insufficient_balance_cli_message_is_actionable_and_has_no_traceback(tmp_path, monkeypatch):
-    source, config, _store = _inputs(tmp_path)
+def test_insufficient_balance_message_is_actionable_without_response_body(tmp_path):
+    source, config, store = _inputs(tmp_path)
     error = _failure(402)
 
     def handler(*_):
         raise error
 
     client = FakeClient(handler=handler)
-    monkeypatch.setattr("wenyi_cli.commands.context.CommandContext.load_config", lambda *_: config)
-    monkeypatch.setattr("wenyi_core.pipeline.runtime.build_client", lambda *_: client)
-    result = CliRunner().invoke(app, ["prepare", str(source)])
-    assert result.exit_code == 1
-    assert "HTTP 402" in result.output
-    assert "balance" in result.output.lower()
-    assert "provider" in result.output.lower()
-    assert "Traceback" not in result.output
-    assert "private_response_placeholder" not in result.output
-    assert "such as ja/en" not in result.output
+    with pytest.raises(ValueError, match="HTTP 402") as caught:
+        Orchestrator(config, client=client, storage=store).prepare(str(source))
+    assert "balance" in str(caught.value).lower()
+    assert "provider" in str(caught.value).lower()
+    assert "private_response_placeholder" not in str(caught.value)
+    assert "such as ja/en" not in str(caught.value)
+    assert not store.exists()
+    event = store.list_events(event_type="language_detection_failed")[-1]
+    assert event["error_category"] == "insufficient_balance"
 
 
 def test_invalid_json_has_its_own_safe_diagnostic(tmp_path):

@@ -1,8 +1,8 @@
 # Wenyi Desktop
 
-[简体中文](zh/desktop.md) · [Web deployment and development](web.md)
+[简体中文](zh/desktop.md) · [Rust rewrite plan](RUST-REWRITE.md)
 
-Desktop is a **local translation application**, built with Tauri, React, and the existing Python translation engine. It starts its own private backend and SQLite workspace. It does not require a Web deployment, PostgreSQL, Redis, or Docker. Packaged releases include the Python runtime; users do not need to install Python.
+Desktop is a **local translation application**, built with a native Rust UI and the existing Python translation engine. It starts its own private backend and SQLite workspace. Packaged releases include the Python runtime; users do not need to install Python.
 
 Translation still needs access to the configured model provider. Optional MinerU and BabelDOC services retain their existing requirements; “local application” does not make external model or document services offline.
 
@@ -51,7 +51,7 @@ Start translation from the project page. Wenyi parses the source, prepares whole
 
 ### 4. Proofread and save
 
-Compare the translation with the source, edit paragraphs, inspect revisions, and review reported issues. Review can publish fixes to the translation; disable automatic fixes when you want a read-only review. Desktop and Web share these workspace pages; see the [interface preview](../README.md#interface-preview) for a screenshot.
+Compare the translation with the source, edit paragraphs, inspect revisions, and review reported issues. Review can publish fixes to the translation; disable automatic fixes when you want a read-only review.
 
 Choose an export format and, where supported, a bilingual edition. Desktop opens the system save dialog before starting the export; canceling creates no export task. HTML is saved as an HTML-and-assets ZIP, which should be extracted before reading.
 
@@ -67,7 +67,7 @@ labels, not the book's source/target languages, content, or model-generated anal
 
 ## Independent data
 
-Desktop does not adopt or migrate existing Web projects. It also does not read or modify the CLI's `config.yaml`, `state/`, or `output/`. CLI behavior remains unchanged.
+Desktop uses an independent SQLite workspace and does not read other applications' configuration or state files.
 
 The default Desktop workspace is:
 
@@ -105,96 +105,82 @@ Use `--data-dir <path>` to select a separate workspace, for example for testing.
 
 ## Run from source
 
-Install Python 3.10+, `uv`, Node 22, pnpm 9, Rust stable, and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). These are development/build requirements, not additional Python requirements for packaged releases.
-
-On Debian/Ubuntu, also install `libdbus-1-dev` for the native tray availability
-checks (`sudo apt-get install libdbus-1-dev`); other Linux distributions need the
-corresponding D-Bus development package.
+Install Python 3.10+, `uv`, and Rust stable. These are development/build
+requirements, not additional requirements for packaged releases.
 
 From the repository root:
 
 ```bash
-uv sync --locked --package wenyi-desktop --group dev
-pnpm install --frozen-lockfile
-pnpm desktop
+uv sync --locked --all-packages --group dev
+cargo run --manifest-path apps/desktop/native/Cargo.toml
 ```
 
 For an isolated preview:
 
 ```bash
-pnpm desktop --data-dir /path/to/desktop-test-workspace
+cargo run --manifest-path apps/desktop/native/Cargo.toml -- --data-dir /path/to/desktop-test-workspace
 ```
 
-The launcher builds the UI and starts the native application. Debug builds use the repository's `.venv`; `WENYI_DESKTOP_PYTHON` can explicitly select another development interpreter. There is no remote `--url` mode or silent fallback to a Web server.
-
-The launcher supports both JavaScript pnpm entry points and standalone native pnpm executables, including extensionless Linux binaries.
+The native app builds the UI and starts with the repository's `.venv` sidecar;
+`WENYI_DESKTOP_PYTHON` can explicitly select another development interpreter.
+There is no remote `--url` mode or silent fallback to another server.
 
 Build a native release on the target platform with:
 
 ```bash
-pnpm desktop:build
+cargo build --release --manifest-path apps/desktop/native/Cargo.toml
 ```
 
-The build freezes the Python engine as an onedir sidecar, then bundles it with the UI and native executable. Onedir avoids unpacking the entire runtime on every launch. Installers, signing, and platform-specific runtime dependencies must be verified for each release; a successful Linux build is not evidence of Windows/macOS validation.
+Packaging freezes the Python engine as an onedir sidecar, then bundles it with the
+UI and native executable. Installers, signing, and platform-specific runtime
+dependencies must be verified for each release; a successful Linux build is not
+evidence of Windows/macOS validation.
 
 macOS packages are built separately on Apple Silicon and Intel runners. When
 building locally, use a native Python interpreter and Rust toolchain matching
-the Mac's architecture; cross-compiling only the Rust host does not rebuild the
+the Mac's architecture; cross-compiling only the Rust app does not rebuild the
 Python sidecar for another architecture.
 
 Windows release builds open only the application window, not a console. The local
 engine runs without a console window while retaining its private communication pipes.
 Debug/source launches keep their development console for diagnostics.
 
-Native bundles use PNG, ICO and ICNS artwork for Linux, Windows and macOS respectively.
-To regenerate the native icons from the shared emblem, run
-`pnpm exec tauri icon packages/ui/src/assets/wenyi-emblem.png --output /path/to/temporary-icons`
-from the repository root, then copy only `icon.ico` and `icon.icns` into `apps/desktop/icons`.
-
 ### Versions and release downloads
 
-Python metadata continues to use `hatch-vcs`; `scripts/release_version.py` uses
-the same setuptools-scm Git source to derive the native application and asset
-version. For example, `v1.2.3` becomes `1.2.3`, and `v1.2.3rc1` becomes Python
-`1.2.3rc1` / native `1.2.3-rc.1`. Untagged commits and tracked local edits keep
-an explicit development identity, such as `1.2.4-dev.2+gabc123`. Cargo's private
-crate version is not the application version. The native executable's
-`--version` option reports `Wenyi Desktop <version>` without starting the UI.
+Python metadata continues to use `hatch-vcs`; the native application and asset
+version derive from the same Git source. For example, `v1.2.3` becomes `1.2.3`,
+and `v1.2.3rc1` becomes Python `1.2.3rc1` / native `1.2.3-rc.1`. Untagged commits
+and tracked local edits keep an explicit development identity, such as
+`1.2.4-dev.2+gabc123`. The native executable's `--version` option reports
+`Wenyi Desktop <version>` without starting the UI.
 
 Distribution currently targets stable tags. Development/prerelease identities are
-retained for build diagnostics, but Linux package-manager upgrade ordering is not
-normalized: for example, Debian considers `1.2.4-rc.1` newer than `1.2.4`.
-Do not treat these builds as a supported prerelease update channel.
+retained for build diagnostics. Do not treat these builds as a supported
+prerelease update channel.
 
-Use `WENYI_BUILD_TAG=v1.2.3 pnpm desktop:build` on a clean checkout of that tag
+Use `WENYI_BUILD_TAG=v1.2.3` with the release build on a clean checkout of that tag
 (PowerShell: set `$env:WENYI_BUILD_TAG = "v1.2.3"` first). An explicit tag must
-exist, point at HEAD, match the Python version, and have no tracked edits;
-untracked notes do not change setuptools-scm's dirty status. Version overrides
-are rejected. Supported release tags are numeric releases and `a`, `b`, or
-`rc` prereleases; epochs, post releases, local/dev release tags, more than three
-numeric components, and values beyond `255.255.65535` fail rather than silently
-losing identity. macOS's numeric bundle version uses the release triple while
-the application version retains prerelease/development information. Windows
-uses NSIS `.exe`, not MSI, because MSI cannot faithfully represent these
-prerelease/development identities.
+exist, point at HEAD, match the Python version, and have no tracked edits.
+Version overrides are rejected. Supported release tags are numeric releases and `a`,
+`b`, or `rc` prereleases; epochs, post releases, local/dev release tags, more than
+three numeric components, and values beyond `255.255.65535` fail rather than silently
+losing identity. Windows uses NSIS `.exe`, not MSI, because MSI cannot faithfully
+represent these prerelease/development identities.
 
-The **CLI packages** and **Desktop packages** workflows accept an optional
+The **Desktop packages** workflow accepts an optional
 `tag` through `workflow_dispatch`; leaving it empty builds the selected checkout.
-Their run names show the component and tag (or development ref). A published
+Its run name shows the component and tag (or development ref). A published
 GitHub release builds its tag and uploads only that component's assets.
 Manual runs only produce workflow artifacts; they do not publish a release.
 
-- CLI downloads are `wenyi-cli-<version>-<platform>-<arch>.zip` on every platform.
-  ZIP entries preserve Unix executable permissions; use an extractor that honors
-  them (or run `chmod +x wenyi` after extraction).
 - Desktop downloads are `wenyi-desktop-<version>-<platform>-<arch>.<extension>`:
   Linux AppImage (single-file application), `.deb` and `.rpm`; Windows NSIS
   installer `.exe`; macOS `.dmg`. They are uploaded directly, without an outer
   ZIP. After downloading an AppImage, grant execute permission (`chmod +x <file>.AppImage`).
   The bare Rust executable is not a distributable application.
 - CI artifact downloads may be wrapped by GitHub's artifact service; the actual
-  GitHub Release assets are the files described above. Checksums are separated
-  as `wenyi-cli-SHA256SUMS.txt` and `wenyi-desktop-SHA256SUMS.txt`. Existing release
+  GitHub Release assets are the files described above. Checksums are
+  `wenyi-desktop-SHA256SUMS.txt`. Existing release
   assets are not overwritten; a duplicate upload fails.
 
 The sidecar build rebuilds local Python packages instead of reusing their cached
@@ -205,10 +191,10 @@ set for its platform; older outputs are left untouched and never relabeled.
 These workflows do not perform OS code signing or notarization. Platform signing and end-user
 installation checks remain release responsibilities.
 
-The AppImage was launched on KDE Wayland with a temporary workspace and an invalid development-Python path. Its bundled engine started, authenticated loopback requests succeeded, and the previous close-to-exit lifecycle shut down and reaped that engine. Separate frozen-engine checks exercised offline synthetic TXT upload/parse/preview and existing/new-format event reads. The current tray lifecycle was also checked on KDE Wayland using a debug native build, production UI, source Python engine, and temporary empty workspace: minimize/restore and close-to-tray/restore kept the engine alive, and explicit tray exit reaped it. Packaged tray behavior, real file-manager drag/drop, OS save dialogs, Windows/macOS execution, and removable-media behavior still require platform acceptance testing.
+The AppImage was launched on KDE Wayland with a temporary workspace and an invalid development-Python path. Its bundled engine started, authenticated loopback requests succeeded, and the previous close-to-exit lifecycle shut down and reaped that engine. Separate frozen-engine checks exercised offline synthetic TXT upload/parse/preview and existing/new-format event reads. The current tray lifecycle was also checked on KDE Wayland using a debug native build, source Python engine, and temporary empty workspace: minimize/restore and close-to-tray/restore kept the engine alive, and explicit tray exit reaped it. Packaged tray behavior, real file-manager drag/drop, OS save dialogs, Windows/macOS execution, and removable-media behavior still require platform acceptance testing.
 
 Native single-instance behavior was additionally checked on KDE Wayland via
-XWayland with a debug build, production UI, source Python engine, and temporary
+XWayland with a debug build, source Python engine, and temporary
 empty workspace. A second launch during startup exited without initializing its
 own GUI or engine, even with an invalid display and Python path. Reopening after
 close-to-tray/minimize through a workspace path alias restored the same native
@@ -241,73 +227,11 @@ or restarts the application. Installation requires explicit confirmation; finish
 or cancel active tasks and save or discard unsaved editor/settings changes first.
 The application checks these guards again before installing and restarting.
 
-Signed Windows NSIS installations, macOS applications on both Apple Silicon and
-Intel, and Linux **AppImage** builds support integrated installation. macOS updates
-stay on the installed application's architecture. Linux `.deb`/`.rpm` installations
-always use manual download/package installation, not AppImage replacement.
-Development, local and unconfigured builds still support public-release checks
-and manual downloads. Network/check failures remain visible and do not prevent using Desktop.
-Updater signatures are mandatory for integrated installation and are **separate
-from Windows/macOS OS code signing and notarization**.
-Signatures must also bind the advertised application version (`requireSignedVersion`):
-an older signed artifact cannot be relabeled as a newer release.
-
-### Maintainer signing setup
-
-No update service is required. The native updater uses the fixed HTTPS endpoint
-`https://github.com/BigDawnGhost/wenyi/releases/latest/download/latest.json`.
-Do not generate keys in this repository. From the repository root, generate a
-Tauri signer key into a protected location **outside the checkout**:
-
-```bash
-pnpm exec tauri signer generate --write-keys /secure/path/outside-checkout/wenyi-updater.key
-```
-
-Use the interactive password prompt; never put a real password in command history.
-Keep the private key and password in a secure backup. Never commit them, paste them
-into issues/logs, or use them in PR workflows. Preserve the key across releases:
-installed applications trust the embedded public key, so changing it requires a
-planned migration/manual upgrade.
-
-Configure these GitHub Actions repository entries:
-
-| Entry | Kind | Value |
-| --- | --- | --- |
-| `WENYI_UPDATER_PUBLIC_KEY` | Variable | Full contents of the generated `.pub` file, not its path |
-| `TAURI_SIGNING_PRIVATE_KEY` | Secret | Full contents of the private key file |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Secret | Key password (empty for an intentionally passwordless key) |
-
-For a local signed build, supply the same three environment variables from a
-secure environment/secret manager (the public key is not secret), then run
-`WENYI_BUILD_TAG=v1.2.3 pnpm desktop:build` in the matching clean tagged checkout.
-On macOS, pass `--bundles dmg,app` to produce the additional updater archive.
-The launcher enables Tauri v2 `bundle.createUpdaterArtifacts` only for configured
-stable signed builds. Partial configuration, a public-key path/malformed public
-key, or signing a development/prerelease version fails explicitly. Password must
-be defined locally even when empty. Ordinary `cargo test`, `cargo run`, PR builds
-and unsigned `pnpm desktop:build` do not need signing secrets.
-
-The Desktop workflow supplies signing secrets only to stable release builds;
-PRs, development/prerelease builds and manual workflow runs remain unsigned.
-If all signing configuration is absent, stable releases still produce manual
-installers and log that **no `latest.json` is published**. Partially configured
-signing fails instead of publishing misleading update metadata.
-
-Signed release assets add `.sig` beside Windows `.exe` and Linux `.AppImage`;
-macOS adds `.app.tar.gz` plus `.sig` alongside the existing `.dmg` for each
-architecture. There are no extra installer ZIP wrappers. `scripts/desktop_updates.py`
-validates the complete four-platform set and produces a stable SemVer manifest
-with `windows-x86_64`, `linux-x86_64`, `darwin-aarch64` and `darwin-x86_64` entries,
-the actual renamed release URLs, and signature contents. All payloads and signatures must build and
-upload successfully before `latest.json`, including the release notes, is uploaded
-**last**. Release uploads never overwrite existing attachments; retries with existing names fail. Missing
-or malformed signatures cannot publish a partial manifest. A release without a
-manifest cannot be installed through the integrated updater; use manual download.
-Collection and manifest generation require `WENYI_UPDATER_PUBLIC_KEY` and reject
-signatures whose key ID differs from it. Tauri's key-mismatch warning is therefore
-a publishing failure, not a release that clients cannot install. This release
-check is not cryptographic verification; the native updater verifies the downloaded
-artifact and signed version before installation.
+> **Note:** integrated auto-update is being reimplemented for the native GPUI app
+> as part of the [Rust rewrite](RUST-REWRITE.md) (open question Q4). Until then,
+> releases are manual downloads from GitHub Releases. Never ship an unsigned
+> auto-updater: signatures must bind the advertised application version so an
+> older signed artifact cannot be relabeled as a newer release.
 
 ## API keys
 
@@ -361,12 +285,12 @@ Restart Desktop after changing its inherited environment externally.
 ## Import and save
 
 - Drop a supported file from the file manager into the **Create project** dialog's source area, or use **Browse files**. Dropping only selects the file; **Create project** starts the upload. A native selection is a short-lived, single-use grant, not a general filesystem permission. Re-drop the file after an expired or failed native upload; the form retains its values and disables creation until a fresh file is selected.
-- Native drag-event and high-DPI position fixes require restarting the updated native executable. Reloading the frontend alone does not update the Rust event handler.
+- Native drag-event and high-DPI position fixes require restarting the updated native executable.
 - Desktop export opens a native destination picker **before** creating an export task. Canceling the picker creates no task and writes no output.
 - Completed history entries offer **Save as…**. Saving streams through a temporary file in the destination directory and publishes only after completion. Existing files require confirmation; transfer failures leave the existing destination intact.
 - Export history keeps the latest five completed entries. An older entry disappears from history immediately; already-open saves remain readable. File downloads defer deletion until their last stream closes, including on cancellation or disconnect; an HTML ZIP uses its own temporary archive. Failed cleanup remains retryable on later export publication or restart.
 - HTML is explicitly saved as **HTML + assets (ZIP)**, with a `.html.zip` filename. Extract the archive before opening the HTML so relative image/media links continue to work. Only that published HTML and its owned assets are included.
-- Desktop refuses internal workspace destinations and source-file identities/paths recorded during the current app session. Source protection is bounded and kept in memory without retaining open source files. Do not replace a destination from another application while saving: an overwrite is an atomic file replacement, not a cross-process compare-and-swap. Web continues to use browser downloads.
+- Desktop refuses internal workspace destinations and source-file identities/paths recorded during the current app session. Source protection is bounded and kept in memory without retaining open source files. Do not replace a destination from another application while saving: an overwrite is an atomic file replacement, not a cross-process compare-and-swap.
 
 ## Startup, shutdown, and rendering
 
@@ -383,7 +307,7 @@ are coalesced into one pending restore request.
 Instance ownership is per workspace, not per executable path or application
 version. Separate `--data-dir` workspaces can run independently; path aliases
 to the same directory share one owner. Native admission happens before creating
-the WebView or starting Python. The existing backend workspace lock remains a
+the window or starting Python. The existing backend workspace lock remains a
 separate data-safety check.
 
 If the existing app is closing, its previous engine is still shutting down, or
@@ -423,16 +347,14 @@ Object and suspended-process assignment just to own a redirector's descendant.
   running; already-started requests and native saves are not canceled. Restoring
   the window immediately reconciles saved state, including tasks completed in the
   background. An ordinary loss of focus does not count as minimization.
-- Hiding retains the WebView, unsaved editor drafts, and session-only credentials.
-  This reduces unnecessary UI work, not the resident memory of the Python engine
-  or WebView. It does not keep the computer awake or prevent operating-system sleep.
+- Hiding retains the window state, unsaved editor drafts, and session-only credentials.
+  This reduces unnecessary UI work, not the resident memory of the Python engine.
+  It does not keep the computer awake or prevent operating-system sleep.
 
-On Linux/GTK Wayland, compositor-side minimization is not reliably reported to
+On Linux/Wayland, compositor-side minimization is not reliably reported to
 the application. It still keeps tasks running, but UI polling/timers may continue.
 Use close-to-tray for reliably detected background operation; an ordinary blur
-is deliberately not treated as minimization. Restoring from the tray remaps the
-same native window to handle GTK/Wayland's deiconify limitation, without replacing
-the WebView or its drafts.
+is deliberately not treated as minimization.
 
 Linux and Windows hide the native top window menu bar while keeping its menu
 events and **Ctrl+Q** quit accelerator registered, even without a usable tray.
@@ -449,14 +371,8 @@ editor drafts before quitting; an unsaved in-memory draft is not a persisted
 checkpoint. Background translation continues to make configured model requests
 and can incur provider usage until the task finishes or is paused.
 
-On Linux, native Wayland is preferred when available; X11 is a connection-time fallback, not a global override. For proprietary NVIDIA drivers, Desktop uses a process-local explicit-sync compatibility setting on native Wayland while keeping DMA-BUF enabled. NVIDIA/X11 and NVIDIA/Hyprland use a separate DMA-BUF fallback. Explicit user graphics environment settings take precedence.
+On Linux, native Wayland is preferred when available; X11 is a connection-time fallback, not a global override. Explicit user graphics environment settings take precedence.
 
-If the window still fails, try this diagnostic for one launch rather than setting it globally:
-
-```bash
-WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm desktop
-```
-
-The NVIDIA/KDE Wayland `Gdk Error 71` was reproduced with a native GTK/WebKit probe and avoided by the targeted explicit-sync setting. This confirms that compatibility case, not universal GPU performance. Interface performance measurements are documented separately from correctness tests.
-
-The Rust backend rewrite remains paused. Desktop uses the existing Python engine behind the shared backend interfaces; Rust owns only native application capabilities and process lifecycle.
+Desktop uses the existing Python engine behind the sidecar contract while the
+[Rust rewrite](RUST-REWRITE.md) is in progress; the native app owns the window,
+application capabilities and process lifecycle.

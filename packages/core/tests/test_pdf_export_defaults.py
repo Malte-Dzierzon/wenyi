@@ -3,8 +3,6 @@
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.assemble.writer import assemble
 from wenyi_core.config import Config
 from wenyi_core.ingest.models import Chapter, Document, Segment
@@ -67,9 +65,6 @@ def pdf_project(tmp_path, monkeypatch):
         lambda *a, **kw: document.model_copy(deep=True),
     )
     monkeypatch.setattr(
-        "wenyi_cli.commands.context.CommandContext.load_config", lambda self: config
-    )
-    monkeypatch.setattr(
         "wenyi_core.pipeline.runtime.build_client",
         lambda cfg: FakeClient(handler=routing_handler, config=cfg.llm),
     )
@@ -84,26 +79,24 @@ def pdf_project(tmp_path, monkeypatch):
     return config, source, requests
 
 
-@pytest.mark.parametrize("command", ["translate", "assemble"])
+@pytest.mark.parametrize("entry_point", ["translate", "assemble"])
 @pytest.mark.parametrize(
     "mono,bilingual,explicit_out",
     [(True, False, False), (False, True, False), (True, True, False), (True, True, True)],
 )
-def test_cli_defaults_to_pdf_for_mono_and_bilingual_outputs(
-    pdf_project, tmp_path, command, mono, bilingual, explicit_out
+def test_workflow_defaults_to_pdf_for_mono_and_bilingual_outputs(
+    pdf_project, tmp_path, entry_point, mono, bilingual, explicit_out
 ):
     config, source, requests = pdf_project
     config.output.mono = mono
     config.output.bilingual = bilingual
-    if command == "assemble":
+    out_path = str(tmp_path / "custom" / "result.pdf") if explicit_out else None
+    if entry_point == "assemble":
         Orchestrator(config).run(str(source))
-    arguments = [command, str(source)]
-    if explicit_out:
-        arguments += ["--out", str(tmp_path / "custom" / "result.pdf")]
+        result = Orchestrator(config).run_assemble(str(source), out_path=out_path)
+    else:
+        result = Orchestrator(config).run_all(str(source), out_path=out_path)
 
-    result = CliRunner().invoke(app, arguments)
-
-    assert result.exit_code == 0, result.output
     if explicit_out:
         expected = [tmp_path / "custom" / "result.pdf", tmp_path / "custom" / "result-bi.pdf"]
     else:
@@ -112,29 +105,30 @@ def test_cli_defaults_to_pdf_for_mono_and_bilingual_outputs(
             expected.append(tmp_path / "output" / "book.zh.pdf")
         if bilingual:
             expected.append(tmp_path / "output" / "book.zh-bi.pdf")
+    assert sorted(result["outputs"]) == sorted(str(path) for path in expected)
     assert [Path(request[2]) for request in requests] == expected
     assert all(path.read_bytes().startswith(b"%PDF-") for path in expected)
     assert all(request[:2] == ("offline-session", {"0:0": "译0"}) for request in requests)
 
 
-@pytest.mark.parametrize("command", ["translate", "assemble"])
+@pytest.mark.parametrize("entry_point", ["translate", "assemble"])
 @pytest.mark.parametrize("fmt", ["epub", "txt"])
-def test_explicit_format_overrides_babeldoc_default(pdf_project, command, fmt):
+def test_explicit_format_overrides_babeldoc_default(pdf_project, entry_point, fmt):
     config, source, requests = pdf_project
-    if command == "assemble":
+    if entry_point == "assemble":
         Orchestrator(config).run(str(source))
+        result = Orchestrator(config).run_assemble(str(source), out_format=fmt)
+    else:
+        result = Orchestrator(config).run_all(str(source), out_format=fmt)
 
-    result = CliRunner().invoke(app, [command, str(source), "--format", fmt])
-
-    assert result.exit_code == 0, result.output
+    assert result["outputs"] == [str(source.parent / "output" / f"book.zh.{fmt}")]
     assert (source.parent / "output" / f"book.zh.{fmt}").is_file()
     assert requests == []
 
 
 def test_chapter_only_translation_does_not_treat_pdf_default_as_explicit_format(pdf_project):
-    _, source, requests = pdf_project
-    result = CliRunner().invoke(app, ["translate", str(source), "--chapter", "0"])
-    assert result.exit_code == 0, result.output
+    config, source, requests = pdf_project
+    Orchestrator(config).run(str(source), only_chapter=0)
     assert requests == []
     assert not (source.parent / "output").exists()
 
@@ -144,9 +138,9 @@ def test_saved_babeldoc_state_defaults_to_pdf_after_config_switches_to_mineru(pd
     Orchestrator(config).run(str(source))
     config.pipeline.pdf_backend = "mineru"
 
-    result = CliRunner().invoke(app, ["assemble", str(source)])
+    result = Orchestrator(config).run_assemble(str(source))
 
-    assert result.exit_code == 0, result.output
+    assert result["outputs"] == [str(source.parent / "output" / "book.zh.pdf")]
     assert len(requests) == 1
     assert Path(requests[0][2]).suffix == ".pdf"
 
@@ -158,9 +152,9 @@ def test_saved_non_babeldoc_pdf_still_defaults_to_epub(pdf_project):
     manifest["meta"] = {"mineru": True}
     store.save_manifest(manifest)
 
-    result = CliRunner().invoke(app, ["assemble", str(source)])
+    result = Orchestrator(config).run_assemble(str(source))
 
-    assert result.exit_code == 0, result.output
+    assert result["outputs"] == [str(source.parent / "output" / "book.zh.epub")]
     assert (source.parent / "output" / "book.zh.epub").is_file()
     assert requests == []
 

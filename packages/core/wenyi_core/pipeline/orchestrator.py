@@ -6,7 +6,7 @@ All parsing, model calls, state I/O, pools, glossary operations, alignment, revi
 machines, reports, exports and accounting belong to domain services. This facade must not
 directly depend on agents, ingest, glossary, assemble or ThreadPoolExecutor, nor read/write
 state files.
-Dependencies flow from CLI to Orchestrator, then Runtime/domain services, then
+Dependencies flow from the app to Orchestrator, then Runtime/domain services, then
 agents/ingest/glossary/assemble/RunStore. Lower layers must never import this module.
 """
 

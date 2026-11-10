@@ -482,12 +482,12 @@ impl Render for ProgressView {
         // Scroll region owns overflow (scrollbar overlay); flex_1 + min_h_0
         // lets it shrink inside the app-shell column.
         let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar();
+            .overflow_y_scrollbar().font(theme::fonts::ui());
 
         let Some(snapshot) = &self.snapshot else {
-            col = col.child(div().text_xl().font_weight(FontWeight::BOLD).child("Translation overview"));
+            col = col.child(super::ui::page_title("Translation overview", None::<Div>));
             if let Some(err) = &self.error {
-                col = col.child(error_box(err, &palette));
+                col = col.child(super::ui::error_box(err, &palette));
             } else {
                 col = col.child(
                     div().text_sm().text_color(palette.muted_foreground).child("Loading…"),
@@ -510,17 +510,14 @@ impl Render for ProgressView {
         let pct = if total > 0 { ((done as f64 / total as f64) * 100.0).round() as f32 } else { 0.0 };
 
         // Header with exact visibility conditions from ProgressPage.
+        let caption = format!(
+            "{} → {} · {}",
+            project.source_lang.as_deref().unwrap_or("auto"),
+            project.target_lang.as_deref().unwrap_or("—"),
+            project.title.as_deref().unwrap_or("waiting for source"),
+        );
         let mut header = div().flex().items_center().justify_between().gap_2().child(
-            div().flex().flex_col().gap_1().child(
-                div().text_xl().font_weight(FontWeight::BOLD).child(project.name.clone()),
-            ).child(
-                div().text_sm().text_color(palette.muted_foreground).child(format!(
-                    "{} → {} · {}",
-                    project.source_lang.as_deref().unwrap_or("auto"),
-                    project.target_lang.as_deref().unwrap_or("—"),
-                    project.title.as_deref().unwrap_or("waiting for source"),
-                )),
-            ),
+            super::ui::page_title(project.name.clone(), Some(caption)),
         );
         let mut actions = div().flex().items_center().gap_2();
         if !busy && !paused && project.status != "error" && project.fmt.is_some() {
@@ -552,21 +549,18 @@ impl Render for ProgressView {
         col = col.child(header);
 
         if let Some(err) = &self.error {
-            col = col.child(error_box(err, &palette));
+            col = col.child(super::ui::error_box(err, &palette));
         }
         if let Some(err) = &project.error {
-            col = col.child(error_box(err, &palette));
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
-        // Overview panel: done/total + progress bar + stats grid. Angular
-        // direction: subtle fill, no border stack.
+        // The page itself is the dashboard canvas. Only data groups get a
+        // surface, avoiding one oversized card around every insight.
         let mut overview = div()
             .flex()
             .flex_col()
-            .gap_4()
-            .p_4()
-            .rounded_sm()
-            .bg(palette.card)
+            .gap_5()
             .child(
                 div()
                     .flex()
@@ -757,14 +751,6 @@ impl Render for ProgressView {
     }
 }
 
-fn error_box(err: &str, palette: &theme::Palette) -> impl IntoElement {
-    div()
-        .p_3()
-        .rounded_md()
-        .bg(palette.destructive)
-        .text_color(palette.destructive_foreground)
-        .child(format!("Error: {err}"))
-}
 
 /// Report summary minus the usage/timing ledgers (those render as charts
 /// above), as key/value rows. Mirrors the `StructuredData` filter.

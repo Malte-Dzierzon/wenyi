@@ -195,8 +195,9 @@ impl Render for ContentsView {
         // lets it shrink inside the app-shell column.
         let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
             .overflow_y_scrollbar()
+            .font(theme::fonts::ui())
             .child(
-                div().text_xl().font_weight(FontWeight::BOLD).child("Contents"),
+                super::ui::page_title("Contents", None::<Div>),
             );
 
         if busy {
@@ -206,11 +207,7 @@ impl Render for ContentsView {
             );
         }
         if let Some(err) = &self.error {
-            col = col.child(
-                div().p_3().rounded_md().bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
         col = col.child(
@@ -290,27 +287,22 @@ impl Render for ContentsView {
                         .child("No chapters match."),
                 );
             } else {
-                let mut list = div().flex().flex_col().gap_1();
-                list = list.child(
-                    div().flex().gap_2().text_xs().font_medium()
-                        .text_color(palette.muted_foreground)
-                        .child(div().w_16().child("#"))
-                        .child(div().flex_1().child("Source title"))
-                        .child(div().flex_1().child("Translated title"))
-                        .child(div().w_24().child("")),
-                );
+                let mut list = super::ui::list_container(&palette)
+                    .child(
+                        super::ui::list_header(&palette)
+                            .child(div().w_16().child("#"))
+                            .child(div().flex_1().child("Source title"))
+                            .child(div().flex_1().child("Translated title"))
+                            .child(div().w_72().text_right().child("Actions")),
+                    );
                 for ch in chapters {
                     let ch2 = ch.clone();
                     let ci = ch.index;
-                    let mut row = div().flex().gap_2().items_center().text_sm()
-                        .p_2().rounded_md().border_1().border_color(palette.border)
-                        .child(div().w_16().child(format!("#{ci}")))
-                        .child(div().flex_1().child(ch.title.clone()))
-                        .child(
-                            div().flex_1().text_color(palette.muted_foreground).child(
-                                ch.title_translated.clone().unwrap_or_else(|| "—".into()),
-                            ),
-                        )
+                    let mut actions = div()
+                        .w_72()
+                        .flex()
+                        .justify_end()
+                        .gap_1()
                         .child(
                             Button::new(format!("edit-title-{ci}"))
                                 .ghost().label("Edit")
@@ -320,12 +312,29 @@ impl Render for ContentsView {
                                 })),
                         );
                     if let Some(cb) = self.on_open_proofreading.clone() {
-                        row = row.child(
+                        actions = actions.child(
                             Button::new(format!("proof-title-{ci}"))
                                 .ghost().label("Proofreading")
                                 .on_click(move |_, _, _| cb(ci)),
                         );
                     }
+                    let row = div()
+                        .flex()
+                        .gap_3()
+                        .items_center()
+                        .text_sm()
+                        .px_3()
+                        .py_2()
+                        .border_t_1()
+                        .border_color(palette.separator)
+                        .child(div().w_16().text_color(palette.muted_foreground).child(format!("#{ci}")))
+                        .child(div().flex_1().min_w_0().truncate().child(ch.title.clone()))
+                        .child(
+                            div().flex_1().min_w_0().truncate().text_color(palette.muted_foreground).child(
+                                ch.title_translated.clone().unwrap_or_else(|| "—".into()),
+                            ),
+                        )
+                        .child(actions);
                     list = list.child(row);
                 }
                 col = col.child(list);

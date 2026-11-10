@@ -192,9 +192,9 @@ impl Render for SubtitlesView {
             );
         }
         let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar().child(
+            .overflow_y_scrollbar().font(theme::fonts::ui()).child(
             div().flex().items_center().justify_between().child(
-                div().text_xl().font_weight(FontWeight::BOLD).child("Subtitle editor"),
+                super::ui::page_title("Subtitle editor", None::<Div>),
             ).child(header_count),
         );
 
@@ -205,11 +205,7 @@ impl Render for SubtitlesView {
             );
         }
         if let Some(err) = &self.error {
-            col = col.child(
-                div().p_3().rounded_md().bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
         col = col.child(
@@ -244,11 +240,17 @@ impl Render for SubtitlesView {
         let page = self.page.min(pages - 1);
         let start = page * PAGE_SIZE;
         let end = (start + PAGE_SIZE).min(filtered.len());
-        let mut list = div().flex().flex_col().gap_2();
+        let mut list = super::ui::list_container(&palette);
         for cue in &filtered[start..end] {
             let editing = self.editing.as_deref() == Some(cue.id.as_str());
-            let mut card = div().flex().flex_col().gap_1().p_3().rounded_md()
-                .border_1().border_color(palette.border)
+            let mut card = div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .px_3()
+                .py_3()
+                .border_b_1()
+                .border_color(palette.separator)
                 .when(editing, |this| {
                     this.border_color(palette.ring).on_key_down(cx.listener(
                         |this, ev: &gpui_kit::KeyDownEvent, _, cx| {

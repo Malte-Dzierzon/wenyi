@@ -1,4 +1,4 @@
-"""CLI helpers for human resolution of glossary conflicts.
+"""Helpers for human resolution of glossary conflicts.
 GlossaryStore.upsert_term detects conflicts automatically. These wrappers choose the final
 translation and mark related conflicts resolved.
 """

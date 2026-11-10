@@ -2492,26 +2492,19 @@ impl Render for GlobalSettingsView {
 
         // Shell: pinned header (title + banners + tabs), scrolling tab body,
         // pinned footer (action bar). Only the active tab builds elements.
-        let mut col = div().flex().flex_col().h_full().min_h_0().child(
+        let mut col = div().flex().flex_col().h_full().min_h_0().font(theme::fonts::ui()).child(
             div()
                 .flex()
                 .flex_col()
                 .gap_3()
                 .px_6()
                 .pt_6()
-                .child(div().text_xl().font_weight(FontWeight::BOLD).child("Settings")),
+                .child(super::ui::page_title("Settings", None::<Div>)),
         );
 
         if let Some(err) = &self.error {
             col = col.child(
-                div().px_6().child(
-                    div()
-                        .p_3()
-                        .rounded_md()
-                        .bg(palette.destructive)
-                        .text_color(palette.destructive_foreground)
-                        .child(format!("Error: {err}")),
-                ),
+                div().px_6().child(super::ui::error_box(err, &palette)),
             );
         }
         if let Some(notice) = &self.notice {
@@ -2582,12 +2575,20 @@ impl Render for GlobalSettingsView {
         // other tabs scroll as a whole.
         if self.tab == SettingsTab::Advanced {
             col = col.child(
-                div().flex().flex_col().flex_1().min_h_0().p_6().child(tab_body),
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .p_6()
+                    .w_full()
+                    .max_w(px(1040.0))
+                    .child(tab_body),
             );
         } else {
             col = col.child(
                 div().id("settings-tab-scroll").overflow_y_scroll().flex().flex_col().flex_1().min_h_0().child(
-                    div().flex().flex_col().gap_3().p_6().child(tab_body),
+                    div().flex().flex_col().gap_4().p_6().w_full().max_w(px(1040.0)).child(tab_body),
                 ),
             );
         }

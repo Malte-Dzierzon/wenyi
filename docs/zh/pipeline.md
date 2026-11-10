@@ -105,15 +105,10 @@ Fixer 术语文本，仍需自行负责其内容；自动过滤适用于结构�
 - **影子修订与盲复审**：同一段的多个确认问题会合并为一次 Fixer 请求。Fixer 会获得风格指南、全书概览、本章梗概、相关术语及邻近原译文，并必须返回完整单段替换而非局部 diff。同轮所有 Fixer 读取同一份不可变影子快照，全部结束后才统一应用；下一轮全书 Reviewer 与取证索引只读取更新后的影子译文，不接收旧问题说明。未解决的仲裁冲突和未经确认的 Agent fallback 会保留为未解决项。连续无问题、达到 Fix 上限、没有有效进展或检测到 A→B→A 循环时停止。
 - **可选 Autofix 发布**：Review 引擎自身仍保持只读。开启 `review_autofix` 后，独立发布服务会先叠加折叠后的 `changes`，再让最终未解决 issues 基于更新后的译文进入现有 Review Agent Loop；确认项继续复用现有 Fixer，不存在 Autofix 专属 loop 或 prompt。发布阶段只把最终完整段落写入正式 `target`，随后刷新注释与 DOCX 样式偏移。
 最终审校是唯一由模型执行的语义审校阶段，默认开启。设置
-`pipeline.review: false` 或传入 `--no-review` 可在一键流程中跳过；也可以将它
-作为独立阶段使用：
+`pipeline.review: false` 可在流程中跳过；也可以在 Desktop 应用的 Review 界面
+作为独立阶段使用（完整审校，或审校 + autofix 发布）。
 
-```bash
-uv run wenyi review book.epub
-uv run wenyi review book.epub --autofix
-```
-
-即使关闭 `pipeline.review`，显式调用上述命令仍会执行审校。内容、配置与术语库指纹匹配时，
+即使关闭 `pipeline.review`，从应用发起审校仍会执行。内容、配置与术语库指纹匹配时，
 复用已完成的结果，或从未完成的轮次、审校块与 Agent 记录续跑。Ctrl+C、超时、传输失败、
 HTTP 429/5xx，以及余额/配额类错误（如 HTTP 402）会将运行标为 `interrupted`；本地/协议
 失败仍记为 `failed` 便于诊断，但 `interrupted` 与 `failed` 都可续跑，下次 `review`

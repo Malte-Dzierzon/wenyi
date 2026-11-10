@@ -109,7 +109,7 @@ class LocalBackend:
         return SqliteStorage(str(self.project_dir(pid)), create=create)
 
     def defaults(self) -> Config:
-        # Config() uses built-in defaults, never the CLI's cwd config.yaml.
+        # Config() uses built-in defaults, never a cwd config.yaml.
         return Config.load(self.config_path) if self.config_path else Config()
 
     def _get(self, table, identity, connection=None):
@@ -161,6 +161,7 @@ class LocalBackend:
             "source_meta": {},
             "initialized": False,
             "error": None,
+            "banner": None,
             "config": config or {},
             "created_at": _now(),
             **(source or {}),
@@ -195,7 +196,7 @@ class LocalBackend:
         rows = sorted(self._list("projects"), key=lambda row: row["created_at"], reverse=True)
         keys = ("id", "name", "title", "fmt", "source_lang", "target_lang", "status", "created_at")
         return [
-            {key: project[key] for key in keys}
+            {**{key: project[key] for key in keys}, "banner": project.get("banner")}
             for row in rows
             if (project := self.get_project(row["id"])) is not None
         ]
@@ -212,6 +213,9 @@ class LocalBackend:
 
     def set_project_status(self, pid: str, status: str, *, error: str | None = None) -> None:
         self.update_project(pid, status=status, error=error)
+
+    def set_project_banner(self, pid: str, banner: str | None) -> None:
+        self.update_project(pid, banner=banner)
 
     def set_project_strategy(
         self, pid: str, strategy: dict, *, connection: sqlite3.Connection | None = None

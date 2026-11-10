@@ -188,6 +188,16 @@ impl Client {
         self.delete(&format!("/projects/{pid}")).await
     }
 
+    /// `PUT /projects/{pid}/banner` — set or clear the library banner.
+    pub async fn set_banner(&self, pid: &str, banner: Option<&str>) -> Result<Project, Error> {
+        self.request(
+            reqwest::Method::PUT,
+            &format!("/projects/{pid}/banner"),
+            Some(serde_json::json!({"banner": banner})),
+        )
+        .await
+    }
+
     /// `GET /health` — unauthenticated liveness probe.
     pub async fn health(&self) -> Result<serde_json::Value, Error> {
         self.get("/health").await
@@ -877,6 +887,8 @@ pub struct Project {
     #[serde(default)]
     pub initialized: bool,
     pub created_at: Option<String>,
+    #[serde(default)]
+    pub banner: Option<String>,
 }
 
 /// Active statuses — mirrors `ACTIVE_STATUSES` in `lib/api.ts`.

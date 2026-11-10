@@ -77,11 +77,10 @@
 ---
 
 ## 界面预览
-
-Desktop 与 Web 共用这些工作台页面。下图展示 Web 中文界面的翻译总览，也可在设置中切换为英文。
+桌面应用是唯一的图形界面。下图展示翻译总览。
 
 <p align="center">
-  <img src="../images/web-translation-overview.png" alt="翻译总览：查看步骤用量、缓存命中率和运行耗时。" width="960">
+  <img src="../images/native-translation-overview.webp" alt="翻译总览：查看步骤用量、缓存命中率和运行耗时。" width="960">
   <br>
   <sub>翻译总览：查看步骤用量、缓存命中率和运行耗时。</sub>
 </p>
@@ -90,17 +89,17 @@ Desktop 与 Web 共用这些工作台页面。下图展示 Web 中文界面的�
 
 ## 快速开始
 
-安装 Python 3.10+ 和 [uv](https://docs.astral.sh/uv/) 后，在仓库根目录运行：
+安装 Python 3.10+、[uv](https://docs.astral.sh/uv/) 与 Rust 稳定版后，在仓库根目录运行：
 
 ```bash
 uv sync --locked
 export DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY"
-uv run wenyi translate book.epub
+cargo run --manifest-path apps/desktop/native/Cargo.toml
 ```
 
-以上 Shell 示例使用默认 DeepSeek 提供商，请替换为自己的密钥，并在翻译前检查 `config.yaml`。Windows 命令、其他提供商及续跑／导出选项见 [CLI 使用指南](cli.md)。
-
-想使用图形界面？下载与设置步骤见 [Desktop 快速开始](desktop.md#快速开始)。
+以上示例使用默认 DeepSeek 提供商，请替换为自己的密钥，并在翻译前检查 `config.yaml`。
+原生界面在开发模式下自动启动 Python sidecar。下载与设置步骤见 [Desktop 快速开始](desktop.md#快速开始)。
+目标是纯 Rust 单二进制应用，见 [Rust 重写规划](RUST-REWRITE.md)。
 
 ---
 
@@ -133,8 +132,7 @@ uv run wenyi translate book.epub
 ### 使用入口
 
 - [Desktop 使用说明](desktop.md) — 安装与构建、API Key、原生导入与保存、本地数据和故障排查
-- [CLI 使用指南](cli.md) — 本地安装、命令、翻译、续跑和导出
-- [Web 部署](web.md) — 可选的自部署浏览器工作台，使用独立项目数据
+- [Rust 重写规划](RUST-REWRITE.md) — 目标架构、行为基准与迁移顺序
 
 ### 通用说明
 

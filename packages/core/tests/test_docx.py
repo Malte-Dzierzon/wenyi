@@ -1,4 +1,4 @@
-"""DOCX ingestion, assembly and default CLI output-format tests."""
+"""DOCX ingestion and assembly tests."""
 
 from __future__ import annotations
 
@@ -6,22 +6,16 @@ import os
 import tempfile
 import unittest
 import zipfile
-from unittest.mock import patch
 from xml.etree import ElementTree
 
 from docx import Document as DocxDocument
 from docx.shared import RGBColor
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
-from wenyi_cli.commands.validation import resolve_output_format
 from wenyi_core.assemble.docx_writer import _assemble_docx
 from wenyi_core.assemble.writer import assemble
-from wenyi_core.config import Config
 from wenyi_core.document_styles.docx import merge_align_results, proportional_range_placements
 from wenyi_core.ingest.docx_reader import read_docx
 from wenyi_core.ingest.models import KIND_HEADING, KIND_TEXT
 from wenyi_core.ingest.segmenter import load_document
-from wenyi_core.llm.providers.fake import FakeClient
 from wenyi_core.pipeline.runstore import STATUS_DONE
 from wenyi_core.storage.file import FileStorage
 
@@ -477,99 +471,6 @@ class TestDocxAssemble(unittest.TestCase):
             via_writer = assemble(store, path, out_format="docx")
             self.assertTrue(via_writer.endswith(".docx"))
             self.assertTrue(os.path.isfile(via_writer))
-
-
-class TestDocxCliDefaults(unittest.TestCase):
-    def testresolve_output_format_defaults(self):
-        self.assertEqual(resolve_output_format("a.docx", None), "docx")
-        self.assertEqual(resolve_output_format("a.epub", None), "epub")
-        self.assertEqual(resolve_output_format("a.docx", "epub"), "epub")
-        self.assertEqual(resolve_output_format("a.txt", "docx"), "docx")
-
-    def test_translate_docx_defaults_out_format(self):
-        captured: dict = {}
-
-        class FakeOrchestrator:
-            def __init__(self, config, client=None):
-                self.client = FakeClient()
-                del client
-                captured["config"] = config
-
-            def run_all(self, input_path, **kwargs):
-                captured["input"] = input_path
-                captured["kwargs"] = kwargs
-                store = type(
-                    "S",
-                    (),
-                    {"run_dir": "state/sample", "load_usage": staticmethod(lambda: {})},
-                )()
-                return {
-                    "store": store,
-                    "outputs": ["output/sample.zh.docx"],
-                    "output": "output/sample.zh.docx",
-                    "report": {
-                        "summary": {
-                            "chapters_done": 1,
-                            "chapters_total": 1,
-                            "terms": 0,
-                        }
-                    },
-                }
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "sample.docx")
-            _write_sample_docx(path)
-            with (
-                patch(
-                    "wenyi_cli.commands.context.CommandContext.load_config",
-                    return_value=Config.from_dict({"llm": {"preset": "fake"}}),
-                ),
-                patch("wenyi_core.pipeline.orchestrator.Orchestrator", FakeOrchestrator),
-            ):
-                result = CliRunner().invoke(app, ["translate", path])
-        self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(captured["kwargs"].get("out_format"), "docx")
-
-    def test_format_docx_is_accepted(self):
-        cfg = Config.from_dict({"llm": {"preset": "fake"}})
-        captured: dict = {}
-
-        class FakeOrchestrator:
-            def __init__(self, config, client=None):
-                self.client = FakeClient()
-                del client
-
-            def run_all(self, input_path, **kwargs):
-                captured["kwargs"] = kwargs
-                store = type(
-                    "S",
-                    (),
-                    {"run_dir": "state/sample", "load_usage": staticmethod(lambda: {})},
-                )()
-                return {
-                    "store": store,
-                    "outputs": ["output/book.zh.docx"],
-                    "output": "output/book.zh.docx",
-                    "report": {
-                        "summary": {
-                            "chapters_done": 1,
-                            "chapters_total": 1,
-                            "terms": 0,
-                        }
-                    },
-                }
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "book.txt")
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write("Hello.\n")
-            with (
-                patch("wenyi_cli.commands.context.CommandContext.load_config", return_value=cfg),
-                patch("wenyi_core.pipeline.orchestrator.Orchestrator", FakeOrchestrator),
-            ):
-                result = CliRunner().invoke(app, ["translate", path, "--format", "docx"])
-        self.assertEqual(result.exit_code, 0, result.output)
-        self.assertEqual(captured["kwargs"].get("out_format"), "docx")
 
 
 if __name__ == "__main__":

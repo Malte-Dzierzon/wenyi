@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 from bs4.element import Comment
-from wenyi_cli.commands.validation import runstore_for
 from wenyi_core.assemble.pdf_writer import _normalize_html_for_fpdf
 from wenyi_core.assemble.writer import assemble
 from wenyi_core.config import Config
@@ -21,6 +20,7 @@ from wenyi_core.ingest.models import Document
 from wenyi_core.ingest.pdf_reader import pdf_cache_html_path
 from wenyi_core.ingest.segmenter import load_document
 from wenyi_core.llm.providers.fake import FakeClient
+from wenyi_core.pipeline.input_preparation import locate_input_storage
 from wenyi_core.pipeline.orchestrator import Orchestrator
 from wenyi_core.pipeline.runstore import RunStore, source_sha256
 from wenyi_core.storage.file import FileStorage
@@ -348,7 +348,7 @@ class TestPdfIngest(unittest.TestCase):
                 os.path.isfile(os.path.join(state_dir, "sample", "targets", "zh", "manifest.json"))
             )
 
-    def test_cli_tools_locate_pdf_state_without_parsing_source(self):
+    def test_locate_existing_finds_pdf_state_without_parsing_source(self):
         with tempfile.TemporaryDirectory() as directory:
             pdf_path = os.path.join(directory, "sample.pdf")
             with open(pdf_path, "wb") as file:
@@ -367,10 +367,10 @@ class TestPdfIngest(unittest.TestCase):
             )
 
             with patch(
-                "wenyi_cli.commands.validation.load_document",
+                "wenyi_core.pipeline.input_preparation.load_document",
                 side_effect=AssertionError("PDF source should not be parsed"),
             ):
-                store = runstore_for(config, pdf_path)
+                store, _ = locate_input_storage(pdf_path, config, FileStorage)
 
         self.assertEqual(store.run_dir, os.path.join(state_dir, "sample", "targets", "zh"))
 

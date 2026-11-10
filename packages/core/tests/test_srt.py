@@ -1,4 +1,4 @@
-"""SRT parsing, concurrent translation and CLI routing tests."""
+"""SRT parsing and concurrent translation tests."""
 
 from __future__ import annotations
 
@@ -6,10 +6,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
 
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.config import Config
 from wenyi_core.ingest.srt_reader import parse_srt
 from wenyi_core.llm.providers.fake import FakeClient
@@ -127,31 +124,6 @@ class TestSrtTranslate(unittest.TestCase):
             self.assertEqual(calls["n"], first_calls)  # Resume must not repeat requests.
             self.assertEqual(second["translated"], 3)
             self.assertTrue(os.path.isfile(os.path.join(second["run_dir"], "cues.jsonl")))
-
-    def test_cli_translate_routes_srt(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "demo.srt")
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(_sample_srt())
-            fake_result = {
-                "translated": 3,
-                "cue_count": 3,
-                "run_dir": os.path.join(directory, "state", "srt", "demo"),
-                "outputs": [os.path.join(directory, "output", "demo.zh.srt")],
-                "usage": {},
-            }
-            with (
-                patch("wenyi_cli.commands.context.CommandContext.load_config") as load_config,
-                patch(
-                    "wenyi_core.srt.translate.translate_srt",
-                    return_value=fake_result,
-                ) as translate_srt_mock,
-            ):
-                load_config.return_value = Config.from_dict({"llm": {"preset": "fake"}})
-                result = CliRunner().invoke(app, ["translate", path])
-            self.assertEqual(result.exit_code, 0, result.output)
-            translate_srt_mock.assert_called_once()
-            self.assertIn("Subtitle translation complete", result.output)
 
 
 if __name__ == "__main__":

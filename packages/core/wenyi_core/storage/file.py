@@ -1,8 +1,7 @@
-"""Local filesystem implementation of Storage for CLI workflows.
+"""Local filesystem implementation of Storage for file-based workflows.
 
 Compose :class:`wenyi_core.pipeline.runstore.RunStore` for JSON run state with
 :class:`wenyi_core.glossary.store.GlossaryStore` for the SQLite glossary.
-Domain services use the same storage interface as the Web backend.
 """
 
 from __future__ import annotations

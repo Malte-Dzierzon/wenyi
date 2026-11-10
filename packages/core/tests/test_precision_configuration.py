@@ -1,12 +1,9 @@
 """Precision mode configuration, routing and language-policy contracts."""
 
 from dataclasses import replace
-from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.config import Config, PipelineConfig
 from wenyi_core.i18n.prompts import render
 from wenyi_core.llm.operations import OPERATIONS, configured_operations, workflow_operations
@@ -109,55 +106,3 @@ def test_precision_cache_binds_consumed_templates_and_effective_language_guidanc
         ),
     )
     assert effective.task_fingerprint("precision") != fingerprint
-
-
-def test_cli_precision_conflict_is_concise_and_precedes_credentials():
-    config = Config()
-    with (
-        patch("wenyi_cli.commands.context.CommandContext.load_config", return_value=config),
-        patch("wenyi_cli.commands.context.CommandContext.validate_api_configuration") as validate,
-    ):
-        result = CliRunner().invoke(
-            app, ["translate", "unused.txt", "--translation-mode", "best_of_three", "--no-polish"]
-        )
-    assert result.exit_code == 1
-    assert "requires pipeline.polish=true" in result.output
-    assert "Traceback" not in result.output
-    validate.assert_not_called()
-
-
-def test_srt_rejects_explicit_book_mode():
-    result = CliRunner().invoke(
-        app, ["translate", "unused.srt", "--translation-mode", "best_of_three"]
-    )
-    assert result.exit_code == 1
-    assert "SRT translation does not support: --translation-mode" in result.output
-
-
-def test_offline_model_preview_shows_shared_routes_without_removed_precision_operations():
-    with patch("wenyi_cli.commands.context.CommandContext.load_config", return_value=Config()):
-        result = CliRunner().invoke(app, ["models", "list", "--json"])
-    assert result.exit_code == 0, result.output
-    for operation in REMOVED_OPERATIONS:
-        assert operation not in result.output
-    for operation in ("translation.body", "polish.body"):
-        assert operation in result.output
-
-
-def test_cli_combines_mode_and_polish_overrides_before_validation():
-    config = Config(pipeline=PipelineConfig(polish=False))
-    with (
-        patch("wenyi_cli.commands.context.CommandContext.load_config", return_value=config),
-        patch("wenyi_cli.commands.context.CommandContext.validate_api_configuration") as validate,
-        patch(
-            "wenyi_cli.commands.workflows.require_input_file", side_effect=ValueError("stop here")
-        ),
-    ):
-        result = CliRunner().invoke(
-            app, ["translate", "unused.txt", "--translation-mode", "best_of_three", "--polish"]
-        )
-    assert result.exit_code == 1
-    assert "stop here" in result.output
-    assert config.pipeline.translation_mode == "best_of_three"
-    assert config.pipeline.polish is True
-    validate.assert_called_once()

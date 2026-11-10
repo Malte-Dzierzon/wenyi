@@ -1,7 +1,7 @@
 """Validate release archives and dependency isolation in clean wheel installations.
 
-Run after building all five workspace packages: python scripts/check_backend_packages.py dist.
-No model, database, Redis, credential-store, or user-workspace access is required.
+Run after building the three remaining workspace packages: python scripts/check_backend_packages.py dist.
+No model, credential-store, or user-workspace access is required.
 """
 
 from __future__ import annotations
@@ -16,41 +16,18 @@ from pathlib import Path
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ("wenyi_core", "wenyi_cli", "wenyi_backend", "wenyi_api", "wenyi_desktop")
+PACKAGES = ("wenyi_core", "wenyi_backend", "wenyi_desktop")
 PROFILES = {
-    "cli": (
-        ("wenyi_core", "wenyi_cli"),
-        (
-            "wenyi_backend",
-            "wenyi_api",
-            "wenyi_desktop",
-            "psycopg",
-            "psycopg_pool",
-            "arq",
-            "redis",
-            "keyring",
-        ),
-    ),
     "shared": (
         ("wenyi_core", "wenyi_backend"),
         (
-            "wenyi_api",
             "wenyi_desktop",
-            "wenyi_cli",
-            "psycopg",
-            "psycopg_pool",
-            "arq",
-            "redis",
             "keyring",
         ),
     ),
-    "web": (
-        ("wenyi_core", "wenyi_backend", "wenyi_api"),
-        ("wenyi_desktop", "wenyi_cli", "keyring", "PyInstaller"),
-    ),
     "desktop": (
         ("wenyi_core", "wenyi_backend", "wenyi_desktop"),
-        ("wenyi_api", "wenyi_cli", "psycopg", "psycopg_pool", "arq", "redis", "PyInstaller"),
+        ("PyInstaller",),
     ),
 }
 
@@ -68,30 +45,10 @@ if "wenyi_backend" in installed:
     import wenyi_backend
     for module in pkgutil.walk_packages(wenyi_backend.__path__, "wenyi_backend."):
         importlib.import_module(module.name)
-if "wenyi_api" in installed:
-    import wenyi_api.main
-    import wenyi_api.workers
-    import psycopg, psycopg_pool, arq, redis
 if "wenyi_desktop" in installed:
     import wenyi_desktop.main
     import wenyi_desktop.__main__
     import keyring
-"""
-
-# This tests HTTP assembly without starting the production lifespan or touching services.
-# Service connectivity is covered by the separate PostgreSQL/Redis integration CI job.
-WEB_HEALTH_SMOKE = """
-import asyncio
-import httpx
-from wenyi_api.main import app
-async def main():
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get("/health")
-        assert response.status_code == 200, response.text
-        assert response.json()["status"] == "ok"
-asyncio.run(main())
 """
 
 
@@ -174,17 +131,9 @@ def installations(wheels: dict[str, Path]) -> None:
                 env=env,
                 timeout=60,
             )
-            if profile == "web":
+            if profile == "desktop":
                 subprocess.run(
-                    [str(python), "-I", "-c", WEB_HEALTH_SMOKE],
-                    check=True,
-                    cwd=root,
-                    env=env,
-                    timeout=30,
-                )
-            if profile in {"cli", "desktop"}:
-                subprocess.run(
-                    [str(python), "-I", "-m", f"wenyi_{profile}", "--help"],
+                    [str(python), "-I", "-m", "wenyi_desktop", "--help"],
                     check=True,
                     cwd=root,
                     env=env,

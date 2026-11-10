@@ -24,7 +24,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DESTINATION = ROOT / "apps/desktop/sidecar"
-EXCLUDED_MODULES = ("wenyi_api", "wenyi_cli", "psycopg", "psycopg_pool", "arq", "redis")
+EXCLUDED_MODULES = (
+    "wenyi_api",
+    "wenyi_cli",
+    "psycopg",
+    "psycopg_pool",
+    "arq",
+    "redis",
+    "typer",
+    "rich",
+)
 
 
 def verify_bundle(directory: Path) -> None:

@@ -503,8 +503,7 @@ class GlossaryStore:
         Translation, review and polishing prompts share this source. Existing positions must
         remain stable while new entries append at the end, preserving provider prefix-cache
         hits. Do not sort by type/source here: inserted entries would shift later text and
-        invalidate the prefix. Alphabetical grouping belongs in the display layer, such as
-        CLI sorted().
+        invalidate the prefix. Alphabetical grouping belongs in the display layer.
         """
         rows = self.conn.execute("SELECT * FROM glossary ORDER BY rowid").fetchall()
         return [GlossaryTerm.from_row(r) for r in rows]

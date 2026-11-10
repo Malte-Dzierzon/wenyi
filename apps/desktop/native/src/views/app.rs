@@ -130,6 +130,59 @@ impl App {
                         app.client = Some(client.clone());
                         app.dashboard.update(cx, |d, cx| d.set_client(client.clone(), cx));
                         app.global_settings.update(cx, |g, cx| g.set_client(client.clone(), cx));
+                        // AUDIT-ONLY (temporary): WENYI_AUDIT_OPEN=<pid>:<screen>
+                        // opens a project screen directly for screenshots.
+                        if let Ok(spec) = std::env::var("WENYI_AUDIT_OPEN") {
+                            // Global screens: "global:<settings|create>".
+                            if let Some(global) = spec.strip_prefix("global:") {
+                                let nav = match global {
+                                    "settings" => Some(GlobalNav::InterfaceSettings),
+                                    "create" => Some(GlobalNav::CreateProject),
+                                    _ => None,
+                                };
+                                if let Some(nav) = nav {
+                                    app.navigate(Location::Global(nav), cx);
+                                }
+                            } else {
+                            let mut parts = spec.splitn(2, ':');
+                            if let (Some(pid), Some(screen)) = (parts.next(), parts.next()) {
+                                let pid = pid.to_string();
+                                let screen = screen.to_string();
+                                let client2 = client.clone();
+                                cx.spawn(async move |this, cx| {
+                                    let result = cx
+                                        .background_spawn(async move {
+                                            crate::client::block_on(client2.get_project(&pid))
+                                        })
+                                        .await;
+                                    if let Ok(detail) = result {
+                                        let nav = match screen.as_str() {
+                                            "proofreading" => ProjectNav::Proofreading,
+                                            "review" => ProjectNav::Review,
+                                            "glossary" => ProjectNav::Glossary,
+                                            "style" => ProjectNav::Style,
+                                            "contents" => ProjectNav::Contents,
+                                            "export" => ProjectNav::Export,
+                                            "settings" => ProjectNav::Settings,
+                                            "events" => ProjectNav::Events,
+                                            "subtitles" => ProjectNav::Subtitles,
+                                            _ => ProjectNav::Overview,
+                                        };
+                                        tracing::info!(screen = %screen, nav = ?nav, "audit hook navigating");
+                                        _ = this.update(cx, |app: &mut App, cx| {
+                                            let project = detail.project.clone();
+                                            app.open_project(project.clone(), cx);
+                                            app.navigate(
+                                                Location::Project { project, screen: nav },
+                                                cx,
+                                            );
+                                        });
+                                    }
+                                })
+                                .detach();
+                            }
+                            }
+                        }
                     }
                     Err(err) => {
                         tracing::error!(error = %err, "backend failed");
@@ -772,8 +825,10 @@ impl Render for App {
                                     .flex_col()
                                     .p_6()
                                     .gap_2()
-                                    .child(div().text_xl().font_weight(FontWeight::BOLD).child(
+                                    .font(theme::fonts::ui())
+                                    .child(super::ui::page_title(
                                         format!("{} — {}", project.name, screen.label()),
+                                        None::<Div>,
                                     ))
                                     .child(format!(
                                         "Screen “{}” for project {} — coming in its milestone.",

@@ -232,11 +232,11 @@ impl Render for ReviewView {
         // Scroll region owns overflow (scrollbar overlay); flex_1 + min_h_0
         // lets it shrink inside the app-shell column.
         let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar();
+            .overflow_y_scrollbar().font(theme::fonts::ui());
 
         // Header: title + history select + run button.
         let mut header = div().flex().items_center().justify_between().gap_2().child(
-            div().text_xl().font_weight(FontWeight::BOLD).child("Whole-book review"),
+            super::ui::page_title("Whole-book review", None::<Div>),
         );
         let mut actions = div().flex().items_center().gap_2();
         if self.runs.len() > 1 {
@@ -274,11 +274,7 @@ impl Render for ReviewView {
         col = col.child(header);
 
         if let Some(err) = &self.error {
-            col = col.child(
-                div().p_3().rounded_md().bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
         if self.loading && self.run_detail.is_none() {
@@ -340,15 +336,21 @@ impl Render for ReviewView {
                 div().text_sm().text_color(palette.muted_foreground).child("No matching issues."),
             );
         } else {
-            let mut list = div().flex().flex_col().gap_1();
+            let mut list = super::ui::list_container(&palette);
             for item in items {
                 let expanded = self.expanded.contains(&item.id);
                 let id = item.id.clone();
-                let mut row = div().flex().flex_col().gap_1().p_3().rounded_md()
-                    .border_1().border_color(palette.border)
+                let mut row = div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .px_3()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(palette.separator)
                     .child(
                         div().flex().items_center().gap_2().text_sm()
-                            .child(div().px_2().rounded_sm().bg(palette.muted).text_xs().child(item.status.clone()))
+                            .child(super::ui::status_pill(&item.status, &palette))
                             .child(div().font_medium().child(
                                 if item.detail.is_empty() { item.kind.clone() } else { item.detail.clone() },
                             ))

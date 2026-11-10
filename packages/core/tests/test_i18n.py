@@ -11,8 +11,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.assemble.writer import assemble
 from wenyi_core.assemble.writer_common import _epub_lang
 from wenyi_core.config import Config
@@ -35,7 +33,7 @@ from tests.fake_llm import routing_handler
 
 
 def require_file_storage(store: Storage) -> FileStorage:
-    """CLI/offline tests use the file backend; narrow Storage to FileStorage for path asserts."""
+    """Offline tests use the file backend; narrow Storage to FileStorage for path asserts."""
     if not isinstance(store, FileStorage):
         raise TypeError(f"expected FileStorage, got {type(store).__name__}")
     return store
@@ -332,35 +330,6 @@ def test_srt_target_isolation_traditional_script_and_resume():
             assert len(client.calls) == calls_before
             results.append(result["run_dir"])
         assert len(set(results)) == 3
-
-
-def test_language_list_needs_no_api_and_reads_packaged_templates():
-    runner = CliRunner()
-    with (
-        tempfile.TemporaryDirectory() as directory,
-        patch("wenyi_cli.commands.context.CommandContext.validate_api_configuration") as validate,
-    ):
-        result = runner.invoke(app, ["--config", str(Path(directory) / "config.yaml"), "languages"])
-        assert result.exit_code == 0, result.output
-        assert "zh-Hant" in result.output
-        assert "en-GB" in result.output
-        assert "vi" in result.output
-        assert "Vietnamese" in result.output
-        validate.assert_not_called()
-
-
-@pytest.mark.parametrize("command", ["translate", "status", "report", "assemble"])
-@pytest.mark.parametrize("invalid", ["language: {target: typo}\n", "language: [\n"])
-def test_cli_invalid_language_or_yaml_is_a_concise_error(command, invalid):
-    runner = CliRunner()
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "config.yaml"
-        path.write_text(invalid, encoding="utf-8")
-        result = runner.invoke(app, ["--config", str(path), command, "missing.txt"])
-        assert result.exit_code == 1, result.output
-        assert "Configuration error" in result.output
-        assert "Error: 1" not in result.output
-        assert "Traceback" not in result.output
 
 
 def test_partial_non_chinese_run_resumes_without_retranslating_saved_batch():

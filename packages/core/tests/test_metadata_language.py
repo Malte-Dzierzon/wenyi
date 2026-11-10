@@ -3,8 +3,6 @@
 import json
 
 import pytest
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.agents.analyzer import Analyzer
 from wenyi_core.config import Config
 from wenyi_core.glossary.store import GlossaryStore, GlossaryTerm, term_match_sources
@@ -138,11 +136,8 @@ def test_analysis_preserves_style_bullets_and_normalizes_character_metadata():
     assert result["terms"][0]["type"] == "place"
 
 
-def test_cli_and_generated_configuration_use_english(tmp_path):
+def test_generated_configuration_uses_english(tmp_path):
     path = tmp_path / "config.yaml"
-    result = CliRunner().invoke(app, ["--config", str(path), "--help"])
-    assert result.exit_code == 0
-    assert "Multilingual translation" in result.output
-    assert not any("\u3400" <= c <= "\u9fff" for c in result.output)
+    Config.create_default_file(str(path))
     comments = [line.partition("#")[2] for line in path.read_text().splitlines() if "#" in line]
     assert not any("\u3400" <= c <= "\u9fff" for c in "\n".join(comments))

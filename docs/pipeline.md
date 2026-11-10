@@ -114,15 +114,11 @@ The glossary constrains later translation and supplies evidence to the final rev
 - **Shadow Fix and blind re-review:** confirmed issues for the same segment are grouped into one Fixer request. The Fixer receives the style brief, book synopsis, chapter digest, relevant glossary subset, and nearby source/translation pairs, and must return one complete replacement segment rather than a diff. All Fixers in a round read one immutable shadow snapshot; their patches are applied together only after the round finishes. The next whole-book Review and evidence index read the updated shadow text without receiving the old issue explanations. Unresolved arbitration conflicts and unverified Agent fallbacks are left unresolved. The loop stops after consecutive clean passes, the configured Fix limit, no progress, or an A→B→A cycle.
 - **Optional Autofix publishing:** the Review engine itself remains read-only. When `review_autofix` is enabled, a separate publisher first overlays the folded `changes`, then sends final unresolved issues through the existing Review Agent Loop against that updated translation. Confirmed issues reuse the existing Fixer; no Autofix-specific loop or prompt exists. The publisher writes only final complete segments to formal `target` values, then refreshes annotation and DOCX style offsets.
 Final review is the sole model-driven semantic review stage and is enabled by
-default. Setting `pipeline.review: false` or passing `--no-review` skips it in the
-one-command workflow. Review is also available as an independent stage:
+default. Setting `pipeline.review: false` skips it in the workflow. Review is
+also available as an independent stage from the Desktop app's Review screen
+(full review, or review with autofix publishing).
 
-```bash
-uv run wenyi review book.epub
-uv run wenyi review book.epub --autofix
-```
-
-The explicit command runs even when `pipeline.review` is disabled. Matching completed
+Review from the app runs even when `pipeline.review` is disabled. Matching completed
 results are reused; an unfinished Review resumes its saved rounds, chunks, and agent
 traces when content, configuration, and glossary fingerprints match. Recoverable stops
 such as Ctrl+C, timeouts, transport failures, HTTP 429/5xx, and provider balance/quota

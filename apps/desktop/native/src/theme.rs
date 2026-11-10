@@ -777,6 +777,79 @@ pub mod radius {
     }
 }
 
+/// Font stacks — UI family + CJK fallbacks, applied via `.font(...)`.
+///
+/// The kit theme carries a single `font_family` (no fallback list), so every
+/// text style would otherwise resolve CJK glyphs through GPUI's generic
+/// fallback stack per text run. Naming the stack explicitly keeps CJK lookups
+/// on the font cache: `Noto Sans CJK SC` covers Simplified Chinese, TC/JP/KR
+/// spellings resolve to the same installed files on most desktops.
+///
+/// Each stack is a lazily-built [`gpui_kit::Font`]; views apply it once at
+/// the page root (`.font(fonts::ui())`) so the whole subtree inherits it.
+pub mod fonts {
+    use std::sync::LazyLock;
+
+    use gpui_kit::{Font, FontFallbacks, SharedString};
+
+    fn stack(family: &str, fallbacks: &[&str]) -> Font {
+        Font {
+            family: SharedString::new(family),
+            features: Default::default(),
+            fallbacks: Some(FontFallbacks::from_fonts(
+                fallbacks.iter().map(|f| f.to_string()).collect(),
+            )),
+            weight: Default::default(),
+            style: Default::default(),
+        }
+    }
+
+    /// CJK fallback chain shared by all stacks.
+    fn cjk() -> [&'static str; 4] {
+        ["Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans CJK KR"]
+    }
+
+    /// Default UI stack: system UI + CJK. Resolves to the desktop's UI font
+    /// (Cantarell/Adwaita/Segoe UI/SF) with CJK coverage for translations.
+    pub fn ui() -> Font {
+        static UI: LazyLock<Font> = LazyLock::new(|| {
+            let mut fallbacks: Vec<&str> = cjk().to_vec();
+            fallbacks.push("Noto Sans");
+            stack(".SystemUIFont", &fallbacks)
+        });
+        UI.clone()
+    }
+
+    /// Monospace stack for IDs, timestamps, counts, code: JetBrains Mono when
+    /// installed, DejaVu fallback, then CJK mono for mixed content.
+    pub fn mono() -> Font {
+        static MONO: LazyLock<Font> = LazyLock::new(|| {
+            stack(
+                "JetBrains Mono",
+                &[
+                    "JetBrainsMono Nerd Font Mono",
+                    "DejaVu Sans Mono",
+                    "Noto Sans Mono CJK SC",
+                    "Noto Sans CJK SC",
+                ],
+            )
+        });
+        MONO.clone()
+    }
+
+    /// Serif stack for the editorial voice: book titles, project names, long
+    /// reading surfaces. Falls back through common serif families to CJK.
+    pub fn serif() -> Font {
+        static SERIF: LazyLock<Font> = LazyLock::new(|| {
+            let mut fallbacks: Vec<&str> =
+                vec!["Source Serif 4", "Noto Serif", "DejaVu Serif", "Liberation Serif"];
+            fallbacks.extend(cjk());
+            stack("Georgia", &fallbacks)
+        });
+        SERIF.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-"""Map workflow choices to the same validated configuration as the CLI."""
+"""Map workflow choices to validated engine configuration."""
 
 from __future__ import annotations
 

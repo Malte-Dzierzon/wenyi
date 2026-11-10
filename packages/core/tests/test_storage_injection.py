@@ -189,7 +189,7 @@ def test_domain_services_have_no_direct_state_files_or_sqlite():
     core = Path(__file__).resolve().parents[1] / "wenyi_core"
     for path in (core / "pipeline").glob("*.py"):
         if path.name == "runstore.py":
-            continue  # The explicit CLI filesystem backend.
+            continue  # The explicit filesystem backend.
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -212,6 +212,4 @@ def test_domain_services_have_no_direct_state_files_or_sqlite():
                 if isinstance(node, ast.ImportFrom)
                 else [alias.name for alias in node.names]
             )
-            assert not any(
-                module.split(".")[0] in {"wenyi_cli", "typer", "rich"} for module in modules
-            ), path
+            assert not any(module.split(".")[0] in {"rich"} for module in modules), path

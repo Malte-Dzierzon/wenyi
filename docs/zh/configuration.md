@@ -2,24 +2,20 @@
 
 [English](../configuration.md)
 
-Wenyi CLI 读取当前工作目录的 `config.yaml`。配置文件不存在时，运行 CLI 会自动创建带注释的默认文件。
+Wenyi 读取当前工作目录的 `config.yaml`。配置文件不存在时使用默认配置模板。
 
 顶层配置项为 `language`、`llm`、`segment`、`pipeline`、`output`、`honorific` 和 `paths`。未知配置项会被拒绝；已移除的设置不会自动转换为新格式。
 
-## Web/Desktop 设置与模型注册
+## Desktop 设置与模型注册
 
-CLI 继续读取 `config.yaml`。Web **总设置** 统一管理提供商连接、模型注册、默认档位与
-步骤路由，以及新项目流程默认值。Web 首次使用 `WENYI_CONFIG` 指定的文件
-（默认 `config.yaml`）初始化默认值；首次保存后改从 PostgreSQL 读取，重启后保留。
-保存 Web 设置不会改写 CLI 配置文件。API Key 仍只从服务端环境变量读取，页面只填写变量名。
+Desktop **总设置** 在独立 SQLite 工作区管理提供商连接、模型注册、默认档位与
+步骤路由，以及新项目流程默认值，从内置默认配置初始化。
+Desktop 另支持手动输入 API key：系统凭据库可用时自动保存，不可用时仅保留在
+当前会话内存，并明确提示重启后重新输入。仍可使用环境变量，详见
+[Desktop 密钥设置](desktop.md#api-密钥)；密钥不能写入配置 YAML。
 
-Desktop 在独立 SQLite 工作区使用相同设置流程，从内置默认配置初始化，而不是读取
-CLI 当前目录的配置文件，也不导入 Web 设置或项目。Desktop 另支持手动输入 API key：
-系统凭据库可用时自动保存，不可用时仅保留在当前会话内存，并明确提示重启后重新输入。
-仍可使用环境变量，详见 [Desktop 密钥设置](desktop.md#api-密钥)；密钥不能写入配置 YAML。
-
-标准翻译或精翻仅在 Web/Desktop 创建书籍项目时选择。总设置没有翻译模式或流程模板选择器，
-新请求不再支持快速出稿。创建项目时会复制通用默认配置，之后修改默认值不会重置
+标准翻译或精翻仅在 Desktop 创建书籍项目时选择。总设置没有翻译模式或流程模板选择器。
+创建项目时会复制通用默认配置，之后修改默认值不会重置
 已有项目的流程和模型选择。项目配置和 YAML 不能切换已保存的翻译方式，需创建新项目。
 已有历史项目和冻结任务仍保留原流程。
 
@@ -49,7 +45,7 @@ language:
   target: zh
 ```
 
-`source: auto` 会调用模型识别源语言；也可以显式选择下表语言。源语言与目标语言可直接互译，不经中文中转。多语言质量仍属实验性。默认 CLI、配置注释和提示词指令统一使用英语，与翻译目标独立。生成的默认配置仍为 `target: zh`；需要英语译文时选择 `en`。
+`source: auto` 会调用模型识别源语言；也可以显式选择下表语言。源语言与目标语言可直接互译，不经中文中转。多语言质量仍属实验性。配置注释和提示词指令统一使用英语，与翻译目标独立。生成的默认配置仍为 `target: zh`；需要英语译文时选择 `en`。
 
 检测请求失败与返回了不支持的语言结果会分别提示。HTTP 402 明确提示 provider 余额不足，
 需要充值或更换 provider；鉴权、限流和连接失败保留各自诊断。
@@ -68,24 +64,21 @@ language:
 | `pt`、`pt-BR`、`pt-PT`、`ru` | 葡萄牙语、巴西/欧洲葡萄牙语、俄语 |
 | `vi` | 越南语 |
 
-运行 `uv run wenyi languages` 查看内置列表，无需 API Key。`target` 不接受 `auto`；不支持的代码在配置校验时拒绝。注册的语言别名 `zh-Hans` / `zh-CN` → `zh`、`zh-TW` → `zh-Hant`、`ja-JP` → `ja`、`ko-KR` → `ko`、`vi-VN` → `vi`；已注册的地区和文字变体保留，不再截取前两个字母。
+Desktop 应用无需 API Key 即可查看内置列表。`target` 不接受 `auto`；不支持的代码在配置校验时拒绝。注册的语言别名 `zh-Hans` / `zh-CN` → `zh`、`zh-TW` → `zh-Hant`、`ja-JP` → `ja`、`ko-KR` → `ko`、`vi-VN` → `vi`；已注册的地区和文字变体保留，不再截取前两个字母。
 
-每次运行选择一个方向。例如 `source: zh`、`target: en` 直接中译英；把日语原文设为 `source: ja`、`target: en` 则直接日译英。检测或规范化后完全相同的语言会拒绝翻译。更换目标语言会建立独立状态；`prepare`、`translate`、`review`、`assemble`、`status`、`report` 和术语命令须使用对应的 `language.target`。源语言显式配置与保存值冲突时拒绝续跑。
+每次运行选择一个方向。例如 `source: zh`、`target: en` 直接中译英；把日语原文设为 `source: ja`、`target: en` 则直接日译英。检测或规范化后完全相同的语言会拒绝翻译。更换目标语言会建立独立状态。源语言显式配置与保存值冲突时拒绝续跑。
 
-提示词资源与状态隔离见[翻译流程](pipeline.md)，界面语言设置见 [Web 界面语言](web.md#界面语言)。多语言公版长篇盲评、母语审校及 RTL／排版认证仍待开展；支持界面语言不代表翻译质量已经认证。CLI 与提示词指令仍使用英语，当前没有 `ui_locale` 或 `prompt_locale` 配置字段。
+提示词资源与状态隔离见[翻译流程](pipeline.md)。多语言公版长篇盲评、母语审校及 RTL／排版认证仍待开展；支持界面语言不代表翻译质量已经认证。提示词指令仍使用英语，当前没有 `ui_locale` 或 `prompt_locale` 配置字段。
 
 ## 内置语言策略
 
-语言策略属于内置实现，定义在 `packages/core/wenyi_core/i18n/policy/` 及 `i18n/data/languages/`、`pairs/`。开发者通过修改源码中的资源、操作规格与领域实现调整策略，并更新相应测试。YAML 的 `language` 只接受 `source` 和 `target`，不提供操作覆盖或修订接受开关，网页设置也不展示策略计划。
+语言策略属于内置实现，定义在 `packages/core/wenyi_core/i18n/policy/` 及 `i18n/data/languages/`、`pairs/`。开发者通过修改源码中的资源、操作规格与领域实现调整策略，并更新相应测试。YAML 的 `language` 只接受 `source` 和 `target`，不提供操作覆盖或修订接受开关，设置界面也不展示策略计划。
 
 原文标记依据源语言，目标标点、字体与元数据依据目标语言。档案从父到子继承，精确注册的语言对绑定优先。`zh-Hant` 禁用简体中文标点规范化，说明页仍使用英文。已有 `output.punctuation_normalize`、`honorific.strategy` 与流程选项继续生效。
 
-开发者无需密钥或模型调用即可查看同一个内置解析器的结果：
-
-```bash
-uv run wenyi language-policy --source ja --format docx --backend native
-uv run wenyi language-policy --source en --subtitles --format srt
-```
+开发者无需密钥或模型调用即可通过引擎策略 API 查看同一个内置解析器的结果
+（原 `language-policy` 开发者命令）。示例：`--source ja --format docx`、
+`--source en --subtitles --format srt`。
 
 诊断显示选择、资源哈希、版本、模型路由与指纹，不修改策略。自动源语言检测在实际检测前仍未解析；通过 `--source` 查看指定方向。未知内置操作、非法参数或不可用处理器会在消耗工作前报错。
 
@@ -136,7 +129,7 @@ llm:
 - `routes.<操作>` 必须且只能选择 `{model: 配置名}` 或 `{tier: strong}`。未知操作、字段及引用在请求前报错，不再隐式回退缺失档位。
 - 覆盖预设时，按 ID 整体替换连接或模型配置，需要重复必填字段；不同模型的 options 不合并。档位和路由按各自键替换。
 - 显式 `max_output_tokens` 优先于流程的静态、动态输出提示；不设置时，梗概和注释定位沿用原有提示预算。OpenAI 兼容适配器在 thinking 开启时将低于 4,096 的提示预算提升到 4,096；显式设置更小上限则报错。实际模型限制仍取决于服务端。
-- CLI/Web 的 API Key 只从环境变量读取，Desktop 另支持系统凭据库或仅本次会话的手动输入；密钥不写入 YAML、地址或原始请求扩展。原始扩展不能覆盖模型身份、消息、流式开关、JSON 模式、密钥和输出上限。
+- API Key 只从环境变量读取，Desktop 另支持系统凭据库或仅本次会话的手动输入；密钥不写入 YAML、地址或原始请求扩展。原始扩展不能覆盖模型身份、消息、流式开关、JSON 模式、密钥和输出上限。
 
 ### 提供商选项
 
@@ -156,8 +149,8 @@ llm:
 
 SDK 内置重试统一关闭。Wenyi 统一重试连接/超时、HTTP 408/409/429、5xx 瞬时错误及空响应；退避期间释放连接并发名额，并响应取消。普通 4xx 错误不重试。PDF 默认 MinerU 解析另用 `MINERU_API_KEY`；可选 BabelDOC HTTP bridge 独立于模型路由。
 
-总设置中的 **MinerU PDF 解析**卡片独立于模型连接。Web 和 CLI 从部署/进程环境变量
-`MINERU_API_KEY` 读取密钥。Desktop 优先读取同一变量，缺失时使用该卡片手动保存的
+总设置中的 **MinerU PDF 解析**卡片独立于模型连接。`MINERU_API_KEY` 从进程环境变量
+读取。Desktop 优先读取同一变量，缺失时使用该卡片手动保存的
 系统凭据库或仅会话内存密钥。Desktop 卡片仅提供一个输入框和一个保存按钮；
 环境密钥存在时两者均禁用。保存不会改变配置 YAML 或模型注册。
 仅当未缓存的 PDF 需要 MinerU 转换时才解析凭据；已有转换 HTML 与非 PDF 输入无需密钥。
@@ -189,23 +182,17 @@ DeepSeek 的 `reasoning_effort` 可设为 `low`、`high` 或 `max`；`thinking: 
 
 ### 预览、限额与显式故障切换
 
-```bash
-uv run wenyi models list
-uv run wenyi models list --json
-uv run wenyi models explain --operation review.verify
-uv run wenyi models check --for translate
-```
+Desktop 应用的模型界面无需密钥即可预览路由（`list`/`explain` 语义），
+并只检查可达操作的密钥（`check --for prepare|translate|review|srt` 语义），
+遵守配置的阶段开关。预览与校验均不创建 SDK 客户端、不发送请求。
 
-`list` 和 `explain` 无需密钥；`check --for prepare|translate|review|srt` 只检查当前配置开关下可达操作的密钥。这三个命令均不创建 SDK 客户端、不发送请求。翻译命令先应用 CLI 流程开关，再检查密钥。
-
-需要确认 provider 实际可连通时，运行真实连通性测试：
-
-```bash
-uv run wenyi models ping --for translate
-uv run wenyi models ping --for review --timeout 10 --json
-```
-
-`ping` 向该流程可达的每个模型配置（含显式 fallback）发送一次简短请求（`max_output_tokens` 为 16；开启 thinking 时取 provider 的最低值，例如 4096）。它不重试，每次请求最长等待 `--timeout` 秒（默认 30），不计入任何运行的用量；任一配置失败时退出码为 1。失败按类别报告，例如 `authentication_failed`、`model_or_endpoint_not_found`、`connection_failed` 或 `missing_credential`，不回显 provider 响应内容。回复被截断或为空也视为可连通。
+需要确认 provider 实际可连通时，应用提供真实连通性测试（`ping` 语义）：
+向该流程可达的每个模型配置（含显式 fallback）发送一次简短请求
+（`max_output_tokens` 为 16；开启 thinking 时取 provider 的最低值，例如 4096）。
+它不重试，每次请求最长等待配置的超时（默认 30 秒），不计入任何运行的用量。
+失败按类别报告，例如 `authentication_failed`、`model_or_endpoint_not_found`、
+`connection_failed` 或 `missing_credential`，不回显 provider 响应内容。
+回复被截断或为空也视为可连通。
 
 可选本地控制示例（使用离线提供商）：
 
@@ -247,12 +234,8 @@ llm:
 
 翻译、分析、概要、SRT 模型变更会保留完成结果，仅后续请求使用新路由。可达的 Review 模型、端点、选项或协议变化会开启新 Review；无关路由、密钥轮换、别名和并发调整不会使其失效。缺少推理身份的旧 Review 缓存保留供检查，但不复用。Autofix 使用独立指纹：已写发布索引的任务按保存的候选补完；未完成的模型规划需恢复原路由后继续。
 
-旧配置和非空旧用量账本需要显式转换：
-
-```bash
-uv run wenyi models migrate-config old-config.yaml --out routed-config.yaml
-uv run wenyi models migrate-usage state/BOOK/targets/zh
-```
+旧配置和非空旧用量账本需要通过引擎迁移 API 显式转换
+（原 `models migrate-config` / `migrate-usage` 命令）。
 
 配置转换器生成独立文件；账本转换器逐份备份，保留总量及旧档位/阶段归属，将未知提供商和模型历史标记为 `unknown`，不会处理原书。转换账本前应停止该目标的运行任务。Review 目录保留。`pipeline.review_agent_tier` 由取证、仲裁、修订的独立路由取代。
 
@@ -262,15 +245,15 @@ uv run wenyi models migrate-usage state/BOOK/targets/zh
 
 `pipeline.translation_mode` 可选 `standard`（默认）或 `best_of_three`。
 精翻模式必须设置 `pipeline.polish: true`；包括项目 YAML 在内的无效组合会被拒绝。
-Web 在创建书籍项目时选择翻译模式；新项目默认 `standard`，不继承全局模式。
+Desktop 在创建书籍项目时选择翻译模式；新项目默认 `standard`，不继承全局模式。
 选择精翻会自动开启本项目润色，翻译方式在创建后固定；项目配置可调整其他字段，
 但不能关闭精翻要求的润色，恢复默认配置也保留已保存的翻译方式。
-翻译模式不属于 Web 总设置，全局 YAML 会拒绝它。SRT 不支持精翻；
+翻译模式不属于总设置，全局 YAML 会拒绝它。SRT 不支持精翻；
 项目 YAML 和换源接口也会校验这一限制，不会静默改成普通字幕翻译。
 
 精翻始终生成三份初稿，内置三分支并发，不作为用户选项。
 旧配置及冻结任务中的 `pipeline.precision_concurrency` 仍可读取，但其值会被忽略，
-新配置文档不再输出此字段，Web 新的 YAML 写入会拒绝它。随后一次综合润色对照原文，
+新配置文档不再输出此字段，新的 YAML 写入会拒绝它。随后一次综合润色对照原文，
 融合各稿有用部分并直接输出最终译文。沿用 `translation.body` 与 `polish.body`
 路由、模型配置和 provider 行为，不增加精翻专属输出 token 上限或提示。
 正常批次调用四次，标准翻译加润色调用两次。
@@ -304,7 +287,7 @@ pipeline:
   babeldoc_timeout: 600
 ```
 
-- `review`：默认开启；全书翻译完成时自动执行取证式全书审校。一键流程可用 `--no-review` 或设为 `false` 跳过。仍可显式调用 `wenyi review`。
+- `review`：默认开启；全书翻译完成时自动执行取证式全书审校。设为 `false` 可在流程中跳过；仍可从 Desktop 应用独立发起审校。
 - `align_retry_limit`：模型输出结构无效时的额外尝试次数；默认 `2` 表示连同初次请求最多尝试三次，`0` 关闭此类重试。标准翻译耗尽后回退到逐段翻译；精翻的每份初稿和综合润色使用同一预算，仅重试失败阶段并保持上下文不变，耗尽后暂停，不自动拆段。实际请求（包括失败尝试）产生模型用量；网络等传输重试仍独立处理。
 - `polish`：翻译后再调用强模型润色，质量可能提升，但显著增加耗时和成本。
 - `rolling_context_segments`：每批翻译附带的前文译文段数。翻译与润色还会内置附带同章下一条原文片段作为只读参考，此值为零时也保留后文参考；它不改变输出段数，也不写入滚动译文上下文。详见[全书理解与上下文](pipeline.md#全书理解与上下文)。
@@ -320,22 +303,21 @@ pipeline:
 - `review_fix_loop`：针对确认的问题在本次运行的影子译文中生成完整单段替换，再从头盲审全书；关闭后保持单轮、只给建议的行为。
 - `review_fix_max_rounds`：最多生成的临时 Fix 轮数，范围为 `0` 到 `4`；它不是 Review 总轮数。
 - `review_clean_confirmations`：开启影子 Fix 后，需要连续无问题的全书 Review 次数，范围为 `1` 到 `2`，默认 `2`。
-- `review_autofix`：默认开启。只读 Review 引擎结束后，先把折叠后的 `changes` 叠加到工作译文，再让每段剩余 issue 基于更新后的译文复用现有有界 Review Agent Loop，确认项继续交给现有 Review Fixer。可用 `--no-autofix` 或设为 `false`，避免写回正式 `target`。生成的完整单段译文只覆盖正式章节的 `target`，不修改 manifest 和术语库。完整前后版本链、issue ID、判定、失败原因和写回状态保存在本次 Review 的 `autofix/index.json`，不会给章节 JSON 新增历史字段。
+- `review_autofix`：默认开启。只读 Review 引擎结束后，先把折叠后的 `changes` 叠加到工作译文，再让每段剩余 issue 基于更新后的译文复用现有有界 Review Agent Loop，确认项继续交给现有 Review Fixer。设为 `false` 可避免写回正式 `target`。生成的完整单段译文只覆盖正式章节的 `target`，不修改 manifest 和术语库。完整前后版本链、issue ID、判定、失败原因和写回状态保存在本次 Review 的 `autofix/index.json`，不会给章节 JSON 新增历史字段。
 - `pdf_backend`：默认 `mineru`，经 MinerU 转 HTML。需要尽量保留版式时改用 `babeldoc`（外部 AGPL HTTP bridge）。经 BabelDOC 创建的 PDF 状态，在 `translate` 和 `assemble` 中均默认导出 PDF；MinerU 状态仍默认导出 EPUB。显式 `--format` 优先，续跑默认格式以已保存的后端为准。
 - `babeldoc_bridge_url`：BabelDOC bridge 地址，默认 `http://127.0.0.1:8765`。
 - `babeldoc_timeout`：bridge extract / fillback 的 HTTP 超时秒数。
 - `babeldoc_pages`：可选的 1-based 页码，如 `"15"` 或 `"6-8"`；省略则处理全书。
 
-`translate` 命令的 `--polish`、`--no-polish`、`--review`、`--no-review`
-会覆盖对应配置。
+润色与审校的流程覆盖可在 Desktop 应用中按操作设置。
 
 正文翻译和新 Reviewer 请求始终使用全量术语表，无范围选择开关。已有 YAML 或项目
 配置中的 `pipeline.glossary_scope` 必须删除；旧键即使取值为 `full` 也会报错。
 快照刷新、续跑行为及提示词大小取舍详见[术语库策略](pipeline.md#术语库)。
 
-可使用 `wenyi review INPUT` 独立执行最终审校。内容、配置、全量术语策略和术语库指纹
-匹配时，复用已完成结果或续跑未完成工作；否则新建 Review。默认会在影子循环后发布折叠后的修订；可用 `--no-autofix` 保持本次只读，
-或在配置关闭时用 `--autofix` 强制发布。Autofix 会先应用折叠后的 changes，再让最终未解决
+可从 Desktop 应用独立执行最终审校。内容、配置、全量术语策略和术语库指纹
+匹配时，复用已完成结果或续跑未完成工作；否则新建 Review。默认会在影子循环后发布折叠后的修订；关闭 autofix 可保持本次只读。
+Autofix 会先应用折叠后的 changes，再让最终未解决
 issues 复用同一套 Agent Loop 和 Fixer，不会另建一套 Autofix loop 或 prompt。
 统一结果和内部逐轮记录会保存到 `state/<书名>/targets/<目标语言>/reviews/review-<时间戳>/`。
 本次 Review 用量既保存为目录内增量，也会计入本书累计用量。

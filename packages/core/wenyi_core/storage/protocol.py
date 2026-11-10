@@ -1,4 +1,4 @@
-"""Persistence ports shared by CLI file storage and Web PostgreSQL storage.
+"""Persistence ports shared by file storage and SQLite storage.
 
 Domain services receive this interface. Resource directories contain uploaded originals,
 parser caches and exports; mutable workflow state must use these methods.

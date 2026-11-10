@@ -23,6 +23,7 @@ from ..project_service import (
 )
 from ..schemas import (
     AssembleEnqueued,
+    BannerUpdate,
     JobEnqueued,
     Message,
     Project,
@@ -207,6 +208,14 @@ async def resume(pid: str, chapter: int | None = None) -> dict:
         raise HTTPException(409, "Project has no resumable task")
     params = dict(previous.get("params") or {})
     return await start_job(pid, previous["kind"], params=params)
+
+@router.put("/{pid}/banner", response_model=Project)
+def update_banner(pid: str, body: BannerUpdate) -> dict:
+    """Set or clear the project's library banner (`gradient:<n>`, `cover`, `none`, null)."""
+    require_project(pid)
+    banner = (body.banner or "").strip() or None
+    dal.set_project_banner(pid, banner)
+    return require_project(pid)
 
 
 @router.delete("/{pid}", response_model=Message)

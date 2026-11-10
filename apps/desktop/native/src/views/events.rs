@@ -312,23 +312,14 @@ impl Render for EventsView {
             .gap_3()
             .p_6()
             .overflow_y_scrollbar()
+            .font(theme::fonts::ui())
             .child(
-                div()
-                    .text_xl()
-                    .font_weight(FontWeight::BOLD)
-                    .child("Event log"),
+                super::ui::page_title("Event log", None::<Div>),
             );
 
         // ErrorNotice equivalent (rendered above the card, like the source).
         if let Some(err) = &self.error {
-            col = col.child(
-                div()
-                    .p_3()
-                    .rounded_md()
-                    .bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
         let Some(events) = &self.events else {
@@ -344,25 +335,10 @@ impl Render for EventsView {
             return col;
         };
 
-        let mut card = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_4()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.border)
-            .bg(palette.card);
+        let mut card = super::ui::list_container(&palette);
 
         if self.rows.is_empty() {
-            card = card.child(
-                div()
-                    .text_sm()
-                    .text_color(palette.muted_foreground)
-                    .text_center()
-                    .py_8()
-                    .child("No events yet."),
-            );
+            card = card.child(super::ui::empty_state("No events yet.", &palette));
         } else {
             let expanded = self.expanded.clone();
             let rows = self.rows.clone();
@@ -381,7 +357,10 @@ impl Render for EventsView {
                     .items_start()
                     .gap_3()
                     .text_sm()
-                    .py_1()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(palette.separator)
                     .cursor_pointer()
                     .child(div().text_xs().text_color(palette.muted_foreground).child(timestamp))
                     .child(

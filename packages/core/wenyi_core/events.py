@@ -3,7 +3,7 @@
 The core reports progress through ``orchestrator.run(progress=cb)`` independently
 of the UI. Adapters can wrap callbacks with a :class:`ProgressEmitter`:
 
-- ``RedisEmitter`` in apps/api publishes events for the WebSocket relay.
+- ``RedisEmitter`` in wenyi_backend publishes events for the progress relay.
 
 The core has no Redis dependency; it invokes the injected progress callback.
 """

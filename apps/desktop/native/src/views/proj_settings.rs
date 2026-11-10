@@ -152,6 +152,9 @@ pub struct ProjSettingsView {
     notice: Option<String>,
     project_status: String,
     project_fmt: String,
+    project_name: String,
+    banner: Option<String>,
+    banner_saving: bool,
     editable: bool,
     effective: serde_json::Value,
     registered_models: serde_json::Value,
@@ -242,6 +245,9 @@ impl ProjSettingsView {
             notice: None,
             project_status: String::new(),
             project_fmt: String::new(),
+            project_name: String::new(),
+            banner: None,
+            banner_saving: false,
             editable: true,
             effective: serde_json::Value::Object(Default::default()),
             registered_models: serde_json::Value::Object(Default::default()),
@@ -344,9 +350,10 @@ impl ProjSettingsView {
                         view.apply_config(config);
                         view.project_status = project.project.status;
                         view.project_fmt = project.project.fmt.unwrap_or_default();
+                        view.project_name = project.project.name.clone();
+                        view.banner = project.project.banner.clone();
                         view.saved_routes = routes;
                         view.routes_error = None;
-                        view.error = None;
                         view.loaded = true;
                         view.operations = caps_raw
                             .as_ref()
@@ -417,7 +424,38 @@ impl ProjSettingsView {
         self.sync_form_widgets();
     }
 
-    /// Push programmatic effective values into the form widgets.
+    /// Persist the library banner (`gradient:<n>`, `none`, or clear to the
+    /// hash-derived default). Independent of the YAML config flow.
+    fn save_banner(&mut self, banner: Option<String>, cx: &mut Context<Self>) {
+        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+            return;
+        };
+        self.banner_saving = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let banner_ref = banner.as_deref();
+            let result = cx
+                .background_spawn(async move {
+                    crate::client::block_on(client.set_banner(&pid, banner_ref))
+                })
+                .await;
+            _ = this.update(cx, |view: &mut ProjSettingsView, cx| {
+                view.banner_saving = false;
+                match result {
+                    Ok(project) => {
+                        view.banner = project.banner;
+                        view.notice = Some("Library banner updated.".to_string());
+                    }
+                    Err(err) => {
+                        view.error = Some(format!("Could not save banner: {err}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn sync_form_widgets(&mut self) {
         self.pending_ints = [
             Some(get_i64(&self.effective, "segment", "max_tokens_per_batch", 1800).to_string()),
@@ -714,20 +752,16 @@ impl Render for ProjSettingsView {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .gap_3()
+            .w_full()
+            .max_w(px(1040.0))
+            .gap_4()
             .p_6()
             .overflow_y_scrollbar()
-            .child(div().text_xl().font_weight(FontWeight::BOLD).child("Project settings"));
+            .font(theme::fonts::ui())
+            .child(super::ui::page_title("Project settings", None::<Div>));
 
         if let Some(err) = &self.error {
-            col = col.child(
-                div()
-                    .p_3()
-                    .rounded_md()
-                    .bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
         if let Some(notice) = &self.notice {
             col = col.child(
@@ -759,6 +793,72 @@ impl Render for ProjSettingsView {
                     } else {
                         "Configuration is not editable for this project."
                     }),
+            );
+        }
+
+        // -- Library banner: deterministic default + 8 generated variants.
+        //    Stored as `gradient:<n>` / `none` / null (hash default).
+        {
+            let mut grid = div().flex().flex_wrap().gap_2();
+            let current = self.banner.clone().unwrap_or_default();
+            let options: Vec<(String, String)> = std::iter::once((
+                String::new(),
+                "Auto".to_string(),
+            ))
+            .chain((0..8).map(|n| (format!("gradient:{n}"), format!("Variant {n}"))))
+            .chain(std::iter::once(("none".to_string(), "Plain".to_string())))
+            .collect();
+            for (value, label) in options {
+                let selected = current == value
+                    || (current.is_empty()
+                        && value.is_empty());
+                let banner_value = if value.is_empty() { None } else { Some(value.clone()) };
+                let preview_banner = if value.is_empty() { None } else { Some(value.as_str()) };
+                let mut cell = div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .p_2()
+                    .rounded_sm()
+                    .border_1()
+                    .cursor_pointer()
+                    .child(super::ui::book_cover(
+                        &self.project_name,
+                        &self.pid,
+                        preview_banner,
+                        &palette,
+                    ))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(if selected {
+                                palette.foreground
+                            } else {
+                                palette.muted_foreground
+                            })
+                            .child(label),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.banner_saving {
+                            this.save_banner(banner_value.clone(), cx);
+                        }
+                    }));
+                if selected {
+                    cell = cell.border_color(palette.focus_ring);
+                } else {
+                    cell = cell.border_color(palette.border);
+                }
+                if self.banner_saving {
+                    cell = cell.opacity(0.6);
+                }
+                grid = grid.child(cell);
+            }
+            col = col.child(
+                div().flex().flex_col().gap_2().child(super::ui::section_title(
+                    "Library banner",
+                    Some("Cover shown in My projects. Auto derives a variant from the project id."),
+                )).child(grid),
             );
         }
 

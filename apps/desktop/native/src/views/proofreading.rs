@@ -407,16 +407,12 @@ impl Render for ProofreadingView {
         // lets it shrink inside the app-shell column. Tab order: search →
         // chapter buttons → segment Edit buttons → editor panel.
         let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar().child(
-            div().text_xl().font_weight(FontWeight::BOLD).child("Manual proofreading"),
+            .overflow_y_scrollbar().font(theme::fonts::ui()).child(
+            super::ui::page_title("Manual proofreading", None::<Div>),
         );
 
         if let Some(err) = &self.error {
-            col = col.child(
-                div().p_3().rounded_md().bg(palette.destructive)
-                    .text_color(palette.destructive_foreground)
-                    .child(format!("Error: {err}")),
-            );
+            col = col.child(super::ui::error_box(err, &palette));
         }
 
         // Chapter card (mirrors the source `Card`): title + search/filter row
@@ -541,16 +537,7 @@ impl Render for ProofreadingView {
                                         ),
                                     ),
                             )
-                            .child(
-                                div()
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_sm()
-                                    .bg(palette.muted)
-                                    .text_xs()
-                                    .flex_none()
-                                    .child(ch.status.clone()),
-                            )
+                            .child(super::ui::status_pill(&ch.status, &palette))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_chapter(ci, cx);
                             })),

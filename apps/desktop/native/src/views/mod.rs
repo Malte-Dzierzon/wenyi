@@ -21,6 +21,7 @@ mod sidebar;
 mod style;
 mod subtitles;
 mod toast;
+pub(crate) mod ui;
 mod widgets;
 
 pub use app::App;

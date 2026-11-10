@@ -1089,9 +1089,9 @@ impl Render for GlossaryView {
         // central table scrolls; stats footer pinned at the bottom. The page
         // keeps its scroll container so the flex chain resolves heights.
         let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar().child(
+            .overflow_y_scrollbar().font(theme::fonts::ui()).child(
             div().flex().items_center().justify_between().child(
-                div().text_xl().font_weight(FontWeight::BOLD).child("Glossary"),
+                super::ui::page_title("Glossary", None::<Div>),
             ).child(
                 div().flex().gap_2()
                     .child(

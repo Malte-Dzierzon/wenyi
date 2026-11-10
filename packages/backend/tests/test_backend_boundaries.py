@@ -27,9 +27,8 @@ SHARED_FORBIDDEN = {
         ),
         (
             "apps/desktop/backend/wenyi_desktop",
-            {"wenyi_api", "psycopg", "psycopg_pool", "redis", "arq"},
+            {"psycopg", "psycopg_pool", "redis", "arq"},
         ),
-        ("apps/api/wenyi_api", {"wenyi_desktop", "keyring"}),
         ("packages/backend/tests", SHARED_FORBIDDEN),
     ],
 )
@@ -62,7 +61,6 @@ def test_test_support_does_not_import_collected_test_modules():
     directories = (
         "packages/core/tests",
         "packages/backend/tests",
-        "apps/api/tests",
         "apps/desktop/backend/tests",
     )
     violations = []

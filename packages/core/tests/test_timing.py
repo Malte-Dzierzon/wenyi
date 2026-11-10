@@ -1,11 +1,9 @@
-"""Invocation timing, resume accounting and stage-independent CLI clocks."""
+"""Invocation timing, resume accounting and stage-independent clocks."""
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
-from wenyi_cli.cli import app
 from wenyi_core.config import Config
 from wenyi_core.llm.providers.fake import FakeClient
 from wenyi_core.pipeline.orchestrator import Orchestrator
@@ -115,9 +113,6 @@ def timed_book(tmp_path, monkeypatch):
         "wenyi_core.pipeline.runtime.RunTimer",
         lambda operation: RunTimer(operation, clock=lambda: now[0]),
     )
-    monkeypatch.setattr(
-        "wenyi_cli.commands.context.CommandContext.load_config", lambda self: config
-    )
 
     def progress(done, total, label):
         now[0] += 2.0
@@ -151,9 +146,6 @@ def test_full_workflow_counts_nested_stages_once_and_includes_export(timed_book,
     assert ledger is not None
     assert len(ledger["runs"]) == 2
     assert ledger["total_seconds"] == first_elapsed + now[0] - 10000.0
-    inspection = CliRunner().invoke(app, ["status", str(source)])
-    assert inspection.exit_code == 0, inspection.output
-    assert f"cumulative {format_duration(ledger['total_seconds'])}" in inspection.output
     orch.run_report(str(source))
     assert load_timing(run_dir) == ledger
 
@@ -204,18 +196,6 @@ def test_individual_review_and_export_record_separate_invocations(timed_book):
     assert ledger is not None
     assert [run["operation"] for run in ledger["runs"]] == ["translate", "review", "assemble"]
     assert ledger["total_seconds"] == now[0]
-
-
-def test_cli_retains_timing_summary_after_translation(timed_book, monkeypatch):
-    orch, source, now, progress = timed_book
-    monkeypatch.setattr(
-        "wenyi_core.pipeline.runtime.build_client", lambda cfg: FakeClient(handler=routing_handler)
-    )
-    result = CliRunner().invoke(app, ["translate", str(source), "--format", "txt"])
-    assert result.exit_code == 0, result.output
-    assert "Time: last run" in result.output
-    assert "cumulative" in result.output
-    assert "across 1 run." in result.output
 
 
 def test_subtitle_resume_accumulates_time_in_subtitle_state(tmp_path, monkeypatch):

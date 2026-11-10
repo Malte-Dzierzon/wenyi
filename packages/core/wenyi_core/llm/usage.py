@@ -130,7 +130,7 @@ def validate_usage(value: dict[str, Any] | None) -> dict[str, Any]:
             value.get("totals", {}).get(field, 0) for field in _USAGE_FIELDS
         ):
             return empty_usage()
-        raise ValueError("Usage ledger needs conversion; run wenyi models migrate-usage RUN_DIR")
+        raise ValueError("Usage ledger needs conversion via the engine migration API")
     if not all(isinstance(value.get(group), dict) for group in _GROUPS):
         raise ValueError("Invalid usage ledger grouping")
     if not isinstance(value.get("totals"), dict):

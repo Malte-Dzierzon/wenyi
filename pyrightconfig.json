@@ -1,20 +1,19 @@
 {
   "include": [
     "packages/core/wenyi_core",
-    "packages/cli/wenyi_cli",
+    "packages/backend/wenyi_backend",
+    "apps/desktop/backend/wenyi_desktop",
     "packages/core/tests",
-    "apps/api/wenyi_api",
-    "apps/api/tests"
+    "packages/backend/tests",
+    "apps/desktop/backend/tests"
   ],
   "exclude": [
     "**/__pycache__",
-    "**/node_modules",
     ".venv",
     "build",
     "dist",
     "output",
-    "state",
-    "packages/core/tests/test_pdf_real_fonts.py"
+    "state"
   ],
   "venvPath": ".",
   "venv": ".venv",
@@ -27,9 +26,7 @@
   "reportPrivateImportUsage": "none",
   "extraPaths": [
     "packages/core",
-    "packages/cli",
-    "packages/core/tests",
-    "apps/api",
-    "apps/api/tests"
+    "packages/backend",
+    "apps/desktop/backend"
   ]
 }
