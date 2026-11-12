@@ -532,3 +532,180 @@ async fn admit_survives_immediate_recovery_sweep() {
         handle.abort();
     }
 }
+
+#[tokio::test]
+async fn curator_task_runs_pass_and_records_state() {
+    use wenyi_core::curator::Curator;
+    use wenyi_core::glossary::{upsert_term, GlossaryTerm};
+    use wenyi_core::llm::fake::FakeClient;
+    use wenyi_core::model::{BookId, ChapterId, SegmentId};
+
+    let db = scratch_db("curator-task");
+    let conn = store::open(&db).unwrap();
+    let pid = ProjectId::new("p9").unwrap();
+    store::create_project(&conn, &pid, "p9").unwrap();
+    let book = BookId::new("b9").unwrap();
+    store::create_book(&conn, &book, &pid, 0, "B").unwrap();
+    let chapter = ChapterId::new("c9").unwrap();
+    store::create_chapter(&conn, &chapter, &book, 0, "C").unwrap();
+    let sid = SegmentId::new("s9").unwrap();
+    store::insert_segments(&conn, &chapter, &[(sid, "Wolf prowls.".to_string())]).unwrap();
+    upsert_term(
+        &conn,
+        &pid,
+        "en",
+        "zh",
+        &GlossaryTerm::new("Wolf", "狼"),
+        Some(0),
+    )
+    .unwrap();
+    drop(conn);
+    let mut rt = JobsRuntime::new(
+        db.clone(),
+        RuntimeConfig {
+            workflow_depth: 4,
+            export_depth: 4,
+            workflow_consumers: 1,
+            export_consumers: 1,
+            recovery_interval: Duration::from_secs(3600),
+            curator_interval: None,
+        },
+    );
+    let db_path = db.clone().into_os_string().into_string().unwrap();
+    rt.register(
+        "run_glossary_curator",
+        Curator::task(Curator::new("en", "zh"), move || {
+            let handler: wenyi_core::llm::fake::FakeHandler =
+                Box::new(|_, _, _| r#"{"status": "verified", "reason": "holds"}"#.to_string());
+            Box::new(FakeClient::new(Some(handler), None).unwrap())
+                as Box<dyn wenyi_core::pipeline_agents::ModelClient>
+        }),
+    );
+    let rt = Arc::new(rt);
+    let handles = Arc::clone(&rt).start().await.unwrap();
+    seed_job(&db, "p9", "glossary_curator", "jc", "rc", "{}");
+    let mut params = BTreeMap::new();
+    params.insert("db_path".to_string(), serde_json::Value::String(db_path));
+    params.insert(
+        "source_lang".to_string(),
+        serde_json::Value::String("en".to_string()),
+    );
+    params.insert(
+        "target_lang".to_string(),
+        serde_json::Value::String("zh".to_string()),
+    );
+    rt.admit(
+        &pid,
+        "glossary_curator",
+        "run_glossary_curator",
+        &JobId::new("jc").unwrap(),
+        &RunId::new("rc").unwrap(),
+        params,
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if rt.idle() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                if rt.idle() {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let conn = store::open(&db).unwrap();
+    let job = store::get_job_by_run(&conn, &RunId::new("rc").unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(job.status, "done");
+    let state = store::load_curator_state(&conn, &pid, "en", "zh").unwrap();
+    assert_eq!(state["last_pass"]["checked"], 1);
+    let term = wenyi_core::glossary::get_term(&conn, &pid, "en", "zh", "Wolf")
+        .unwrap()
+        .unwrap();
+    assert_eq!(term.mentions, 1);
+    rt.stop().await;
+    for handle in handles {
+        handle.abort();
+    }
+}
+
+/// Periodic curator sweep admits with a `db_path` param: regression test
+/// for the `curate_periodically` path that admitted with empty params, so
+/// every 5-minute pass failed with "missing its database path" on a live
+/// workspace (the manual `curator_start` path always carried `db_path`).
+#[tokio::test]
+async fn periodic_curator_sweep_carries_db_path() {
+    use wenyi_core::glossary::{upsert_term, GlossaryTerm};
+    use wenyi_core::model::{BookId, ChapterId, SegmentId};
+
+    let db = scratch_db("curator-sweep");
+    let conn = store::open(&db).unwrap();
+    let pid = ProjectId::new("ps").unwrap();
+    store::create_project(&conn, &pid, "ps").unwrap();
+    let book = BookId::new("bs").unwrap();
+    store::create_book(&conn, &book, &pid, 0, "B").unwrap();
+    let chapter = ChapterId::new("cs").unwrap();
+    store::create_chapter(&conn, &chapter, &book, 0, "C").unwrap();
+    let sid = SegmentId::new("ss").unwrap();
+    store::insert_segments(&conn, &chapter, &[(sid, "Wolf prowls.".to_string())]).unwrap();
+    upsert_term(
+        &conn,
+        &pid,
+        "en",
+        "zh",
+        &GlossaryTerm::new("Wolf", "狼"),
+        Some(0),
+    )
+    .unwrap();
+    drop(conn);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<bool>::new()));
+    let seen_task = Arc::clone(&seen);
+    let mut rt = JobsRuntime::new(
+        db.clone(),
+        RuntimeConfig {
+            workflow_depth: 4,
+            export_depth: 4,
+            workflow_consumers: 1,
+            export_consumers: 1,
+            recovery_interval: Duration::from_secs(3600),
+            curator_interval: Some(Duration::from_millis(50)),
+        },
+    );
+    // Scripted body: record whether `db_path` arrived (real curator body
+    // needs a FakeClient + full pass; the regression is the admit params).
+    rt.register(
+        "run_glossary_curator",
+        Arc::new(move |work: WorkItem, _cancel: Cancel| {
+            let seen = Arc::clone(&seen_task);
+            Box::pin(async move {
+                seen.lock()
+                    .unwrap()
+                    .push(work.params.contains_key("db_path"));
+                TaskOutcome::Done
+            })
+        }),
+    );
+    let rt = Arc::new(rt);
+    let handles = Arc::clone(&rt).start().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let got = seen.lock().unwrap().clone();
+    assert!(!got.is_empty(), "sweep admitted no pass");
+    assert!(got.iter().all(|v| *v), "sweep admitted without db_path");
+    rt.stop().await;
+    for handle in handles {
+        handle.abort();
+    }
+}

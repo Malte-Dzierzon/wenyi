@@ -221,6 +221,13 @@ static OPERATIONS: LazyLock<BTreeMap<&'static str, OperationSpec>> = LazyLock::n
             output_tokens = Some(8192),
             workflows = &["srt"]
         ),
+        op!(
+            "style.observe",
+            "Propose style profile refinements from chapter evidence",
+            tier = "cheap",
+            output_tokens = Some(2048),
+            workflows = &["translate"]
+        ),
     ];
     let mut map = BTreeMap::new();
     for spec in specs {

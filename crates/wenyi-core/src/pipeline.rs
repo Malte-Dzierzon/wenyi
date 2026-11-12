@@ -280,11 +280,15 @@ impl<'a> Pipeline<'a> {
     pub fn plan(&self, phase: &str) -> Result<PolicyPlan> {
         let best_of_three =
             self.config.pipeline.translation_mode == crate::config::TranslationMode::BestOfThree;
-        let groups = policy::task_groups(
+        let groups = policy::task_groups_full(
             phase,
             self.config.pipeline.book_understanding,
             self.config.pipeline.polish,
             best_of_three,
+            self.config.pipeline.review_agent_loop,
+            self.config.pipeline.review_conflict_arbitration,
+            self.config.pipeline.review_fix_loop,
+            self.config.pipeline.review_autofix,
         )?;
         let refs: Vec<&str> = groups.iter().map(|s| s as &str).collect();
         policy::resolve_policy(
@@ -333,8 +337,9 @@ impl<'a> Pipeline<'a> {
             .unwrap_or("")
             .to_lowercase();
         let source_hash = hash::source_sha256(input_path)?;
-        let existing = store::list_books(conn, project_id)?;
-        if let Some(book) = existing.first() {
+        // Resume: same content already imported — refresh languages and
+        // understanding, never duplicate the book.
+        if let Some(book) = store::find_book_by_source_hash(conn, project_id, &source_hash)? {
             self.src = self.config.source_lang.clone();
             self.tgt = self.config.target_lang.clone();
             let synopsis = self.ensure_understanding(conn, &book.id, &mut *progress)?;
@@ -378,8 +383,34 @@ impl<'a> Pipeline<'a> {
         }
         document.source_lang = self.src.clone();
         document.target_lang = self.tgt.clone();
-        let book_id = BookId::new(format!("book-{}", &source_hash[..16]))?;
-        store::create_book(conn, &book_id, project_id, 0, &document.title)?;
+        // Series: each distinct import becomes the next ordinal book.
+        let books = store::list_books(conn, project_id)?;
+        let ordinal = books.iter().map(|book| book.ordinal).max().unwrap_or(-1) + 1;
+        let stem = format!("book-{}", &source_hash[..16]);
+        let mut candidate = stem.clone();
+        let mut attempt = 0u32;
+        while books.iter().any(|book| book.id.as_str() == candidate) {
+            attempt += 1;
+            candidate = format!("{stem}-{attempt}");
+        }
+        let book_id = BookId::new(candidate)?;
+        store::create_book(conn, &book_id, project_id, ordinal, &document.title)?;
+        let filename = input_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("input");
+        let bytes = std::fs::metadata(input_path)
+            .map(|meta| meta.len() as i64)
+            .unwrap_or(0);
+        store::insert_source_file(
+            conn,
+            &format!("{}-src", book_id.as_str()),
+            &book_id,
+            filename,
+            &source_hash,
+            bytes,
+            &ext,
+        )?;
         for (ordinal, chapter) in document.chapters.iter().enumerate() {
             let chapter_id = ChapterId::new(format!("{}-ch{ordinal:04}", book_id.as_str()))?;
             store::create_chapter(conn, &chapter_id, &book_id, ordinal as i64, &chapter.title)?;
@@ -460,7 +491,18 @@ impl<'a> Pipeline<'a> {
         store::save_analysis(
             conn,
             &book_id,
-            &serde_json::Value::Object(analysis).to_string(),
+            &serde_json::Value::Object(analysis.clone()).to_string(),
+        )?;
+        // Series memory: first book publishes v1; later books fill only
+        // missing keys into a new version (never overwrite).
+        crate::style::seed_from_analysis(
+            conn,
+            project_id,
+            &book_id,
+            &self.src,
+            &self.tgt,
+            &analysis,
+            &analysis_plan.task_fingerprint("analyzer"),
         )?;
         let keep = self.config.pipeline.rolling_context_segments.max(0) as usize;
         let context = RollingContext::new(keep.max(40));
@@ -644,11 +686,20 @@ impl<'a> Pipeline<'a> {
             context_json.as_deref(),
             self.config.pipeline.rolling_context_segments.max(0) as usize,
         );
-        let analysis_text =
-            store::load_analysis(conn, book_id)?.unwrap_or_else(|| "{}".to_string());
-        let analysis: serde_json::Map<String, serde_json::Value> =
-            serde_json::from_str(&analysis_text).unwrap_or_default();
-        let style = Analyzer::style_brief(&analysis);
+        // One consistent style snapshot for the whole run: the profile
+        // version in force now; mid-run publishes activate next run.
+        let snapshot =
+            crate::style::snapshot_for_book(conn, project_id, book_id, &self.src, &self.tgt)?;
+        let style = if snapshot.brief.is_empty() {
+            // Legacy resume: no profile published yet (pre-Slice-5 book).
+            let analysis_text =
+                store::load_analysis(conn, book_id)?.unwrap_or_else(|| "{}".to_string());
+            let analysis: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_str(&analysis_text).unwrap_or_default();
+            Analyzer::style_brief(&analysis)
+        } else {
+            snapshot.brief.clone()
+        };
         let inputs = self.prepare_run_inputs(conn, book_id, only_chapter)?;
         let mut done = inputs.done;
         events.push(serde_json::json!({
@@ -667,6 +718,7 @@ impl<'a> Pipeline<'a> {
                 *ordinal,
                 &mut context,
                 &style,
+                snapshot.profile_version,
                 book_synopsis,
                 &mut history,
                 &inputs.source_corpus,
@@ -753,6 +805,7 @@ impl<'a> Pipeline<'a> {
         ordinal: i64,
         context: &mut RollingContext,
         style: &str,
+        style_profile_version: i64,
         book_synopsis: &str,
         history: &mut BTreeMap<(i64, i64), TranslatedEvidence>,
         source_corpus: &str,
@@ -761,7 +814,6 @@ impl<'a> Pipeline<'a> {
         total: i64,
         events: &mut Vec<serde_json::Value>,
     ) -> Result<i64> {
-        let _ = book_id;
         let chapters = store::list_chapters(conn, book_id, 0, i64::MAX)?;
         let chapter = chapters
             .iter()
@@ -793,7 +845,8 @@ impl<'a> Pipeline<'a> {
         };
         progress.emit(done, total, &label);
         let mut checkpoints = store::completed_batch_glossary_keys(conn, &chapter.id)?;
-        let mut term_snapshot = glossary::all_terms(conn, project_id, &self.src, &self.tgt)?;
+        let mut term_snapshot =
+            glossary::terms_for_book(conn, project_id, book_id, &self.src, &self.tgt)?;
         let mut term_snapshot_stale = false;
         let plan = self.plan("translation")?;
         let mut seg_base = 0usize;
@@ -810,6 +863,7 @@ impl<'a> Pipeline<'a> {
                     self.extract_batch_glossary(
                         conn,
                         project_id,
+                        book_id,
                         ordinal,
                         batch_start,
                         batch,
@@ -833,7 +887,8 @@ impl<'a> Pipeline<'a> {
                 continue;
             }
             if term_snapshot_stale {
-                term_snapshot = glossary::all_terms(conn, project_id, &self.src, &self.tgt)?;
+                term_snapshot =
+                    glossary::terms_for_book(conn, project_id, book_id, &self.src, &self.tgt)?;
             }
             let ctx_text =
                 context.render(self.config.pipeline.rolling_context_segments.max(0) as usize);
@@ -908,12 +963,13 @@ impl<'a> Pipeline<'a> {
                 }
             }
             for (position, segment) in batch.iter().enumerate() {
-                store::set_target_with_baseline(
+                store::set_target_stamped_with_baseline(
                     conn,
                     &segment.id,
                     Some(&targets[position]),
                     before_polish[position].as_deref(),
                     "translate",
+                    (style_profile_version > 0).then_some(style_profile_version),
                 )?;
             }
             context.add_targets(&targets);
@@ -931,6 +987,7 @@ impl<'a> Pipeline<'a> {
             self.extract_batch_glossary(
                 conn,
                 project_id,
+                book_id,
                 ordinal,
                 batch_start,
                 batch,
@@ -987,7 +1044,160 @@ impl<'a> Pipeline<'a> {
             None,
         )?;
         store::set_chapter_status(conn, &chapter.id, "done")?;
+        // Style observation at the chapter boundary: inspect a bounded
+        // sample of what just completed; never mutate the live profile.
+        self.observe_chapter(conn, project_id, book_id, ordinal, events)?;
+        // Curator index: reindex the completed book so new translation
+        // evidence is visible to the next pass (event-driven, no scan).
+        crate::curator::Curator::reindex_book(conn, project_id, book_id, &self.src, &self.tgt)?;
         Ok(done)
+    }
+
+    /// Observe one completed chapter and persist style proposals.
+    ///
+    /// Samples up to 12 translated segments (bounded evidence, never the
+    /// whole book), asks the cheap tier for refinements, and stores the
+    /// result as pending proposals. The live profile is untouched.
+    pub fn observe_chapter(
+        &mut self,
+        conn: &Connection,
+        project_id: &ProjectId,
+        book_id: &BookId,
+        ordinal: i64,
+        events: &mut Vec<serde_json::Value>,
+    ) -> Result<()> {
+        if !self.config.pipeline.style_observation {
+            return Ok(());
+        }
+        let snapshot =
+            crate::style::snapshot_for_book(conn, project_id, book_id, &self.src, &self.tgt)?;
+        if snapshot.profile_version == 0 || snapshot.brief.trim().is_empty() {
+            return Ok(());
+        }
+        let profile = store::latest_style_profile(conn, project_id, &self.src, &self.tgt)?;
+        let Some(profile) = profile else {
+            return Ok(());
+        };
+        let chapters = store::list_chapters(conn, book_id, 0, i64::MAX)?;
+        let Some(chapter) = chapters.into_iter().find(|c| c.ordinal == ordinal) else {
+            return Ok(());
+        };
+        let segments = store::list_segments(conn, &chapter.id, 0, i64::MAX)?;
+        let done: Vec<&store::Segment> = segments
+            .iter()
+            .filter(|s| {
+                !s.source.trim().is_empty()
+                    && s.target.as_ref().is_some_and(|t| !t.trim().is_empty())
+            })
+            .collect();
+        if done.is_empty() {
+            return Ok(());
+        }
+        // Bounded sample: first, middle spread, last (max 12 segments).
+        let sample: Vec<&&store::Segment> = if done.len() <= 12 {
+            done.iter().collect()
+        } else {
+            let mut picked = vec![&done[0]];
+            let step = (done.len() - 1) as f64 / 11.0;
+            for slot in 1..11 {
+                picked.push(&done[crate::curator::bankers_round(slot as f64 * step) as usize]);
+            }
+            picked.push(&done[done.len() - 1]);
+            picked
+        };
+        let evidence_text = sample
+            .iter()
+            .map(|s| {
+                format!(
+                    "- ch{ordinal} seg{}: {} => {}",
+                    s.ordinal,
+                    s.source.trim(),
+                    s.target.as_deref().unwrap_or_default().trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let plan = self.plan("analysis")?;
+        let analyzer = Analyzer::new(&self.src, &self.tgt, plan, &self.config);
+        let proposals = analyzer.observe(
+            self.client,
+            profile.version,
+            &snapshot.brief,
+            &evidence_text,
+        );
+        if !proposals.is_empty() {
+            self.record_metered("style.observe", "cheap");
+        }
+        let current: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&profile.profile_json).unwrap_or_default();
+        let references = sample
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "book_id": book_id.as_str(),
+                    "chapter": ordinal,
+                    "segment": s.ordinal,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut stored = 0usize;
+        for (property, after, reason, confidence, scope) in proposals {
+            let before = current
+                .get(&property)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let after_value = serde_json::Value::String(after);
+            if before == after_value {
+                continue;
+            }
+            if scope == "book" {
+                // Book-scoped: fold low-risk local notes into the pinned
+                // overrides directly; high-confidence series-grade changes
+                // still go through proposals below.
+                if confidence < 0.7 {
+                    let mut held: serde_json::Map<String, serde_json::Value> =
+                        store::load_book_style_override(conn, book_id, &self.src, &self.tgt)?
+                            .filter(|held| held.profile_version == profile.version)
+                            .and_then(|held| serde_json::from_str(&held.overrides_json).ok())
+                            .unwrap_or_default();
+                    held.insert(property.clone(), after_value.clone());
+                    let overrides = serde_json::Value::Object(held).to_string();
+                    store::save_book_style_override(
+                        conn,
+                        book_id,
+                        &self.src,
+                        &self.tgt,
+                        profile.version,
+                        &overrides,
+                    )?;
+                    stored += 1;
+                    continue;
+                }
+            }
+            store::save_style_proposal(
+                conn,
+                project_id,
+                &self.src,
+                &self.tgt,
+                if scope == "book" { Some(book_id) } else { None },
+                &property,
+                &before.to_string(),
+                &after_value.to_string(),
+                &reason,
+                confidence,
+                &serde_json::Value::Array(references.clone()).to_string(),
+                &profile.prompt_version,
+            )?;
+            stored += 1;
+        }
+        events.push(serde_json::json!({
+            "event": "style_observed",
+            "chapter": ordinal,
+            "profile_version": profile.version,
+            "evidence_segments": sample.len(),
+            "proposals": stored,
+        }));
+        Ok(())
     }
 
     /// Extract + align + store terms for one batch (oracle
@@ -997,6 +1207,7 @@ impl<'a> Pipeline<'a> {
         &mut self,
         conn: &Connection,
         project_id: &ProjectId,
+        book_id: &BookId,
         ordinal: i64,
         batch_start: usize,
         batch: &[&store::Segment],
@@ -1010,7 +1221,7 @@ impl<'a> Pipeline<'a> {
             .collect::<Vec<_>>()
             .join("\n");
         // Read fresh targets (just persisted above).
-        let chapter = store::list_chapters(conn, &self.book_of(conn, project_id)?, 0, i64::MAX)?
+        let chapter = store::list_chapters(conn, book_id, 0, i64::MAX)?
             .into_iter()
             .find(|chapter| chapter.ordinal == ordinal)
             .ok_or_else(|| Error::NotFound {
@@ -1038,19 +1249,6 @@ impl<'a> Pipeline<'a> {
             Some(existing_terms),
         )?;
         Ok(())
-    }
-
-    /// Resolve the single book of a one-book project (Slice 4 scope).
-    fn book_of(&self, conn: &Connection, project_id: &ProjectId) -> Result<BookId> {
-        let books = store::list_books(conn, project_id)?;
-        books
-            .into_iter()
-            .next()
-            .map(|book| book.id)
-            .ok_or_else(|| Error::NotFound {
-                kind: "book",
-                id: project_id.as_str().to_string(),
-            })
     }
 
     /// Extract, align with first occurrences, and store (oracle

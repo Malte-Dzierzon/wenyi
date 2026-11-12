@@ -88,9 +88,10 @@ Language policies are implementation details defined in `packages/core/wenyi_cor
 
 Source markup follows the source language; target punctuation, font and metadata follow the target. Profiles inherit root-to-leaf and exact registered language-pair bindings take precedence. `zh-Hant` disables the Simplified Chinese normalizer and retains the English about-page fallback. Existing `output.punctuation_normalize`, `honorific.strategy` and workflow options remain authoritative.
 
-Developers can inspect the same built-in resolver without credentials or model calls through the
-engine's policy API (previously the `language-policy` developer command). Example inspections:
-`--source ja --format docx`, `--source en --subtitles --format srt`.
+Developers can inspect the same built-in resolver without credentials or model calls through
+`Config.language_policy_preview()`. For example,
+`Config(source_lang="ja", target_lang="en").language_policy_preview(format="docx")` resolves the
+book export plan, while `language_policy_preview(path="srt")` resolves the subtitle plan.
 
 On resume, changed semantic policies automatically rebuild affected chapter/style/synopsis analysis before pending work continues. Missing policy identities also require rebuilding derived analysis. Completed targets and glossary remain saved; unchanged task caches are reused, and interrupted rebuilds resume safely. Rebuilding analysis may make model calls. SRT preserves completed cues and ignores incompatible pending-window caches. Font, ruby and export punctuation changes require only a fresh export; Review uses a new policy-bound session. Export fingerprints bind the actual format/backend and consistent source/target snapshot.
 
@@ -103,7 +104,7 @@ llm:
   preset: deepseek
 ```
 
-This preset expands to connection `default`, profiles `default_strong`, `default_cheap`, and `default_fast`, and all three tier mappings. Its product defaults are `https://api.deepseek.com`, `DEEPSEEK_API_KEY`, `deepseek-flash` for all three tiers, with thinking enabled and `reasoning_effort: high`. The model ID and reasoning defaults follow the [DeepSeek API documentation](https://api-docs.deepseek.com/api/create-chat-completion/). The tiers retain independent mappings for later overrides; presets do not query remote capabilities. `preset: gemini` and `preset: fake` are also available; fake is offline.
+This preset expands to connection `default`, profiles `default_strong`, `default_cheap`, and `default_fast`, and all three tier mappings. Its product defaults are `https://api.deepseek.com`, `DEEPSEEK_API_KEY`, `deepseek-flash` for all three tiers, with thinking enabled and `reasoning_effort: high`. The model ID and reasoning defaults follow the [DeepSeek API documentation](https://api-docs.deepseek.com/api/create-chat-completion/). The tiers retain independent mappings for later overrides; presets do not query remote capabilities. `preset: gemini`, `preset: llamacpp`, and `preset: fake` are also available; fake is offline. The llama.cpp preset points at `http://127.0.0.1:8093/v1` with local `lokal27b` (strong) and `lokal9b` (cheap/fast) profiles.
 
 For independent polishing and evidence verification:
 
@@ -153,6 +154,7 @@ Replace `YOUR_EDITOR_MODEL` with a model supported by your endpoint. Other opera
 | `openai-compatible` | Explicit `base_url`; optional `api_key_env`; `reasoning_style` | `thinking`, `reasoning_effort`, `json_response_fallback`, `request_overrides` |
 | `orcarouter` | `https://api.orcarouter.ai/v1`; `ORCAROUTER_API_KEY`; `reasoning_style` | Same as `openai-compatible` |
 | `ollama`, `vllm` | `http://localhost:11434/v1`, `http://localhost:8000/v1`; optional credentials; `reasoning_style` | Same as `openai-compatible` |
+| `llamacpp` | `http://127.0.0.1:8093/v1`; optional credentials; `reasoning_style`; preset `lokal27b` / `lokal9b` | Same as `openai-compatible` |
 | `fake` | No network or credentials | No provider options |
 
 Compatible endpoints accept `reasoning_style: none` (default), `deepseek`, `openai`, or `openrouter`. `json_response_fallback: reasoning_content` is an explicit option for gateways placing JSON there; the default is `none`, and non-JSON reasoning is never accepted. Gemini thinking level and thinking budget are mutually exclusive. Raw extension dictionaries are endpoint-specific; offline validation cannot prove a remote model supports them.
@@ -178,13 +180,14 @@ DeepSeek accepts `reasoning_effort: low`, `high`, or `max`; `thinking: false` ex
 |---|---|---|
 | `language.detect` | `cheap` | Detect source language |
 | `analysis.style` | `strong` | Analyze style, characters and seed glossary |
-| `synopsis.chapter` | `fast` | Chapter digest; 600-token hint |
-| `synopsis.book` | `fast` | Book synopsis; 1,200-token hint |
+| `synopsis.chapter` | `fast` | Chapter digest; 8,192-token hint |
+| `synopsis.book` | `fast` | Book synopsis; 8,192-token hint |
 | `translation.body` | `strong` | Body translation and alignment recovery |
 | `translation.title` | `strong` | Chapter and TOC titles |
 | `polish.body` | `strong` | Prose polishing |
 | `glossary.extract` | `fast` | Glossary extraction |
 | `glossary.align_history` | `fast` | Earlier translation alignment |
+| `glossary.curate` | `cheap` | Review one glossary term against book evidence |
 | `annotation.align` | `cheap` | Annotation alignment; dynamic output hint |
 | `review.scan` | `cheap` | Initial and blind review |
 | `review.verify` | `strong` | Evidence verification |
@@ -256,14 +259,14 @@ Use isolated public-domain fixtures before choosing a mixed-model setup. No new 
 
 ## Pipeline
 
-Precision mode requires `pipeline.polish: true`; invalid combinations are rejected,
-including project YAML settings. In the app, choose the translation mode
-when creating a book project; new projects default to `standard`, independently of
-global settings. Selecting precision enables polishing for that project. Its mode is
-fixed at creation; project settings can adjust other fields but cannot disable the
-polishing required by precision. Restoring defaults also preserves the saved mode.
-Translation mode is not a global setting; global YAML rejects it. SRT does not
-support precision; project YAML and source replacement enforce this boundary.
+Engine and per-project configuration accept `pipeline.translation_mode`; the Desktop global
+settings file rejects it. Precision mode requires `pipeline.polish: true`; invalid combinations
+are rejected, including project YAML settings. In the app, choose the translation mode when
+creating a book project; new projects default to `standard`, independently of global settings.
+Selecting precision enables polishing for that project. Its mode is fixed at creation; project
+settings can adjust other fields but cannot disable the polishing required by precision.
+Restoring defaults also preserves the saved mode. SRT does not support precision; project YAML
+and source replacement enforce this boundary.
 
 Precision always creates three drafts with built-in three-branch concurrency; it is
 not a user option. Existing configurations and frozen jobs containing the retired
@@ -288,6 +291,7 @@ pipeline:
   polish: true
   rolling_context_segments: 6
   book_understanding: true
+  style_observation: true
   prescan_concurrency: 4
   annotation_alignment: true
   annotation_alignment_concurrency: 4
@@ -310,6 +314,7 @@ pipeline:
 - `polish`: run the strong model over translated batches again for style. This may improve quality but significantly increases runtime and cost.
 - `rolling_context_segments`: number of recent translated segments included with each translation batch. Translation and polishing also receive one following source segment from the same chapter as a read-only reference, including when this setting is zero. This built-in lookahead does not change output counts or saved translation context; see [whole-book context](pipeline.md#whole-book-understanding-and-context).
 - `book_understanding`: prescan the book to create chapter digests and a whole-book synopsis. Chapters with source text require a usable digest before body translation; synopsis synthesis failures allow translation to continue. Failed digests are retried on the next prepare/translate run. See [Pipeline](pipeline.md) for retry and cache behavior.
+- `style_observation`: enabled by default. After each chapter completes, sample up to 12 translated segments and ask the cheap tier for style refinements, stored as pending proposals or pinned book overrides. The live profile never changes mid-run; disable to save cost.
 - `prescan_concurrency`: number of chapter-digest requests that may run concurrently.
 - `annotation_alignment`: enabled by default. After each annotated logical paragraph has been fully translated and polished, immediately locate EPUB footnote/endnote links with one sequential model call against the formal target. If export punctuation normalization is enabled, the export layer remaps the persisted offsets together with the normalized in-memory copy. Split continuations are rejoined first, and segments without internal links do not call the model. When disabled, translated links remain clickable but fall back to end-of-paragraph markers; untranslated text and the source side of bilingual output retain the original link positions. This option controls link placement only; resolved source-language note content is supplied to translation automatically.
 - `annotation_alignment_concurrency`: when a paragraph carries more than one annotation, each annotation is aligned through its own independent, concurrently issued request instead of asking one call to place every marker at once (a single mistake used to invalidate the whole paragraph's markers, which is why heavily annotated books tended to fall back to end-of-paragraph placement far more often). This caps how many of those per-annotation requests may run at once for a single paragraph.
@@ -381,7 +386,7 @@ paths:
   state_dir: state
 ```
 
-- `max_tokens_per_batch`: source-token budget for one model translation request, counted with tiktoken `cl100k_base` (a universal estimator, not the live provider tokenizer). Scale it to your smallest model: prompt overhead (synopsis, glossary, context, ~5k tokens) rides on top, so `batch + 5000 + max_output` must fit `max_input_tokens`. Large-context models (beam-free: millions) can take 8000+; local 8k models should stay at 1200-1800. Saving rejects batches that already exceed the smallest configured input limit.
+- `max_tokens_per_batch`: source-token budget for one model translation request, counted with tiktoken `cl100k_base` (a universal estimator, not the live provider tokenizer). Scale it to your smallest model: prompt overhead (synopsis, glossary, context, ~5k tokens) rides on top, so `batch + 5000 + max_output` must fit `max_input_tokens`. Large-context models (millions of tokens) can take 8000+; local 8k models should stay at 1200-1800. Saving rejects batches that already exceed the smallest configured input limit.
 - `max_tokens_per_segment`: token threshold for splitting an exceptionally long source paragraph at sentence boundaries.
 - `honorific.strategy`: Japanese-source honorific policy: `keep_style`, `normalize`, or `drop`.
 - `state_dir`: location of book checkpoints, chapter files, the glossary database, usage data, and reports. Subtitle runs store a separate tree at `<state_dir>/srt/<slug>/targets/<target-language>/` (manifest, cues, batches, usage, events) and never create a glossary or review directory.

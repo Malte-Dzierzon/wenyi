@@ -152,7 +152,7 @@ llm:
     default_strong: {provider: default, model: p}
     default_cheap: {provider: default, model: f}
 segment: {max_tokens_per_batch: 1800}
-pipeline: {review: false, review_autofix: false, polish: true}
+pipeline: {review: false, review_autofix: false, polish: true, style_observation: false}
 "#,
     )
     .unwrap()
@@ -449,4 +449,35 @@ fn glossary_seeds_and_extracts() {
             chapter.title
         );
     }
+}
+
+#[test]
+fn second_import_becomes_next_book_and_same_hash_resumes() {
+    let db = temp_db("series");
+    let conn = store::open(&db).unwrap();
+    let project = ProjectId::new("test-series").unwrap();
+    store::create_project(&conn, &project, "Test").unwrap();
+    let mut fake = FakeClient::new(Some(handler()), None).unwrap();
+    let mut pipeline = Pipeline::new(fake_config(), &mut fake);
+    let input = db.parent().unwrap().join("novel.txt");
+    let (book_a, _) = pipeline
+        .prepare(&conn, &project, &input, &mut Progress::none())
+        .unwrap();
+    // Same content again: resume, no duplicate book.
+    let (book_a2, _) = pipeline
+        .prepare(&conn, &project, &input, &mut Progress::none())
+        .unwrap();
+    assert_eq!(book_a, book_a2);
+    assert_eq!(store::list_books(&conn, &project).unwrap().len(), 1);
+    // Distinct content: second book at ordinal 1.
+    let other = db.parent().unwrap().join("other.txt");
+    std::fs::write(&other, "# Other\n\nDifferent words here.\n").unwrap();
+    let (book_b, _) = pipeline
+        .prepare(&conn, &project, &other, &mut Progress::none())
+        .unwrap();
+    assert_ne!(book_a, book_b);
+    let books = store::list_books(&conn, &project).unwrap();
+    assert_eq!(books.len(), 2);
+    assert_eq!(books[1].id, book_b);
+    assert_eq!(books[1].ordinal, 1);
 }

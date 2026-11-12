@@ -17,9 +17,16 @@
 //!   the lead's job); [`system_is_dark`] reads the OS appearance via
 //!   `gpui_kit::App::window_appearance`.
 
-use gpui_kit::{FontWeight, Hsla, Pixels, hsla, px};
+use gpui_kit::{hsla, px, FontWeight, Hsla, Pixels};
 use serde::{Deserialize, Serialize};
-use std::{env, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, LazyLock, Mutex}};
+use std::{
+    env,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        LazyLock, Mutex,
+    },
+};
 
 /// Convert an HSL triplet (h in degrees, s/l in 0..1) to GPUI Hsla.
 fn hsl(h: f32, s: f32, l: f32) -> Hsla {
@@ -30,7 +37,10 @@ fn hsl(h: f32, s: f32, l: f32) -> Hsla {
 fn hsla_deg(h: f32, s: f32, l: f32, a: f32) -> Hsla {
     hsla(h / 360.0, s, l, a)
 }
-
+// Staged semantic roles (`accent`, `input`, on-fill foregrounds, `overlay`):
+// mirrors of the shadcn roles for badge/dialog follow-ups. Allowed until
+// those surfaces read them.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     // --- shadcn base roles (stable; values match index.css) ---
@@ -323,7 +333,10 @@ impl Default for ThemeChoice {
     /// Light-first default: the original web design is light (`:root`);
     /// dark/Noctalia remain available in Interface settings.
     fn default() -> Self {
-        Self { mode: ThemeMode::Light, accent: Accent::Blue }
+        Self {
+            mode: ThemeMode::Light,
+            accent: Accent::Blue,
+        }
     }
 }
 impl ThemeChoice {
@@ -334,8 +347,8 @@ impl ThemeChoice {
             _ => Palette::with_accent(self.mode.resolve_dark(system_dark), self.accent),
         }
     }
-
-    /// Concrete palette for this choice using the live OS appearance.
+    // Staged for App wiring (live-OS palette resolve). Allowed until wired.
+    #[allow(dead_code)]
     pub fn palette_live(&self, cx: &gpui_kit::App) -> Palette {
         self.palette(system_is_dark(cx))
     }
@@ -355,7 +368,10 @@ pub fn choice_file_path() -> PathBuf {
         return PathBuf::from(xdg).join("wenyi").join("theme.json");
     }
     if let Some(home) = env::var_os("HOME") {
-        return PathBuf::from(home).join(".config").join("wenyi").join("theme.json");
+        return PathBuf::from(home)
+            .join(".config")
+            .join("wenyi")
+            .join("theme.json");
     }
     PathBuf::from("wenyi-theme.json")
 }
@@ -386,10 +402,14 @@ pub fn save_choice(choice: &ThemeChoice) -> std::io::Result<()> {
 /// via the xdg portal); no fallback needed — unknown appearances report light.
 pub fn system_is_dark(cx: &gpui_kit::App) -> bool {
     use gpui_kit::WindowAppearance as Appearance;
-    matches!(cx.window_appearance(), Appearance::Dark | Appearance::VibrantDark)
+    matches!(
+        cx.window_appearance(),
+        Appearance::Dark | Appearance::VibrantDark
+    )
 }
-
-/// Convenience for App wiring: resolve + build the palette in one call.
+// Staged for App wiring (resolve + build the palette in one call). Allowed
+// until wired.
+#[allow(dead_code)]
 pub fn palette_for(choice: &ThemeChoice, cx: &gpui_kit::App) -> Palette {
     choice.palette_live(cx)
 }
@@ -430,8 +450,10 @@ pub fn current_system_dark() -> bool {
 pub fn current_palette() -> Palette {
     current_choice().palette(current_system_dark())
 }
-
-// ---------- Noctalia palette loading ----------
+// `black`/`magenta`/`cyan`/`white` + `bright` carry the full terminal shape
+// of the Noctalia file (the regression test pins the shape). Allowed: they
+// are parse-only slots today.
+#[allow(dead_code)]
 #[derive(Deserialize, Default)]
 struct NoctaliaTermColors {
     #[serde(default)]
@@ -451,7 +473,7 @@ struct NoctaliaTermColors {
     #[serde(default)]
     white: Option<String>,
 }
-
+#[allow(dead_code)]
 #[derive(Deserialize, Default)]
 struct NoctaliaTerminal {
     #[serde(default)]
@@ -511,7 +533,10 @@ fn hex_to_hsla(s: &str) -> Option<Hsla> {
 
 fn noctalia_palette_path() -> Option<PathBuf> {
     let home = env::var_os("HOME")?;
-    let dir = PathBuf::from(home).join(".config").join("noctalia").join("palettes");
+    let dir = PathBuf::from(home)
+        .join(".config")
+        .join("noctalia")
+        .join("palettes");
     let haven = dir.join("Haven.json");
     if haven.is_file() {
         return Some(haven);
@@ -574,7 +599,7 @@ pub fn load_noctalia_palette() -> Option<Palette> {
         .as_deref()
         .and_then(hex_to_hsla)
         .unwrap_or(primary);
-    let tertiary = d
+    let _tertiary = d
         .m_tertiary
         .as_deref()
         .and_then(hex_to_hsla)
@@ -584,12 +609,12 @@ pub fn load_noctalia_palette() -> Option<Palette> {
         .as_deref()
         .and_then(hex_to_hsla)
         .unwrap_or(on_surface);
-    let on_tertiary = d
+    let _on_tertiary = d
         .m_on_tertiary
         .as_deref()
         .and_then(hex_to_hsla)
         .unwrap_or(on_surface);
-    let on_hover = d
+    let _on_hover = d
         .m_on_hover
         .as_deref()
         .and_then(hex_to_hsla)
@@ -649,7 +674,8 @@ pub fn load_noctalia_palette() -> Option<Palette> {
         info,
         info_foreground: surface,
         separator,
-        overlay: hex_to_hsla(d.m_shadow.as_deref().unwrap_or("#000000")).unwrap_or(hsl(0.0, 0.0, 0.0)),
+        overlay: hex_to_hsla(d.m_shadow.as_deref().unwrap_or("#000000"))
+            .unwrap_or(hsl(0.0, 0.0, 0.0)),
         accent_soft: hover,
     })
 }
@@ -663,14 +689,19 @@ pub struct TypeToken {
     pub size: Pixels,
     pub weight: FontWeight,
 }
-
-/// Typography scale.
+// Staged typography/icon/layout/spacing scales (`h1`/`body`/`label`,
+// `icon::*`, `layout::*`, `space`): shared tokens for upcoming screens.
+// Allowed until those screens consume them.
+#[allow(dead_code)]
 pub mod text {
     use super::TypeToken;
-    use gpui_kit::{FontWeight, px};
+    use gpui_kit::{px, FontWeight};
 
     fn token(size: f32, weight: FontWeight) -> TypeToken {
-        TypeToken { size: px(size), weight }
+        TypeToken {
+            size: px(size),
+            weight,
+        }
     }
 
     /// View title (current views use `.text_xl()` ≈ 20px bold; prefer semibold).
@@ -702,10 +733,9 @@ pub mod text {
         token(12.0, FontWeight::NORMAL)
     }
 }
-
-/// Icon sizes (Lucide, 1px stroke at these boxes).
+#[allow(dead_code)]
 pub mod icon {
-    use gpui_kit::{Pixels, px};
+    use gpui_kit::{px, Pixels};
 
     pub fn xs() -> Pixels {
         px(12.0)
@@ -724,10 +754,9 @@ pub mod icon {
         px(24.0)
     }
 }
-
-/// Shell layout constants (4px-base multiples).
+#[allow(dead_code)]
 pub mod layout {
-    use gpui_kit::{Pixels, px};
+    use gpui_kit::{px, Pixels};
 
     /// Sidebar width (Zed's is ~240-300 depending on density).
     pub fn sidebar_width() -> Pixels {
@@ -746,7 +775,7 @@ pub mod layout {
         px(32.0)
     }
 }
-
+#[allow(dead_code)]
 /// Spacing scale — `tailwind.preset.js` pxScale (`key * 4px`).
 pub fn space(key: u32) -> Pixels {
     px((key * 4) as f32)
@@ -754,8 +783,7 @@ pub fn space(key: u32) -> Pixels {
 
 /// Radius scale — `--radius: 8px`; sm/md/lg per preset.
 ///
-/// Zed-style default is 6px ([`radius::md`]) for controls/cards; keep `lg`/`xl`
-/// for sheets and window chrome.
+#[allow(dead_code)]
 pub mod radius {
     use gpui_kit::{px, Pixels};
 
@@ -784,9 +812,8 @@ pub mod radius {
 /// fallback stack per text run. Naming the stack explicitly keeps CJK lookups
 /// on the font cache: `Noto Sans CJK SC` covers Simplified Chinese, TC/JP/KR
 /// spellings resolve to the same installed files on most desktops.
-///
-/// Each stack is a lazily-built [`gpui_kit::Font`]; views apply it once at
-/// the page root (`.font(fonts::ui())`) so the whole subtree inherits it.
+/// Staged CJK mono stack for timestamps/counts. Allowed until wired.
+#[allow(dead_code)]
 pub mod fonts {
     use std::sync::LazyLock;
 
@@ -806,7 +833,12 @@ pub mod fonts {
 
     /// CJK fallback chain shared by all stacks.
     fn cjk() -> [&'static str; 4] {
-        ["Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans CJK KR"]
+        [
+            "Noto Sans CJK SC",
+            "Noto Sans CJK TC",
+            "Noto Sans CJK JP",
+            "Noto Sans CJK KR",
+        ]
     }
 
     /// Default UI stack: system UI + CJK. Resolves to the desktop's UI font
@@ -841,8 +873,12 @@ pub mod fonts {
     /// reading surfaces. Falls back through common serif families to CJK.
     pub fn serif() -> Font {
         static SERIF: LazyLock<Font> = LazyLock::new(|| {
-            let mut fallbacks: Vec<&str> =
-                vec!["Source Serif 4", "Noto Serif", "DejaVu Serif", "Liberation Serif"];
+            let mut fallbacks: Vec<&str> = vec![
+                "Source Serif 4",
+                "Noto Serif",
+                "DejaVu Serif",
+                "Liberation Serif",
+            ];
             fallbacks.extend(cjk());
             stack("Georgia", &fallbacks)
         });
@@ -892,11 +928,20 @@ mod tests {
 
     #[test]
     fn choice_mode_resolution() {
-        let dark = ThemeChoice { mode: ThemeMode::Dark, accent: Accent::Green };
+        let dark = ThemeChoice {
+            mode: ThemeMode::Dark,
+            accent: Accent::Green,
+        };
         assert!(dark.mode.resolve_dark(false));
-        let light = ThemeChoice { mode: ThemeMode::Light, accent: Accent::Green };
+        let light = ThemeChoice {
+            mode: ThemeMode::Light,
+            accent: Accent::Green,
+        };
         assert!(!light.mode.resolve_dark(true));
-        let sys = ThemeChoice { mode: ThemeMode::System, accent: Accent::Blue };
+        let sys = ThemeChoice {
+            mode: ThemeMode::System,
+            accent: Accent::Blue,
+        };
         assert!(sys.mode.resolve_dark(true));
         assert!(!sys.mode.resolve_dark(false));
         // Resolved palettes match the direct constructors' roles.
@@ -904,14 +949,20 @@ mod tests {
         // Light keeps the original `:root` near-black primary (white text);
         // the accent only tints focus/selection washes.
         assert_eq!(light.palette(true).primary, Palette::light().primary);
-        assert_eq!(light.palette(true).primary_foreground, Palette::light().primary_foreground);
+        assert_eq!(
+            light.palette(true).primary_foreground,
+            Palette::light().primary_foreground
+        );
         assert_eq!(light.palette(true).focus_ring, Accent::Green.base(false));
         assert_eq!(light.palette(true).selection, Accent::Green.soft(false));
     }
 
     #[test]
     fn choice_serde_round_trip() {
-        let choice = ThemeChoice { mode: ThemeMode::Dark, accent: Accent::Amber };
+        let choice = ThemeChoice {
+            mode: ThemeMode::Dark,
+            accent: Accent::Amber,
+        };
         let raw = serde_json::to_string(&choice).unwrap();
         assert_eq!(serde_json::from_str::<ThemeChoice>(&raw).unwrap(), choice);
         // Corrupt config falls back to default instead of erroring.
@@ -927,7 +978,10 @@ mod tests {
         let prev = env::var_os(key);
         let dir = env::temp_dir().join(format!("wenyi-theme-test-{}", std::process::id()));
         env::set_var(key, &dir);
-        let choice = ThemeChoice { mode: ThemeMode::Dark, accent: Accent::Amber };
+        let choice = ThemeChoice {
+            mode: ThemeMode::Dark,
+            accent: Accent::Amber,
+        };
         let result = save_choice(&choice).map(|_| load_choice());
         let _ = std::fs::remove_dir_all(&dir);
         match prev {
@@ -937,4 +991,3 @@ mod tests {
         assert_eq!(result.unwrap(), choice);
     }
 }
-

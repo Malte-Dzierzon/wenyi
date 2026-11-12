@@ -6,16 +6,16 @@
 //!   (langs → target, fmt, created date)
 //! - States: loading / empty / error / busy-delete (spinner on the row)
 
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Disableable, StyledExt};
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
-use gpui_kit::*;
 use crate::{
-    client::{is_project_busy, Client, Project},
+    service::{is_project_busy, Project, ServiceHandle},
     theme,
 };
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::Disableable;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
 
 use super::ui;
 /// Display the `created_at` timestamp as a plain date. ISO `YYYY-MM-DD…`
@@ -27,15 +27,20 @@ fn display_date(raw: &str) -> String {
     if trimmed.len() >= 10
         && trimmed.as_bytes()[4] == b'-'
         && trimmed.as_bytes()[7] == b'-'
-        && trimmed[..10].chars().all(|c| c.is_ascii_digit() || c == '-')
+        && trimmed[..10]
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '-')
     {
         return trimmed[..10].to_string();
     }
     trimmed.to_string()
 }
 
+/// Project-open callback (sidebar card click).
+type OnOpen = Option<std::rc::Rc<dyn Fn(Project, &mut Window, &mut App)>>;
+
 pub struct Dashboard {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     projects: Option<Vec<Project>>,
     error: Option<String>,
     deleting: Option<String>,
@@ -44,7 +49,7 @@ pub struct Dashboard {
     /// panel state remains.
     confirm_delete: Option<Project>,
     /// Called when a card body is clicked — mirrors the overlay `<Link>`.
-    on_open: Option<std::rc::Rc<dyn Fn(Project, &mut Window, &mut App)>>,
+    on_open: OnOpen,
     /// Whether this screen is currently shown. The App shell sets it on
     /// navigation; the 5s poll timer only re-arms while visible.
     visible: bool,
@@ -53,7 +58,7 @@ pub struct Dashboard {
 impl Dashboard {
     pub fn new() -> Self {
         Self {
-            client: None,
+            service: None,
             projects: None,
             error: None,
             deleting: None,
@@ -63,15 +68,12 @@ impl Dashboard {
         }
     }
 
-    pub fn on_open(
-        mut self,
-        f: impl Fn(Project, &mut Window, &mut App) + 'static,
-    ) -> Self {
+    pub fn on_open(mut self, f: impl Fn(Project, &mut Window, &mut App) + 'static) -> Self {
         self.on_open = Some(std::rc::Rc::new(f));
         self
     }
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client);
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service);
         self.refresh(cx);
     }
 
@@ -88,14 +90,12 @@ impl Dashboard {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         cx.spawn(async move |this, cx| {
-            // reqwest needs Tokio: run the future on the shared runtime from
-            // a background thread, then update the entity on the UI thread.
             let result = cx
-                .background_spawn(async move { crate::client::block_on(client.list_projects()) })
+                .background_spawn(async move { service.list_projects() })
                 .await;
             _ = this.update(cx, |view: &mut Dashboard, cx| {
                 match result {
@@ -161,7 +161,7 @@ impl Dashboard {
     /// Run the confirmed delete (same backend call as `do_delete` before;
     /// toasts the outcome as the pilot for the shared helper API).
     fn delete_confirmed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(client), Some(project)) = (self.client.clone(), self.confirm_delete.take())
+        let (Some(service), Some(project)) = (self.service.clone(), self.confirm_delete.take())
         else {
             return;
         };
@@ -171,17 +171,19 @@ impl Dashboard {
         cx.spawn(async move |this, cx| {
             let pid = project.id.clone();
             let pname = project.name.clone();
-            let result: Result<serde_json::Value, _> = cx
-                .background_spawn(async move {
-                    crate::client::block_on(client.delete_project(&pid))
-                })
+            let result: Result<(), _> = cx
+                .background_spawn(async move { service.delete_project(&pid) })
                 .await;
             _ = this.update(cx, |view: &mut Dashboard, cx| {
                 view.deleting = None;
                 match result {
-                    Ok(_) => {
+                    Ok(()) => {
                         cx.update_window(window_handle, |_, window, cx| {
-                            super::notify_success(window, cx, format!("Deleted project “{pname}”."));
+                            super::notify_success(
+                                window,
+                                cx,
+                                format!("Deleted project “{pname}”."),
+                            );
                         })
                         .ok();
                         view.refresh(cx);
@@ -201,8 +203,12 @@ impl Dashboard {
         .detach();
     }
 
-
-    fn render_card(&self, project: &Project, palette: theme::Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_card(
+        &self,
+        project: &Project,
+        palette: theme::Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let busy_deleting = self.deleting.as_deref() == Some(project.id.as_str());
         let langs = format!(
             "{} → {}",
@@ -225,7 +231,11 @@ impl Dashboard {
             .unwrap_or_default();
         let meta = format!(
             "{langs}{}{}{}",
-            project.fmt.as_deref().map(|f| format!(" · {f}")).unwrap_or_default(),
+            project
+                .fmt
+                .as_deref()
+                .map(|f| format!(" · {f}"))
+                .unwrap_or_default(),
             created,
             if is_project_busy(&project.status) {
                 " · busy"
@@ -256,7 +266,7 @@ impl Dashboard {
             .child(ui::book_cover(
                 project.title.as_deref().unwrap_or(&project.name),
                 &project.id,
-                project.banner.as_deref(),
+                None,
                 &palette,
             ))
             .child(
@@ -281,7 +291,12 @@ impl Dashboard {
                             .truncate()
                             .child(title),
                     )
-                    .child(div().text_xs().text_color(palette.muted_foreground).child(meta)),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(palette.muted_foreground)
+                            .child(meta),
+                    ),
             )
             .child(
                 div()
@@ -322,7 +337,6 @@ impl Render for Dashboard {
         if let Some(err) = &self.error {
             col = col.child(ui::error_box(err, &palette));
         }
-
 
         match &self.projects {
             None if self.error.is_none() => {

@@ -412,3 +412,118 @@ pub fn stats(
         .map_err(map_err)?;
     Ok((terms, conflicts))
 }
+
+/// Total term count across all language pairs (sweep gate).
+pub fn all_terms_counts(conn: &Connection, project: &ProjectId) -> Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM glossary_terms WHERE project_id = ?",
+        params![project.as_str()],
+        |row| row.get(0),
+    )
+    .map_err(map_err)
+}
+
+/// Set a book-scoped target override. The shared project term keeps its
+/// mapping; the override wins for this book only.
+pub fn set_override(
+    conn: &Connection,
+    book: &crate::model::BookId,
+    source_lang: &str,
+    target_lang: &str,
+    source: &str,
+    target: &str,
+    note: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO glossary_overrides \
+         (book_id, source_lang, target_lang, source, target, note, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(book_id, source_lang, target_lang, source) \
+         DO UPDATE SET target = excluded.target, note = excluded.note, \
+         updated_at = excluded.updated_at",
+        params![
+            book.as_str(),
+            source_lang,
+            target_lang,
+            source,
+            target,
+            note,
+            now_ms()
+        ],
+    )
+    .map_err(map_err)?;
+    Ok(())
+}
+
+/// Clear one book-scoped override; true when a row existed.
+pub fn clear_override(
+    conn: &Connection,
+    book: &crate::model::BookId,
+    source_lang: &str,
+    target_lang: &str,
+    source: &str,
+) -> Result<bool> {
+    let removed = conn
+        .execute(
+            "DELETE FROM glossary_overrides \
+             WHERE book_id = ? AND source_lang = ? AND target_lang = ? AND source = ?",
+            params![book.as_str(), source_lang, target_lang, source],
+        )
+        .map_err(map_err)?;
+    Ok(removed > 0)
+}
+
+/// Load all overrides for a book as `(source, target)` pairs.
+pub fn book_overrides(
+    conn: &Connection,
+    book: &crate::model::BookId,
+    source_lang: &str,
+    target_lang: &str,
+) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT source, target FROM glossary_overrides \
+             WHERE book_id = ? AND source_lang = ? AND target_lang = ? ORDER BY id",
+        )
+        .map_err(map_err)?;
+    let rows = stmt
+        .query_map(params![book.as_str(), source_lang, target_lang], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(map_err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(map_err)?);
+    }
+    Ok(out)
+}
+
+/// Shared terms with book overrides applied (override target + note win;
+/// base metadata otherwise). Order stays insertion-stable.
+pub fn terms_for_book(
+    conn: &Connection,
+    project: &ProjectId,
+    book: &crate::model::BookId,
+    source_lang: &str,
+    target_lang: &str,
+) -> Result<Vec<GlossaryTerm>> {
+    let mut terms: BTreeMap<String, GlossaryTerm> =
+        all_terms(conn, project, source_lang, target_lang)?
+            .into_iter()
+            .map(|term| (term.source.clone(), term))
+            .collect();
+    for (source, target) in book_overrides(conn, book, source_lang, target_lang)? {
+        match terms.get_mut(&source) {
+            Some(term) => {
+                term.target = target;
+                term.note = format!("book override ({})", book.as_str());
+            }
+            None => {
+                let mut term = GlossaryTerm::new(source.clone(), target);
+                term.note = format!("book override ({})", book.as_str());
+                terms.insert(source, term);
+            }
+        }
+    }
+    Ok(terms.into_values().collect())
+}

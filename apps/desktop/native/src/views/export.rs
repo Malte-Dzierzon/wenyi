@@ -1,9 +1,10 @@
 //! Export (screen 7): format/edition options + generate + history + native save.
 //!
 //! Parity source: `features/export/ExportPage.tsx`.
-//! - Queries on load: `get_config` (defaults for bilingual/punctuation/about/
-//!   preserve/order), `get_project` (subtitle lock), `capabilities` (format
-//!   grid + PDF export backends), `list_exports` (2s poll while pending,
+//! - Queries on load: global config `effective.output` (defaults for
+//!   bilingual/punctuation/about/preserve/order), `get_project` (subtitle
+//!   lock), `capabilities` (format grid; no PDF-backend list, so the engine
+//!   select offers Automatic only), `list_exports` (2s poll while pending,
 //!   running, or queued).
 //! - Format grid: Automatic + `caps.output_formats` (minus `srt` unless the
 //!   project itself is a subtitle project, which forces `srt` + `about=false`).
@@ -11,23 +12,22 @@
 //!   PDF engine select when `fmt == pdf`, bilingual order select, about-page
 //!   checkbox, preserve-style checkbox for bilingual output).
 //! - Generate: disabled while generating, uninitialized (no project fmt),
-//!   no caps, defaults not loaded, or config error. Desktop ALWAYS uses the
-//!   native path: `plan_native_export` → `rfd` save dialog → `create_export`
-//!   → poll until done → `native_export_content` → write file. Per-row
-//!   "Save as" reuses `GET …/plan` + `…/content` for that export id.
+//!   no caps, defaults not loaded, or config error. Generate enqueues via
+//!   `create_export`; the list poll picks up completion. Native save-dialog
+//!   wiring (`export_bytes` + `rfd`) lands in the final rewiring pass.
 //! - States: loading / error (aggregated notice) / empty table row / busy and
 //!   read-only gating mirrors the source (no project-busy gate in source).
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{Disableable, IndexPath, StyledExt};
 use gpui_kit::*;
 
 use crate::{
-    client::{block_on, Client, ExportOut, ExportRequest, NativeExportPlan},
+    service::{ExportOut, ExportRequest, ServiceHandle},
     theme,
 };
 
@@ -59,7 +59,7 @@ fn format_bytes(size: Option<i64>) -> String {
 }
 
 pub struct ExportView {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     pid: String,
     project_fmt: Option<String>,
     caps_loaded: bool,
@@ -81,7 +81,6 @@ pub struct ExportView {
     show_advanced: bool,
     exports: Option<Vec<ExportOut>>,
     generating: bool,
-    saving_id: Option<i64>,
     notice: Option<String>,
     order_select: Option<Entity<SelectState<Vec<String>>>>,
     pdf_select: Option<Entity<SelectState<Vec<String>>>>,
@@ -94,7 +93,7 @@ pub struct ExportView {
 impl ExportView {
     pub fn new(pid: String, _window: &mut Window, _cx: &mut Context<Self>) -> Self {
         Self {
-            client: None,
+            service: None,
             pid,
             project_fmt: None,
             caps_loaded: false,
@@ -116,7 +115,6 @@ impl ExportView {
             show_advanced: false,
             exports: None,
             generating: false,
-            saving_id: None,
             notice: None,
             order_select: None,
             pdf_select: None,
@@ -141,41 +139,39 @@ impl ExportView {
         }
     }
 
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client);
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service);
         self.refresh_all(cx);
     }
 
     /// Initial load: config + project + capabilities + exports in one
     /// background round-trip (mirrors the four `useQuery` calls).
     fn refresh_all(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         let pid = self.pid.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    // Independent reads run concurrently; wall time is the
-                    // slowest call (~600ms), not the sum.
-                    block_on(async {
-                        tokio::join!(
-                            client.get_config(&pid),
-                            client.get_project(&pid),
-                            client.capabilities(),
-                            client.capabilities_raw(),
-                            client.list_exports(&pid),
-                        )
-                    })
+                    // Sync engine calls run on a background thread so the
+                    // UI thread never blocks on SQLite.
+                    let config = service.get_global_config();
+                    let project = service.get_project(&pid);
+                    let caps = service.capabilities();
+                    let exports = service.list_exports(&pid);
+                    (config, project, caps, exports)
                 })
                 .await;
             _ = this.update(cx, |view: &mut ExportView, cx| {
-                let (config, project, caps, caps_raw, exports) = result;
+                let (config, project, caps, exports) = result;
                 match config {
                     Ok(cfg) => {
                         let output = cfg.effective.get("output").cloned().unwrap_or_default();
-                        view.bilingual =
-                            output.get("bilingual").and_then(|v| v.as_bool()).unwrap_or(false);
+                        view.bilingual = output
+                            .get("bilingual")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         view.punctuation = output
                             .get("punctuation_normalize")
                             .and_then(|v| v.as_bool())
@@ -212,26 +208,12 @@ impl ExportView {
                         view.project_fmt = None;
                     }
                 }
-                match caps {
-                    Ok(caps) => {
-                        view.caps_formats = caps.output_formats;
-                        view.caps_loaded = true;
-                        view.caps_error = None;
-                    }
-                    Err(err) => {
-                        view.caps_error = Some(err.to_string());
-                        view.caps_loaded = false;
-                    }
-                }
-                view.pdf_backends = caps_raw
-                    .ok()
-                    .and_then(|v| {
-                        v.get("pdf")?.get("export_backends")?.as_array().cloned()
-                    })
-                    .map(|arr| {
-                        arr.iter().filter_map(|b| b.as_str().map(|s| s.to_string())).collect()
-                    })
-                    .unwrap_or_default();
+                view.caps_formats = caps.output_formats;
+                view.caps_loaded = true;
+                view.caps_error = None;
+                // No PDF-backend capability in the engine API; the PDF
+                // engine select offers Automatic only.
+                view.pdf_backends = Vec::new();
                 match exports {
                     Ok(list) => {
                         view.exports_error = None;
@@ -276,13 +258,13 @@ impl ExportView {
     }
 
     fn refresh_exports(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         let pid = self.pid.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.list_exports(&pid)) })
+                .background_spawn(async move { service.list_exports(&pid) })
                 .await;
             _ = this.update(cx, |view: &mut ExportView, cx| {
                 match result {
@@ -325,14 +307,22 @@ impl ExportView {
         if self.subtitle() {
             return vec!["srt".into()];
         }
-        self.caps_formats.iter().filter(|f| *f != "srt").cloned().collect()
+        self.caps_formats
+            .iter()
+            .filter(|f| *f != "srt")
+            .cloned()
+            .collect()
     }
 
     /// `ExportRequest::new()` defaults, then UI state (mirrors `create`).
     fn build_request(&self) -> ExportRequest {
         let mut req = ExportRequest::new();
         let fmt = self.effective_format();
-        req.format = if fmt.is_empty() { None } else { Some(fmt.clone()) };
+        req.format = if fmt.is_empty() {
+            None
+        } else {
+            Some(fmt.clone())
+        };
         req.bilingual = self.bilingual;
         req.order = self.order.clone();
         req.about_page = if self.subtitle() { false } else { self.about };
@@ -352,11 +342,10 @@ impl ExportView {
             || self.config_error.is_some()
     }
 
-    /// Generate via the desktop-native path: plan → save dialog → create →
-    /// poll until done → content → write file. The whole blocking flow runs
-    /// on a background thread; the UI only flips `generating`.
+    /// Generate: enqueue via `create_export`; completion surfaces through
+    /// the `list_exports` poll. Save-dialog wiring lands in the final pass.
     fn generate(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         if self.generate_disabled() {
@@ -369,70 +358,18 @@ impl ExportView {
         self.notice = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let saved: Result<String, String> = cx
+            let created: Result<ExportOut, String> = cx
                 .background_spawn(async move {
-                    // 1. Plan the native filename (side-effect free).
-                    let plan: NativeExportPlan = block_on(client.plan_native_export(&pid, &request))
-                        .map_err(|e| e.to_string())?;
-                    // 2. Destination dialog (blocking is fine off the UI thread).
-                    let mut dialog = rfd::FileDialog::new()
-                        .set_title(format!("Save {}", plan.label))
-                        .set_file_name(&plan.filename);
-                    if !plan.extension.is_empty() {
-                        dialog = dialog.add_filter(&plan.label, &[plan.extension.as_str()]);
-                    }
-                    let Some(dest) = dialog.save_file() else {
-                        return Err("__cancelled__".into());
-                    };
-                    // 3. Enqueue the export snapshot.
-                    let created: serde_json::Value =
-                        block_on(client.create_export(&pid, &request))
-                            .map_err(|e| format!("{e} Export creation may have succeeded. Check export history before generating again."))?;
-                    let export_id = created
-                        .get("export_id")
-                        .and_then(|v| v.as_i64())
-                        .ok_or_else(|| {
-                            "Invalid export job. Check export history before generating again."
-                                .to_string()
-                        })?;
-                    // 4. Wait for completion (mirrors the Tauri task's poll).
-                    loop {
-                        let list = block_on(client.list_exports(&pid)).map_err(|e| e.to_string())?;
-                        match list.iter().find(|e| e.id == export_id).map(|e| e.status.as_str()) {
-                            Some("done") => break,
-                            Some("pending") | Some("queued") | Some("running") => {
-                                std::thread::sleep(std::time::Duration::from_millis(1000));
-                            }
-                            _ => {
-                                return Err(format!(
-                                    "Export generation failed (export {export_id}). Check export history."
-                                ));
-                            }
-                        }
-                    }
-                    // 5. Fetch bytes + write (mirror `save_created_export`).
-                    let bytes = block_on(client.native_export_content(&pid, export_id))
-                        .map_err(|e| {
-                            format!("{e} Export ID {export_id}: check export history and use Save as to recover this export; Generate creates a new snapshot.")
-                        })?;
-                    let mut dest = dest;
-                    if !plan.extension.is_empty()
-                        && dest.extension().and_then(|e| e.to_str()) != Some(plan.extension.as_str())
-                    {
-                        dest.set_extension(&plan.extension);
-                    }
-                    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
-                    Ok(dest.to_string_lossy().into_owned())
+                    service
+                        .create_export(&pid, request)
+                        .map_err(|e| e.to_string())
                 })
                 .await;
             _ = this.update(cx, |view: &mut ExportView, cx| {
                 view.generating = false;
-                match saved {
-                    Ok(path) => {
-                        view.notice = Some(format!("Saved to {path}"));
-                        view.op_error = None;
-                    }
-                    Err(cancelled) if cancelled == "__cancelled__" => {
+                match created {
+                    Ok(out) => {
+                        view.notice = Some(format!("Export {} queued.", out.id));
                         view.op_error = None;
                     }
                     Err(err) => {
@@ -446,58 +383,46 @@ impl ExportView {
         .detach();
     }
 
-    /// Per-row "Save as": plan for the existing export id → dialog →
-    /// content → write file.
-    fn save_row(&mut self, id: i64, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+    /// Save a finished export via the native file dialog.
+    fn save_export(&mut self, export_id: String, cx: &mut Context<Self>) {
+        let Some(service) = self.service.clone() else {
             return;
         };
-        if self.saving_id.is_some() {
-            return;
-        }
-        let pid = self.pid.clone();
-        self.saving_id = Some(id);
-        self.op_error = None;
-        self.notice = None;
-        cx.notify();
+        let suggested = self
+            .exports
+            .as_ref()
+            .and_then(|list| list.iter().find(|e| e.id == export_id))
+            .map(|record| service.export_filename(record))
+            .unwrap_or_else(|| format!("{export_id}.txt"));
         cx.spawn(async move |this, cx| {
-            let saved: Result<String, String> = cx
+            let bytes = cx
+                .background_spawn(async move { service.export_bytes(&export_id) })
+                .await;
+            let bytes = match bytes {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    _ = this.update(cx, |view: &mut ExportView, cx| {
+                        view.op_error = Some(err.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let path = cx
                 .background_spawn(async move {
-                    let plan: NativeExportPlan = block_on(
-                        client.get(&format!("/desktop/projects/{pid}/exports/{id}/plan")),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    let mut dialog = rfd::FileDialog::new()
-                        .set_title(format!("Save {}", plan.label))
-                        .set_file_name(&plan.filename);
-                    if !plan.extension.is_empty() {
-                        dialog = dialog.add_filter(&plan.label, &[plan.extension.as_str()]);
-                    }
-                    let Some(dest) = dialog.save_file() else {
-                        return Err("__cancelled__".into());
-                    };
-                    let bytes = block_on(client.native_export_content(&pid, id))
-                        .map_err(|e| e.to_string())?;
-                    let mut dest = dest;
-                    if !plan.extension.is_empty()
-                        && dest.extension().and_then(|e| e.to_str()) != Some(plan.extension.as_str())
-                    {
-                        dest.set_extension(&plan.extension);
-                    }
-                    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
-                    Ok(dest.to_string_lossy().into_owned())
+                    rfd::FileDialog::new().set_file_name(&suggested).save_file()
                 })
                 .await;
             _ = this.update(cx, |view: &mut ExportView, cx| {
-                view.saving_id = None;
-                match saved {
-                    Ok(path) => {
-                        view.notice = Some(format!("Saved to {path}"));
-                        view.op_error = None;
-                    }
-                    Err(cancelled) if cancelled == "__cancelled__" => {}
-                    Err(err) => {
-                        view.op_error = Some(err);
+                if let Some(path) = path {
+                    match std::fs::write(&path, &bytes) {
+                        Ok(()) => {
+                            view.notice = Some(format!("Saved {}.", path.display()));
+                            view.op_error = None;
+                        }
+                        Err(err) => {
+                            view.op_error = Some(format!("Save failed: {err}"));
+                        }
                     }
                 }
                 cx.notify();
@@ -514,10 +439,11 @@ impl ExportView {
             &self.caps_error,
             &self.exports_error,
             &self.op_error,
-        ] {
-            if let Some(e) = e {
-                parts.push(e.clone());
-            }
+        ]
+        .into_iter()
+        .flatten()
+        {
+            parts.push(e.clone());
         }
         if parts.is_empty() {
             None
@@ -535,19 +461,20 @@ impl Render for ExportView {
         if self.order_select.is_none() {
             let opts = vec!["Translation first".to_string(), "Source first".to_string()];
             let idx = if self.order == "source_first" { 1 } else { 0 };
-            let entity = cx.new(|cx| {
-                SelectState::new(opts, Some(IndexPath::new(idx)), window, cx)
-            });
-            cx.subscribe(&entity, |this: &mut ExportView, _, event: &SelectEvent<Vec<String>>, _| {
-                if let SelectEvent::Confirm(Some(value)) = event {
-                    this.order = if value == "Source first" {
-                        "source_first"
-                    } else {
-                        "target_first"
+            let entity = cx.new(|cx| SelectState::new(opts, Some(IndexPath::new(idx)), window, cx));
+            cx.subscribe(
+                &entity,
+                |this: &mut ExportView, _, event: &SelectEvent<Vec<String>>, _| {
+                    if let SelectEvent::Confirm(Some(value)) = event {
+                        this.order = if value == "Source first" {
+                            "source_first"
+                        } else {
+                            "target_first"
+                        }
+                        .into();
                     }
-                    .into();
-                }
-            })
+                },
+            )
             .detach();
             self.order_select = Some(entity);
         }
@@ -558,22 +485,27 @@ impl Render for ExportView {
             let idx = if self.pdf_backend.is_empty() {
                 0
             } else {
-                pdf_opts.iter().position(|o| o == &self.pdf_backend).unwrap_or(0)
+                pdf_opts
+                    .iter()
+                    .position(|o| o == &self.pdf_backend)
+                    .unwrap_or(0)
             };
             let opts = pdf_opts.clone();
-            let entity = cx.new(|cx| {
-                SelectState::new(opts, Some(IndexPath::new(idx)), window, cx)
-            });
+            let entity = cx.new(|cx| SelectState::new(opts, Some(IndexPath::new(idx)), window, cx));
             let backends = self.pdf_backends.clone();
-            cx.subscribe(&entity, move |this: &mut ExportView, _, event: &SelectEvent<Vec<String>>, _| {
-                if let SelectEvent::Confirm(Some(value)) = event {
-                    this.pdf_backend = if value == "Automatic" || !backends.iter().any(|b| b == value) {
-                        String::new()
-                    } else {
-                        value.clone()
-                    };
-                }
-            })
+            cx.subscribe(
+                &entity,
+                move |this: &mut ExportView, _, event: &SelectEvent<Vec<String>>, _| {
+                    if let SelectEvent::Confirm(Some(value)) = event {
+                        this.pdf_backend =
+                            if value == "Automatic" || !backends.iter().any(|b| b == value) {
+                                String::new()
+                            } else {
+                                value.clone()
+                            };
+                    }
+                },
+            )
             .detach();
             self.pdf_select = Some(entity);
             self.pdf_select_options = pdf_opts;
@@ -706,16 +638,22 @@ impl Render for ExportView {
             );
             if show_pdf_engine {
                 adv = adv.child(
-                    div().flex().flex_col().gap_1().child("PDF export engine").child(
-                        Select::new(self.pdf_select.as_ref().unwrap()),
-                    ),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child("PDF export engine")
+                        .child(Select::new(self.pdf_select.as_ref().unwrap())),
                 );
             }
             if self.bilingual {
                 adv = adv.child(
-                    div().flex().flex_col().gap_1().child("Bilingual order").child(
-                        Select::new(self.order_select.as_ref().unwrap()),
-                    ),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child("Bilingual order")
+                        .child(Select::new(self.order_select.as_ref().unwrap())),
                 );
             }
             adv = adv.child(
@@ -756,20 +694,18 @@ impl Render for ExportView {
         col = col.child(card);
 
         // History card.
-        let mut history = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_5()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.border)
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(palette.muted_foreground)
-                    .child("Only the latest 5 exports are kept. Save files elsewhere to keep them."),
-            );
+        let mut history =
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_5()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.border)
+                .child(div().text_sm().text_color(palette.muted_foreground).child(
+                    "Only the latest 5 exports are kept. Save files elsewhere to keep them.",
+                ));
 
         let header = div()
             .flex()
@@ -779,8 +715,7 @@ impl Render for ExportView {
             .child(div().w_24().child("Format"))
             .child(div().flex_1().child("Created"))
             .child(div().w_20().child("Size"))
-            .child(div().flex_1().child("Status"))
-            .child(div().w_24().child("Actions"));
+            .child(div().flex_1().child("Status"));
         history = history.child(header);
 
         match &self.exports {
@@ -839,25 +774,22 @@ impl Render for ExportView {
                         .child(e.status.clone());
                     if let Some(err) = &e.error {
                         status = status.child(
-                            div().text_sm().text_color(palette.destructive).child(err.clone()),
+                            div()
+                                .text_sm()
+                                .text_color(palette.destructive)
+                                .child(err.clone()),
                         );
                     }
                     row = row.child(status);
                     if e.status == "done" {
-                        let id = e.id;
-                        let saving = self.saving_id == Some(id);
+                        let export_id = e.id.clone();
                         row = row.child(
-                            div().w_24().child(
-                                Button::new(format!("save-{id}"))
-                                    .label(if saving { "Saving…" } else { "Save as" })
-                                    .disabled(saving || self.saving_id.is_some())
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.save_row(id, cx);
-                                    })),
-                            ),
+                            Button::new(format!("save-{}", e.id))
+                                .label("Save")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.save_export(export_id.clone(), cx);
+                                })),
                         );
-                    } else {
-                        row = row.child(div().w_24());
                     }
                     history = history.child(row);
                 }

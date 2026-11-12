@@ -14,11 +14,10 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Disableable, StyledExt};
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    client::{block_on, is_project_busy, AnalysisOut, Client},
+    service::{is_project_busy, AnalysisOut, ServiceError, ServiceHandle},
     theme,
 };
 
@@ -36,7 +35,7 @@ const VOICE_FIELDS: &[(&str, &str)] = &[
 ];
 
 pub struct StyleView {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     pid: String,
     project_status: String,
     data: Option<AnalysisOut>,
@@ -68,7 +67,7 @@ const SAVE_KEYS: &[&str] = &[
 impl StyleView {
     pub fn new(pid: String) -> Self {
         Self {
-            client: None,
+            service: None,
             pid,
             project_status: String::new(),
             data: None,
@@ -84,8 +83,8 @@ impl StyleView {
         }
     }
 
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client);
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service);
         self.refresh(cx);
     }
 
@@ -98,7 +97,7 @@ impl StyleView {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         self.loading = true;
@@ -108,9 +107,9 @@ impl StyleView {
                 .background_spawn(async move {
                     // Sequential, not join!: analysis may 500 before
                     // preparation produces it; status must still render.
-                    let data = block_on(client.get_analysis(&pid));
-                    let project = block_on(client.get_project(&pid))?;
-                    Ok::<_, crate::client::Error>((data, project.project.status))
+                    let data = service.get_analysis(&pid);
+                    let project = service.get_project(&pid)?;
+                    Ok::<_, ServiceError>((data, project.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut StyleView, cx| {
@@ -155,7 +154,7 @@ impl StyleView {
     /// The old UI had three separate Save buttons; edits across sections
     /// are one analysis document, so they save as one unit.
     fn save_all(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         let mut analysis = serde_json::Map::new();
@@ -173,7 +172,7 @@ impl StyleView {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    block_on(client.update_analysis(&pid, serde_json::Value::Object(analysis)))
+                    service.update_analysis(&pid, serde_json::Value::Object(analysis))
                 })
                 .await;
             _ = this.update(cx, |view: &mut StyleView, cx| {
@@ -191,7 +190,7 @@ impl StyleView {
     }
 
     fn refresh_analysis(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         let pid = self.pid.clone();
@@ -199,7 +198,7 @@ impl StyleView {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.refresh_analysis(&pid)) })
+                .background_spawn(async move { service.refresh_analysis(&pid) })
                 .await;
             _ = this.update(cx, |view: &mut StyleView, cx| {
                 view.refreshing = false;
@@ -217,8 +216,8 @@ impl StyleView {
     }
 
     fn save_digest(&mut self, ci: u32, cx: &mut Context<Self>) {
-        let (Some(client), Some(input)) =
-            (self.client.clone(), self.digest_inputs.get(&ci).cloned())
+        let (Some(service), Some(input)) =
+            (self.service.clone(), self.digest_inputs.get(&ci).cloned())
         else {
             return;
         };
@@ -228,7 +227,7 @@ impl StyleView {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.update_digest(&pid, ci, &digest)) })
+                .background_spawn(async move { service.update_digest(&pid, ci, &digest) })
                 .await;
             _ = this.update(cx, |view: &mut StyleView, cx| {
                 view.saving_digest = false;
@@ -304,14 +303,24 @@ impl Render for StyleView {
             .overflow_y_scrollbar()
             .font(theme::fonts::ui())
             .child(
-                div().flex().items_center().justify_between()
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
                     .child(super::ui::page_title("Book knowledge", None::<Div>))
                     .child(
-                        div().flex().items_center().gap_2()
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
                             .child(
                                 Button::new("refresh-analysis")
                                     .ghost()
-                                    .label(if self.refreshing { "Refreshing…" } else { "Refresh analysis" })
+                                    .label(if self.refreshing {
+                                        "Refreshing…"
+                                    } else {
+                                        "Refresh analysis"
+                                    })
                                     .disabled(read_only || self.refreshing)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.refresh_analysis(cx);
@@ -320,7 +329,11 @@ impl Render for StyleView {
                             .child(
                                 Button::new("save-all")
                                     .primary()
-                                    .label(if self.saving { "Saving…" } else { "Save changes" })
+                                    .label(if self.saving {
+                                        "Saving…"
+                                    } else {
+                                        "Save changes"
+                                    })
                                     .disabled(read_only || self.saving)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.save_all(cx);
@@ -333,12 +346,19 @@ impl Render for StyleView {
             col = col.child(super::ui::error_box(err, &palette));
         }
         if self.loading && self.data.is_none() {
-            col = col.child(div().text_sm().text_color(palette.muted_foreground).child("Loading…"));
+            col = col.child(
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
+                    .child("Loading…"),
+            );
             return col;
         }
         if read_only && self.busy() {
             col = col.child(
-                div().text_sm().text_color(palette.muted_foreground)
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
                     .child("Project is running — knowledge is read-only."),
             );
         }
@@ -348,23 +368,47 @@ impl Render for StyleView {
         let synopsis = self.field_input("book_synopsis", window, cx);
         let guide = self.field_input("style_guide", window, cx);
         col = col.child(
-            div().flex().gap_3()
+            div()
+                .flex()
+                .gap_3()
                 .child(
-                    div().flex_1().min_w_0().flex().flex_col().gap_1()
-                        .p_3().rounded_sm().border_1().border_color(palette.border).bg(palette.card)
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .p_3()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(palette.border)
+                        .bg(palette.card)
                         .child(div().text_sm().font_medium().child("Book synopsis"))
                         .child(
-                            div().text_xs().text_color(palette.muted_foreground)
+                            div()
+                                .text_xs()
+                                .text_color(palette.muted_foreground)
                                 .child("Steers chapter context, review, and autofix."),
                         )
                         .child(Textarea::new(&synopsis).h(px(160.))),
                 )
                 .child(
-                    div().flex_1().min_w_0().flex().flex_col().gap_1()
-                        .p_3().rounded_sm().border_1().border_color(palette.border).bg(palette.card)
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .p_3()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(palette.border)
+                        .bg(palette.card)
                         .child(div().text_sm().font_medium().child("Style guide"))
                         .child(
-                            div().text_xs().text_color(palette.muted_foreground)
+                            div()
+                                .text_xs()
+                                .text_color(palette.muted_foreground)
                                 .child("Translator instructions: names, quotes, tone."),
                         )
                         .child(Textarea::new(&guide).h(px(160.))),
@@ -418,25 +462,61 @@ impl Render for StyleView {
             if rows.is_empty() {
                 continue;
             }
-            let mut table = div().flex().flex_col().rounded_sm()
-                .border_1().border_color(palette.border).bg(palette.card);
+            let mut table = div()
+                .flex()
+                .flex_col()
+                .rounded_sm()
+                .border_1()
+                .border_color(palette.border)
+                .bg(palette.card);
             table = table.child(
-                div().px_3().pt_3().pb_1()
+                div()
+                    .px_3()
+                    .pt_3()
+                    .pb_1()
                     .child(div().text_sm().font_medium().child(title))
-                    .child(div().text_xs().text_color(palette.muted_foreground).child(hint)),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(palette.muted_foreground)
+                            .child(hint),
+                    ),
             );
             for (source, target, note) in rows.iter().take(30) {
                 table = table.child(
-                    div().flex().gap_3().px_3().py_1p5()
-                        .border_t_1().border_color(palette.border)
-                        .child(div().w_40().flex_shrink_0().text_sm().font_medium().child(source.clone()))
+                    div()
+                        .flex()
+                        .gap_3()
+                        .px_3()
+                        .py_1p5()
+                        .border_t_1()
+                        .border_color(palette.border)
+                        .child(
+                            div()
+                                .w_40()
+                                .flex_shrink_0()
+                                .text_sm()
+                                .font_medium()
+                                .child(source.clone()),
+                        )
                         .child(div().w_40().flex_shrink_0().text_sm().child(target.clone()))
-                        .child(div().flex_1().min_w_0().text_xs().text_color(palette.muted_foreground).child(note.clone())),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_xs()
+                                .text_color(palette.muted_foreground)
+                                .child(note.clone()),
+                        ),
                 );
             }
             if rows.len() > 30 {
                 table = table.child(
-                    div().px_3().py_1p5().text_xs().text_color(palette.muted_foreground)
+                    div()
+                        .px_3()
+                        .py_1p5()
+                        .text_xs()
+                        .text_color(palette.muted_foreground)
                         .child(format!("+ {} more (see Glossary)", rows.len() - 30)),
                 );
             }
@@ -452,7 +532,9 @@ impl Render for StyleView {
             .unwrap_or_default();
         if digests.is_empty() {
             col = col.child(
-                div().text_sm().text_color(palette.muted_foreground)
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
                     .child("No chapter digests yet — preparation generates them."),
             );
         } else {
@@ -475,8 +557,14 @@ impl Render for StyleView {
                     }
                     let input = self.digest_inputs[&ci].clone();
                     list = list.child(
-                        div().flex().flex_col().gap_1().p_3().rounded_md()
-                            .border_1().border_color(palette.ring)
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .p_3()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(palette.ring)
                             .on_key_down(cx.listener(
                                 move |this, ev: &gpui_kit::KeyDownEvent, _, cx| {
                                     if ev.keystroke.key == "escape" {
@@ -487,49 +575,58 @@ impl Render for StyleView {
                                     }
                                 },
                             ))
-                            .child(div().font_medium().child(format!(
-                                "#{ci} {}",
-                                digest.title
-                            )))
+                            .child(div().font_medium().child(format!("#{ci} {}", digest.title)))
                             .child(Textarea::new(&input).h(px(128.)))
                             .child(
-                                div().flex().gap_2()
+                                div()
+                                    .flex()
+                                    .gap_2()
                                     .child(
                                         Button::new(format!("save-digest-{ci}"))
                                             .primary()
-                                            .label(if self.saving_digest { "Saving…" } else { "Save" })
+                                            .label(if self.saving_digest {
+                                                "Saving…"
+                                            } else {
+                                                "Save"
+                                            })
                                             .disabled(self.saving_digest)
-                                            .on_click(cx.listener(
-                                                move |this, _, _, cx| {
-                                                    this.save_digest(ci, cx);
-                                                },
-                                            )),
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.save_digest(ci, cx);
+                                            })),
                                     )
                                     .child(
                                         Button::new(format!("cancel-digest-{ci}"))
                                             .ghost()
                                             .label("Cancel")
-                                            .on_click(cx.listener(
-                                                move |this, _, _, cx| {
-                                                    this.editing_digest = None;
-                                                    this.digest_drafts.remove(&ci);
-                                                    this.digest_inputs.remove(&ci);
-                                                    cx.notify();
-                                                },
-                                            )),
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.editing_digest = None;
+                                                this.digest_drafts.remove(&ci);
+                                                this.digest_inputs.remove(&ci);
+                                                cx.notify();
+                                            })),
                                     ),
                             ),
                     );
                 } else {
                     list = list.child(
-                        div().flex().flex_col().gap_1().p_3().rounded_md()
-                            .border_1().border_color(palette.border)
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .p_3()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(palette.border)
                             .child(
-                                div().flex().items_center().justify_between()
-                                    .child(div().font_medium().child(format!(
-                                        "#{ci} {}",
-                                        digest.title
-                                    )))
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        div()
+                                            .font_medium()
+                                            .child(format!("#{ci} {}", digest.title)),
+                                    )
                                     .child(
                                         Button::new(format!("edit-digest-{ci}"))
                                             .ghost()
@@ -541,14 +638,18 @@ impl Render for StyleView {
                                             })),
                                     ),
                             )
-                            .child(
-                                if digest.digest.is_empty() {
-                                    div().text_sm().text_color(palette.muted_foreground)
-                                        .child("No digest yet.").into_any_element()
-                                } else {
-                                    div().text_sm().child(digest.digest.clone()).into_any_element()
-                                }
-                            ),
+                            .child(if digest.digest.is_empty() {
+                                div()
+                                    .text_sm()
+                                    .text_color(palette.muted_foreground)
+                                    .child("No digest yet.")
+                                    .into_any_element()
+                            } else {
+                                div()
+                                    .text_sm()
+                                    .child(digest.digest.clone())
+                                    .into_any_element()
+                            }),
                     );
                 }
             }

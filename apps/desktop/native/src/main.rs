@@ -1,16 +1,9 @@
 //! Native GPUI desktop UI for Wenyi.
 //!
-//! Parallel implementation alongside the Tauri/React app. Talks to the same
-//! Python sidecar over the same loopback REST+WS contract — no new backend
-//! protocol. See `docs-next/18-desktop-parity.md`.
+//! In-process frontend over `wenyi_core::service` — no sidecar, no HTTP.
 
-mod backend;
-mod client;
-#[cfg(test)]
-mod contract_tests;
-#[cfg(test)]
-mod sidecar_tests;
 mod nav;
+mod service;
 mod theme;
 mod views;
 
@@ -30,25 +23,9 @@ fn main() {
         return;
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!(
-            "Usage: wenyi-native [--data-dir <workspace>] [--backend <apiBase> --token <token>]"
-        );
+        println!("Usage: wenyi-native [--data-dir <workspace>]");
         println!("  --data-dir  isolated desktop workspace (default: platform data dir)");
-        println!("  --backend   connect to an already-running sidecar instead of spawning");
         return;
-    }
-    // Optional attach mode: --backend <apiBase> --token <token>.
-    // Communicated to the App view via env (parsed once, before the UI starts).
-    if let (Some(api_base), Some(token)) = (
-        args.windows(2)
-            .find(|w| w[0] == "--backend")
-            .map(|w| w[1].clone()),
-        args.windows(2)
-            .find(|w| w[0] == "--token")
-            .map(|w| w[1].clone()),
-    ) {
-        std::env::set_var("WENYI_NATIVE_BACKEND", &api_base);
-        std::env::set_var("WENYI_NATIVE_TOKEN", &token);
     }
     if let Some(dir) = args
         .windows(2)
@@ -58,13 +35,11 @@ fn main() {
         std::env::set_var("WENYI_NATIVE_DATA_DIR", dir);
     }
 
-    application()
-        .with_assets(assets::AllAssets)
-        .run(|cx| {
-            init(cx);
-            open_window(WindowOptions::default(), cx, |window, cx| {
-                cx.new(|cx| views::App::new(window, cx))
-            })
-            .expect("Failed to open window");
-        });
+    application().with_assets(assets::AllAssets).run(|cx| {
+        init(cx);
+        open_window(WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| views::App::new(window, cx))
+        })
+        .expect("Failed to open window");
+    });
 }

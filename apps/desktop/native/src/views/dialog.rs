@@ -12,6 +12,9 @@ use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::WindowExt;
 use gpui_kit::{App, SharedString, Window};
 
+/// Confirm-dialog callback: returns true when the dialog should close.
+type ConfirmFn = Rc<dyn Fn(&mut Window, &mut App) -> bool>;
+
 /// Open a destructive confirm dialog (e.g. delete). Cancel/Esc closes with
 /// no effect; OK runs `on_confirm`.
 pub fn confirm_destructive(
@@ -25,7 +28,7 @@ pub fn confirm_destructive(
     let title: SharedString = title.into();
     let message: SharedString = message.into();
     let ok_label: SharedString = ok_label.into();
-    let on_confirm: Rc<dyn Fn(&mut Window, &mut App) -> bool> = Rc::new(on_confirm);
+    let on_confirm: ConfirmFn = Rc::new(on_confirm);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let on_confirm = on_confirm.clone();
         alert

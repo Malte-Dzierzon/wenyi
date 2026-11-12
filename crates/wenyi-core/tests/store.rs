@@ -306,3 +306,60 @@ fn chapter_and_segment_schema_lag_columns_are_projected() {
     let segments = store::list_segments(&conn, &cid, 0, 10).unwrap();
     assert_eq!(segments[0].target_before_polish.as_deref(), Some("draft"));
 }
+
+#[test]
+fn source_files_bind_books_by_hash() {
+    let db = temp_db("source-files");
+    let conn = store::open(&db).unwrap();
+    let pid = ProjectId::new("p").unwrap();
+    let bid = BookId::new("b0").unwrap();
+    store::create_project(&conn, &pid, "t").unwrap();
+    store::create_book(&conn, &bid, &pid, 0, "B").unwrap();
+    assert_eq!(
+        store::find_book_by_source_hash(&conn, &pid, "abc").unwrap(),
+        None
+    );
+    store::insert_source_file(&conn, "b0-src", &bid, "novel.txt", "abc", 42, "txt").unwrap();
+    // Idempotent: re-import of the same bytes does not duplicate.
+    store::insert_source_file(&conn, "b0-src", &bid, "novel.txt", "abc", 42, "txt").unwrap();
+    let found = store::find_book_by_source_hash(&conn, &pid, "abc")
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.id, bid);
+    assert_eq!(found.ordinal, 0);
+}
+
+#[test]
+fn book_overrides_win_for_one_book_only() {
+    use wenyi_core::glossary::{set_override, terms_for_book, upsert_term, GlossaryTerm};
+    let db = temp_db("book-overrides");
+    let conn = store::open(&db).unwrap();
+    let pid = ProjectId::new("p").unwrap();
+    let b0 = BookId::new("b0").unwrap();
+    let b1 = BookId::new("b1").unwrap();
+    store::create_project(&conn, &pid, "t").unwrap();
+    store::create_book(&conn, &b0, &pid, 0, "B0").unwrap();
+    store::create_book(&conn, &b1, &pid, 1, "B1").unwrap();
+    upsert_term(
+        &conn,
+        &pid,
+        "en",
+        "zh",
+        &GlossaryTerm::new("Wolf", "狼"),
+        Some(0),
+    )
+    .unwrap();
+    set_override(&conn, &b1, "en", "zh", "Wolf", "苍狼", "volume 2 usage").unwrap();
+    let t0: Vec<(String, String)> = terms_for_book(&conn, &pid, &b0, "en", "zh")
+        .unwrap()
+        .into_iter()
+        .map(|t| (t.source, t.target))
+        .collect();
+    let t1: Vec<(String, String)> = terms_for_book(&conn, &pid, &b1, "en", "zh")
+        .unwrap()
+        .into_iter()
+        .map(|t| (t.source, t.target))
+        .collect();
+    assert_eq!(t0, vec![("Wolf".to_string(), "狼".to_string())]);
+    assert_eq!(t1, vec![("Wolf".to_string(), "苍狼".to_string())]);
+}

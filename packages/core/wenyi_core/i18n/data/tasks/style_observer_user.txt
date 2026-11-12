@@ -1,0 +1,7 @@
+[Active style profile (version $profile_version)]
+$profile
+
+[Completed chapter passages ($src_label with $tgt_label)]
+$evidence
+
+Compare the evidence against the profile. Confirm or refine only what the evidence supports; never invent voice from nothing.

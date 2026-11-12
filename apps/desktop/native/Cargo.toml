@@ -7,11 +7,12 @@ license = "MIT"
 publish = false
 
 [dependencies]
+wenyi-core = { path = "../../../crates/wenyi-core" }
 gpui-kit = { version = "0.8", features = ["tree-sitter-yaml"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "multipart"] }
 rfd = "0.15"
+dirs = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 futures = "0.3"
 getrandom = "0.3"

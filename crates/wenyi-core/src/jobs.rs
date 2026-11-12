@@ -31,7 +31,9 @@ pub const TASK_NAMES: [&str; 9] = [
 ];
 
 /// Parallel workflow lanes (chapter translations run concurrently).
-pub const WORKFLOW_CONSUMERS: usize = 3;
+/// Four lanes: three chapter translations plus headroom so one book-wide
+/// job (or a slow chapter) never starves the remaining chapters.
+pub const WORKFLOW_CONSUMERS: usize = 4;
 /// Parallel export lanes.
 pub const EXPORT_CONSUMERS: usize = 2;
 /// Bounded queue depth (backpressure: full queues reject admission).
@@ -612,9 +614,66 @@ impl JobsRuntime {
                 _ = stopping.wait_for(|stop| *stop) => return,
                 _ = tokio::time::sleep(interval) => {}
             }
-            // Curator admission happens through `admit` by the caller
-            // (Slice 5 owns term selection); the sweep only wakes the loop.
-            let _ = &self.curator;
+            // Low-frequency safety sweep: admit one curator pass per project
+            // that has glossary terms and no active curator. Normal work is
+            // event-driven (translation reindexes dirty books); the sweep
+            // only recovers missed dirty work. The body must be registered
+            // via `register("run_glossary_curator", ..)` before `start()`;
+            // admission fails safe (already-active/full) and retries next
+            // sweep.
+            if !self.tasks.contains_key("run_glossary_curator") {
+                continue;
+            }
+            let projects = store::open(&self.db_path)
+                .and_then(|conn| store::list_projects(&conn))
+                .unwrap_or_default();
+            for project in projects {
+                let has_terms = store::open(&self.db_path)
+                    .and_then(|conn| crate::glossary::all_terms_counts(&conn, &project.id))
+                    .unwrap_or(0)
+                    > 0;
+                if !has_terms {
+                    continue;
+                }
+                let run_id = match crate::model::RunId::new(format!(
+                    "curator-{}-{}",
+                    project.id.as_str(),
+                    store::now_ms()
+                )) {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                };
+                let job_id = match crate::model::JobId::new(format!("job-{}", run_id.as_str())) {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                };
+                let enqueued = store::open(&self.db_path).and_then(|conn| {
+                    store::enqueue_job(
+                        &conn,
+                        &job_id,
+                        &project.id,
+                        "glossary_curator",
+                        &run_id,
+                        "{}",
+                    )
+                });
+                if enqueued.is_err() {
+                    continue;
+                }
+                let mut params = BTreeMap::new();
+                params.insert(
+                    "db_path".to_string(),
+                    serde_json::Value::String(self.db_path.to_string_lossy().into_owned()),
+                );
+                let _ = self.admit(
+                    &project.id,
+                    "glossary_curator",
+                    "run_glossary_curator",
+                    &job_id,
+                    &run_id,
+                    params,
+                );
+            }
         }
     }
 

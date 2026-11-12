@@ -50,6 +50,7 @@ pipeline:
   translation_mode: standard # standard | best_of_three; best_of_three requires polish
   rolling_context_segments: 6 # Number of recent translated paragraphs supplied as context
   book_understanding: true # Prescan the source for a whole-book synopsis and chapter digests used during translation
+  style_observation: true # Observe completed chapters into style proposals with the cheap tier; disable to save cost
   prescan_concurrency: 4 # Concurrent chapter-digest workers; chapters are independent, 1 runs serially
   annotation_alignment: true # Align EPUB annotation links per paragraph; if disabled, target links fall back to paragraph ends
   annotation_alignment_concurrency: 4 # Maximum concurrent alignment requests when a paragraph has multiple annotations
@@ -125,6 +126,8 @@ class PipelineConfig(BaseModel):
     rolling_context_segments: int = 6
     # Prescan for a synopsis and chapter digests; disable to save prescan cost.
     book_understanding: bool = True
+    # Observe completed chapters into style proposals (cheap tier).
+    style_observation: bool = True
     prescan_concurrency: int = (
         4  # Concurrent chapter-digest workers; chapters are independent, 1 runs serially
     )

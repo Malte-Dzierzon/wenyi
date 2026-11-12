@@ -70,6 +70,7 @@ pub struct RunRow {
 
 /// Grouping key for the usage breakdown, mirroring `UsageGroup`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)] // Stable analytics labels.
 pub enum UsageGroup {
     ByStage,
     ByModel,
@@ -77,7 +78,11 @@ pub enum UsageGroup {
 }
 
 impl UsageGroup {
-    pub const ALL: [UsageGroup; 3] = [UsageGroup::ByStage, UsageGroup::ByModel, UsageGroup::ByProvider];
+    pub const ALL: [UsageGroup; 3] = [
+        UsageGroup::ByStage,
+        UsageGroup::ByModel,
+        UsageGroup::ByProvider,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
@@ -115,7 +120,9 @@ fn int(value: &serde_json::Value) -> Option<u64> {
             } else if n.is_i64() {
                 u64::try_from(n.as_i64()?).ok()
             } else {
-                n.as_f64().filter(|v| v.is_finite() && *v >= 0.0).map(|v| v as u64)
+                n.as_f64()
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                    .map(|v| v as u64)
             }
         }
         _ => None,
@@ -127,7 +134,11 @@ fn obj<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Va
 }
 
 fn str_field(value: &serde_json::Value, key: &str) -> String {
-    value.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// `cacheRate` from accountingData.ts: hit share of cache traffic, undefined
@@ -148,7 +159,9 @@ pub fn cache_rate(hit: Option<f64>, miss: Option<f64>, input: Option<f64>) -> Op
 /// `formatDuration` from accountingData.ts: seconds → "4.1 s" / "6m 6s" /
 /// "22m 13s" / "1h 2m 3s".
 pub fn format_duration(seconds: Option<f64>) -> String {
-    let Some(seconds) = seconds else { return "—".into() };
+    let Some(seconds) = seconds else {
+        return "—".into();
+    };
     if seconds < 60.0 {
         let rounded = (seconds * 10.0).round() / 10.0;
         if rounded == rounded.trunc() {
@@ -170,7 +183,9 @@ pub fn format_duration(seconds: Option<f64>) -> String {
 /// Format an integer with thousands separators ("496,861"), mirroring the
 /// locale-aware `toLocaleString` in Accounting.tsx.
 pub fn format_count(value: Option<u64>) -> String {
-    let Some(mut value) = value else { return "—".into() };
+    let Some(mut value) = value else {
+        return "—".into();
+    };
     if value == 0 {
         return "0".into();
     }
@@ -205,8 +220,13 @@ pub struct UsageMetrics {
 }
 
 impl UsageMetrics {
-    pub fn from_stats(stats: &crate::client::ProjectStats, _running: bool) -> Self {
-        let totals = obj(&stats.usage, "totals");
+    /// Build from the raw usage/timing ledgers (serde JSON, defensive reads).
+    pub fn from_parts(
+        usage: &serde_json::Value,
+        timing: &serde_json::Value,
+        _running: bool,
+    ) -> Self {
+        let totals = obj(usage, "totals");
         let missing = serde_json::Value::Null;
         let total_tokens = totals.and_then(|t| int(t.get("total_tokens").unwrap_or(&missing)));
         let calls = totals.and_then(|t| int(t.get("calls").unwrap_or(&missing)));
@@ -217,28 +237,42 @@ impl UsageMetrics {
                 t.get("prompt_tokens").and_then(num),
             )
         });
-        let total_seconds = stats.timing.get("total_seconds").and_then(num);
+        let total_seconds = timing.get("total_seconds").and_then(num);
         // True output rate over timed calls only: historical tokens lack
         // wall-clock time, so dividing them by fresh milliseconds would
         // inflate the rate by orders of magnitude.
         let timed_ms = totals.and_then(|t| int(t.get("completion_ms").unwrap_or(&missing)));
-        let timed_tokens = totals.and_then(|t| int(t.get("timed_completion_tokens").unwrap_or(&missing)));
+        let timed_tokens =
+            totals.and_then(|t| int(t.get("timed_completion_tokens").unwrap_or(&missing)));
         let tokens_per_second = match (timed_tokens, timed_ms) {
             (Some(t), Some(ms)) if ms > 0 => Some(t as f64 / (ms as f64 / 1000.0)),
             _ => None,
         };
-        Self { total_tokens, calls, cache_rate, total_seconds, tokens_per_second }
+        Self {
+            total_tokens,
+            calls,
+            cache_rate,
+            total_seconds,
+            tokens_per_second,
+        }
     }
 }
 
 /// Sort key for usage rows: total tokens desc, then id asc (mirrors `usageRows`).
-pub fn usage_rows_for_group(usage: &serde_json::Value, group: UsageGroup) -> Vec<(String, UsageRow)> {
+pub fn usage_rows_for_group(
+    usage: &serde_json::Value,
+    group: UsageGroup,
+) -> Vec<(String, UsageRow)> {
     let slots = usage
         .get(group.key())
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default();
-    let labels = usage.get("labels").and_then(|v| v.as_object()).cloned().unwrap_or_default();
+    let labels = usage
+        .get("labels")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
     let mut rows: Vec<(String, UsageRow)> = Vec::new();
     for (id, slot) in slots.iter() {
         let label = labels
@@ -314,7 +348,11 @@ pub fn timing_runs(timing: &serde_json::Value) -> Vec<RunRow> {
                 .collect()
         })
         .unwrap_or_default();
-    runs.sort_by(|a, b| b.started_at.cmp(&a.started_at).then_with(|| a.id.cmp(&b.id)));
+    runs.sort_by(|a, b| {
+        b.started_at
+            .cmp(&a.started_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     runs
 }
 
@@ -413,8 +451,14 @@ fn metric_card(label: &str, value: &str, dot: Hsla, palette: &theme::Palette) ->
 /// Headline metric row: cumulative tokens / requests / cache hit rate /
 /// recorded time / avg tokens per second.
 pub fn metric_cards(metrics: &UsageMetrics, palette: &theme::Palette) -> impl IntoElement {
-    let rate = metrics.cache_rate.map(|r| format!("{:.1}%", r * 100.0)).unwrap_or_else(|| "—".into());
-    let tps = metrics.tokens_per_second.map(|t| format!("{:.0} t/s", t)).unwrap_or_else(|| "—".into());
+    let rate = metrics
+        .cache_rate
+        .map(|r| format!("{:.1}%", r * 100.0))
+        .unwrap_or_else(|| "—".into());
+    let tps = metrics
+        .tokens_per_second
+        .map(|t| format!("{:.0} t/s", t))
+        .unwrap_or_else(|| "—".into());
     div()
         .flex()
         .flex_row()
@@ -423,10 +467,30 @@ pub fn metric_cards(metrics: &UsageMetrics, palette: &theme::Palette) -> impl In
         .p_4()
         .rounded_md()
         .bg(palette.muted)
-        .child(metric_card("Cumulative tokens", &format_count(metrics.total_tokens), palette.primary, palette))
-        .child(metric_card("Model requests", &format_count(metrics.calls), palette.accent_foreground, palette))
-        .child(metric_card("Cache hit rate", &rate, palette.secondary_foreground, palette))
-        .child(metric_card("Recorded time", &format_duration(metrics.total_seconds), palette.card_foreground, palette))
+        .child(metric_card(
+            "Cumulative tokens",
+            &format_count(metrics.total_tokens),
+            palette.primary,
+            palette,
+        ))
+        .child(metric_card(
+            "Model requests",
+            &format_count(metrics.calls),
+            palette.accent_foreground,
+            palette,
+        ))
+        .child(metric_card(
+            "Cache hit rate",
+            &rate,
+            palette.secondary_foreground,
+            palette,
+        ))
+        .child(metric_card(
+            "Recorded time",
+            &format_duration(metrics.total_seconds),
+            palette.card_foreground,
+            palette,
+        ))
         .child(metric_card("Avg tokens/s", &tps, palette.success, palette))
 }
 
@@ -487,7 +551,11 @@ fn usage_bar(row: &UsageRow, maximum: f64, palette: &theme::Palette) -> impl Int
 /// cache hit-rate), with a segment legend on top. Shows the top 8 rows by
 /// tokens (mirrors the source cap).
 /// The group tab strip lives in `progress.rs` (needs `cx.listener`).
-pub fn usage_rows(usage: &serde_json::Value, group: UsageGroup, palette: &theme::Palette) -> impl IntoElement {
+pub fn usage_rows(
+    usage: &serde_json::Value,
+    group: UsageGroup,
+    palette: &theme::Palette,
+) -> impl IntoElement {
     let rows = usage_rows_for_group(usage, group);
     let maximum = rows.iter().map(|(_, r)| r.total).fold(1.0_f64, f64::max);
     let mut list = div().flex().flex_col().gap_3();
@@ -517,18 +585,23 @@ pub fn usage_rows(usage: &serde_json::Value, group: UsageGroup, palette: &theme:
                         .justify_between()
                         .gap_2()
                         .text_sm()
-                        .child(div().font_weight(FontWeight::MEDIUM).child(row.label.clone()))
                         .child(
                             div()
-                                .text_xs()
-                                .text_color(palette.muted_foreground)
-                                .child(format!(
-                                    "{} tokens · {} calls{}",
-                                    format_count(Some(row.total as u64)),
-                                    format_count(Some(row.calls)),
-                                    if rate.is_empty() { String::new() } else { format!(" · {rate}") },
-                                )),
-                        ),
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(row.label.clone()),
+                        )
+                        .child(div().text_xs().text_color(palette.muted_foreground).child(
+                            format!(
+                                "{} tokens · {} calls{}",
+                                format_count(Some(row.total as u64)),
+                                format_count(Some(row.calls)),
+                                if rate.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" · {rate}")
+                                },
+                            ),
+                        )),
                 )
                 .child(usage_bar(row, maximum, palette)),
         );
@@ -537,7 +610,12 @@ pub fn usage_rows(usage: &serde_json::Value, group: UsageGroup, palette: &theme:
         .flex()
         .flex_col()
         .gap_3()
-        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage breakdown"))
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .child("Usage breakdown"),
+        )
         .child(
             div()
                 .flex()
@@ -546,9 +624,17 @@ pub fn usage_rows(usage: &serde_json::Value, group: UsageGroup, palette: &theme:
                 .gap_3()
                 .child(legend_dot(palette.success, "Cached input".into(), palette))
                 .child(legend_dot(palette.info, "Uncached input".into(), palette))
-                .child(legend_dot(palette.muted_foreground, "Other input".into(), palette))
+                .child(legend_dot(
+                    palette.muted_foreground,
+                    "Other input".into(),
+                    palette,
+                ))
                 .child(legend_dot(palette.warning, "Output".into(), palette))
-                .child(legend_dot(palette.secondary_foreground, "Other".into(), palette)),
+                .child(legend_dot(
+                    palette.secondary_foreground,
+                    "Other".into(),
+                    palette,
+                )),
         )
         .child(list)
 }
@@ -583,7 +669,10 @@ pub fn usage_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl 
     let mut legend = div().flex().flex_col().gap_1();
     if rows.is_empty() {
         legend = legend.child(
-            div().text_sm().text_color(palette.muted_foreground).child("No usage yet"),
+            div()
+                .text_sm()
+                .text_color(palette.muted_foreground)
+                .child("No usage yet"),
         );
     }
     let data: Vec<ShareDatum> = rows
@@ -610,7 +699,14 @@ pub fn usage_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl 
                         .items_center()
                         .gap_2()
                         .min_w_0()
-                        .child(div().w(px(10.0)).h(px(10.0)).rounded_sm().bg(d.color).flex_none())
+                        .child(
+                            div()
+                                .w(px(10.0))
+                                .h(px(10.0))
+                                .rounded_sm()
+                                .bg(d.color)
+                                .flex_none(),
+                        )
                         .child(div().truncate().child(d.label.clone())),
                 )
                 .child(
@@ -636,7 +732,12 @@ pub fn usage_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl 
         .flex()
         .flex_col()
         .gap_3()
-        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage by model"))
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .child("Usage by model"),
+        )
         .child(
             div()
                 .flex()
@@ -645,24 +746,33 @@ pub fn usage_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl 
         )
         .child(legend)
         .child(
-            div().text_xs().text_color(palette.muted_foreground).child(format!(
-                "{} tokens across {} models",
-                format_count(Some(total as u64)),
-                rows.len()
-            )),
+            div()
+                .text_xs()
+                .text_color(palette.muted_foreground)
+                .child(format!(
+                    "{} tokens across {} models",
+                    format_count(Some(total as u64)),
+                    rows.len()
+                )),
         )
 }
 
 /// Provider share donut: same polished ring as [`usage_donut`] but over the
 /// provider ledger. With 2–3 providers a donut fills the panel and reads
 /// better than near-empty ranking bars. Empty → "No usage yet".
-pub fn usage_provider_donut(usage: &serde_json::Value, palette: &theme::Palette) -> impl IntoElement {
+pub fn usage_provider_donut(
+    usage: &serde_json::Value,
+    palette: &theme::Palette,
+) -> impl IntoElement {
     let rows = usage_rows_for_group(usage, UsageGroup::ByProvider);
     let colors = share_colors(palette);
     let mut legend = div().flex().flex_col().gap_2();
     if rows.is_empty() {
         legend = legend.child(
-            div().text_sm().text_color(palette.muted_foreground).child("No usage yet"),
+            div()
+                .text_sm()
+                .text_color(palette.muted_foreground)
+                .child("No usage yet"),
         );
     }
     let data: Vec<ShareDatum> = rows
@@ -677,7 +787,11 @@ pub fn usage_provider_donut(usage: &serde_json::Value, palette: &theme::Palette)
         .collect();
     let total: f64 = rows.iter().map(|(_, r)| r.total).sum();
     for d in &data {
-        let pct = if total > 0.0 { d.total / total * 100.0 } else { 0.0 };
+        let pct = if total > 0.0 {
+            d.total / total * 100.0
+        } else {
+            0.0
+        };
         legend = legend.child(
             div()
                 .flex()
@@ -696,11 +810,26 @@ pub fn usage_provider_donut(usage: &serde_json::Value, palette: &theme::Palette)
                                 .items_center()
                                 .gap_2()
                                 .min_w_0()
-                                .child(div().w(px(10.0)).h(px(10.0)).rounded_sm().bg(d.color).flex_none())
-                                .child(div().truncate().font_weight(FontWeight::MEDIUM).child(d.label.clone())),
+                                .child(
+                                    div()
+                                        .w(px(10.0))
+                                        .h(px(10.0))
+                                        .rounded_sm()
+                                        .bg(d.color)
+                                        .flex_none(),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(d.label.clone()),
+                                ),
                         )
                         .child(
-                            div().text_sm().font_weight(FontWeight::SEMIBOLD).child(format!("{pct:.1}%")),
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(format!("{pct:.1}%")),
                         ),
                 )
                 .child(
@@ -724,7 +853,12 @@ pub fn usage_provider_donut(usage: &serde_json::Value, palette: &theme::Palette)
         .flex()
         .flex_col()
         .gap_3()
-        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Usage by provider"))
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .child("Usage by provider"),
+        )
         .child(
             div()
                 .flex()
@@ -733,11 +867,14 @@ pub fn usage_provider_donut(usage: &serde_json::Value, palette: &theme::Palette)
         )
         .child(legend)
         .child(
-            div().text_xs().text_color(palette.muted_foreground).child(format!(
-                "{} tokens across {} providers",
-                format_count(Some(total as u64)),
-                rows.len()
-            )),
+            div()
+                .text_xs()
+                .text_color(palette.muted_foreground)
+                .child(format!(
+                    "{} tokens across {} providers",
+                    format_count(Some(total as u64)),
+                    rows.len()
+                )),
         )
 }
 
@@ -750,7 +887,12 @@ pub fn run_chart(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement 
             .flex()
             .items_center()
             .justify_between()
-            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Run history"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Run history"),
+            )
             .child(
                 div()
                     .text_xs()
@@ -792,7 +934,11 @@ pub fn run_chart(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement 
                         .gap_2()
                         .text_sm()
                         .child(div().font_weight(FontWeight::MEDIUM).child(op))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(format_duration(Some(run.seconds)))),
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(format_duration(Some(run.seconds))),
+                        ),
                 )
                 .child(
                     div()
@@ -832,26 +978,30 @@ struct TimeDatum {
 /// with thinned ticks — trend context without page dominance. The usage
 /// ledger has no per-timestamp token series, so each run is one point.
 pub fn usage_over_time_compact(runs: &[RunRow], palette: &theme::Palette) -> impl IntoElement {
-    let section = div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .flex()
-                .items_baseline()
-                .justify_between()
-                .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Run durations"))
-                .child(
-                    div().text_xs().text_color(palette.muted_foreground).child(format!(
-                        "{} runs",
-                        runs.len()
-                    )),
-                ),
-        );
+    let section = div().flex().flex_col().gap_1().child(
+        div()
+            .flex()
+            .items_baseline()
+            .justify_between()
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Run durations"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(palette.muted_foreground)
+                    .child(format!("{} runs", runs.len())),
+            ),
+    );
     if runs.is_empty() {
         return section.child(
-            div().text_sm().text_color(palette.muted_foreground).child("No data yet"),
+            div()
+                .text_sm()
+                .text_color(palette.muted_foreground)
+                .child("No data yet"),
         );
     }
     let data: Vec<TimeDatum> = runs
@@ -859,7 +1009,10 @@ pub fn usage_over_time_compact(runs: &[RunRow], palette: &theme::Palette) -> imp
         .rev()
         .take(12)
         .rev()
-        .map(|r| TimeDatum { label: short_time(&r.started_at).into(), seconds: r.seconds })
+        .map(|r| TimeDatum {
+            label: short_time(&r.started_at).into(),
+            seconds: r.seconds,
+        })
         .collect();
     let chart = LineChart::new(data)
         .id("progress-usage-time-compact")
@@ -874,27 +1027,24 @@ pub fn usage_over_time_compact(runs: &[RunRow], palette: &theme::Palette) -> imp
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_rate, format_count, format_duration, timing_runs, usage_rows_for_group, UsageGroup, UsageMetrics, UsageRow};
-
-    fn stats(usage: serde_json::Value, timing: serde_json::Value) -> crate::client::ProjectStats {
-        crate::client::ProjectStats { usage, timing, live: None }
-    }
+    use super::{
+        cache_rate, format_count, format_duration, timing_runs, usage_rows_for_group, UsageGroup,
+        UsageMetrics,
+    };
 
     #[test]
     fn metrics_map_to_documented_paths() {
-        let s = stats(
-            serde_json::json!({
-                "totals": {
-                    "calls": 37,
-                    "total_tokens": 496861,
-                    "prompt_tokens": 1000,
-                    "cache_hit_tokens": 356,
-                    "cache_miss_tokens": 644,
-                }
-            }),
-            serde_json::json!({ "total_seconds": 133.0 }),
-        );
-        let m = UsageMetrics::from_stats(&s, false);
+        let usage = serde_json::json!({
+            "totals": {
+                "calls": 37,
+                "total_tokens": 496861,
+                "prompt_tokens": 1000,
+                "cache_hit_tokens": 356,
+                "cache_miss_tokens": 644,
+            }
+        });
+        let timing = serde_json::json!({ "total_seconds": 133.0 });
+        let m = UsageMetrics::from_parts(&usage, &timing, false);
         assert_eq!(m.total_tokens, Some(496861));
         assert_eq!(m.calls, Some(37));
         assert!((m.cache_rate.unwrap() - 0.356).abs() < 1e-9);

@@ -24,7 +24,7 @@ from .registry import OPERATIONS, validate_bindings, validate_options
 
 # Every consumed template is frozen with the invocation; unused languages are never hashed.
 TASK_GROUPS = {
-    "analysis": ("analyzer", "chapter_digest", "book_synopsis"),
+    "analysis": ("analyzer", "chapter_digest", "book_synopsis", "style_observer"),
     "translation": (
         "translator",
         "polisher",

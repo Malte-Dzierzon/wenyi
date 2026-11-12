@@ -56,11 +56,11 @@ fn policy_fingerprints_match_oracle() {
     let analysis = plan("analysis");
     assert_eq!(
         analysis.fingerprint,
-        "bb852227387c860b2f8d049cf3e7f0df7cae573bc70d9e37c5b82ef745b7026f"
+        "66bd0c9e1e9eb3b2883256521603cc17efc6028ee68b81ef6619275dc6515ed2"
     );
     assert_eq!(
         analysis.semantic_fingerprint,
-        "2c8247f521d4d83afb2f72ab4b8afceee228db4a8051757d4b07e9d08be2dea9"
+        "facf23612b8b66fc1d834830bb83e2375f5a48591a9abc9b587beca7a83472de"
     );
     assert_eq!(
         analysis.task_fingerprint("analyzer"),

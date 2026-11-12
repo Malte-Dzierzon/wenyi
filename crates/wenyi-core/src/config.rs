@@ -388,6 +388,8 @@ pub struct PipelineConfig {
     pub rolling_context_segments: i64,
     /// Prescan digests and synopsis.
     pub book_understanding: bool,
+    /// Observe completed chapters into style proposals (cheap tier).
+    pub style_observation: bool,
     /// Concurrent chapter-digest workers.
     pub prescan_concurrency: i64,
     /// Align EPUB annotation links after finalization.
@@ -441,6 +443,7 @@ impl Default for PipelineConfig {
             polish: true,
             rolling_context_segments: 6,
             book_understanding: true,
+            style_observation: true,
             prescan_concurrency: 4,
             annotation_alignment: true,
             annotation_alignment_concurrency: 4,
@@ -461,13 +464,14 @@ impl Default for PipelineConfig {
     }
 }
 
-const PIPELINE_FIELDS: [&str; 22] = [
+const PIPELINE_FIELDS: [&str; 23] = [
     "translation_mode",
     "review",
     "align_retry_limit",
     "polish",
     "rolling_context_segments",
     "book_understanding",
+    "style_observation",
     "prescan_concurrency",
     "annotation_alignment",
     "annotation_alignment_concurrency",
@@ -569,6 +573,7 @@ impl PipelineConfig {
                 "book_understanding",
                 defaults.book_understanding,
             )?,
+            style_observation: bool_field(&map, "style_observation", defaults.style_observation)?,
             prescan_concurrency: i64_field(
                 &map,
                 "prescan_concurrency",

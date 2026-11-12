@@ -155,6 +155,56 @@ pub fn parse_srt_text(content: &str) -> Result<Vec<SrtCue>> {
     Ok(cues)
 }
 
+/// Write monolingual and/or bilingual SRT files (oracle `write_srt_outputs`).
+/// Returns the written paths.
+pub fn write_srt_outputs(
+    cues: &[SrtCue],
+    translations: &std::collections::BTreeMap<String, String>,
+    mono_path: Option<&Path>,
+    bilingual_path: Option<&Path>,
+) -> Result<Vec<std::path::PathBuf>> {
+    let mut written = Vec::new();
+    if let Some(path) = mono_path {
+        let blocks: Vec<String> = cues
+            .iter()
+            .map(|cue| {
+                format!(
+                    "{}\n{}\n{}\n",
+                    cue.index,
+                    cue.timestamp,
+                    translations
+                        .get(&cue.index)
+                        .cloned()
+                        .unwrap_or_else(|| cue.text.clone())
+                )
+            })
+            .collect();
+        crate::document::assemble::write_atomic(path, blocks.join("\n").as_bytes())?;
+        written.push(path.to_path_buf());
+    }
+    if let Some(path) = bilingual_path {
+        // Bilingual is always target-first (no `order` param in the oracle).
+        let blocks: Vec<String> = cues
+            .iter()
+            .map(|cue| {
+                format!(
+                    "{}\n{}\n{}\n{}\n",
+                    cue.index,
+                    cue.timestamp,
+                    translations
+                        .get(&cue.index)
+                        .cloned()
+                        .unwrap_or_else(|| cue.text.clone()),
+                    cue.text
+                )
+            })
+            .collect();
+        crate::document::assemble::write_atomic(path, blocks.join("\n").as_bytes())?;
+        written.push(path.to_path_buf());
+    }
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

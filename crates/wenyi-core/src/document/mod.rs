@@ -6,6 +6,7 @@
 pub mod anchors;
 pub mod annotate;
 pub mod assemble;
+pub mod docx;
 pub mod epub;
 pub mod hash;
 pub mod html;

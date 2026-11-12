@@ -22,7 +22,13 @@ pub enum Error {
         /// Entity identity.
         id: String,
     },
-    /// Filesystem failure.
+    /// Write-write conflict: the caller edited against a stale baseline.
+    /// Carries the stale expectation detail (never secrets).
+    #[error("conflict: {0}")]
+    Conflict(String),
+    /// Operation not supported for this input (format, workflow, ...).
+    #[error("unsupported: {0}")]
+    Unsupported(String),
     #[error("io: {path}: {message}")]
     Io {
         /// Affected path.

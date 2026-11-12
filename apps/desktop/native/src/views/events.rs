@@ -1,23 +1,22 @@
-//! Event log (screen: events): timestamped run events, newest first.
+//! Event log (screen: events): engine progress events, newest first.
 //!
 //! Parity source: `features/events/EventsPage.tsx`.
-//! - `GET /projects/:pid/events`, 5s refetch (`refetchInterval: 5000`)
-//! - Backend returns asc; sort desc by id client-side (`select` in source)
-//! - NO type filter (source exposes none; backend filter unused)
-//! - Row: timestamp, type badge (label + tone), expandable payload
+//! - Live push via engine `subscribe()` (`started`/`progress`/`done`/
+//!   `failed`/`interrupted`); rows cap at 500, newest first.
+//! - NO type filter (source exposes none).
+//! - Row: type badge (label + tone), expandable payload
 //!   (`<details>/<summary>` → `Collapsible`)
-//! - States: loading / error / empty (source renders `ErrorNotice` + the
-//!   `!events?.length` empty branch while errors surface separately)
+//! - States: listening / error / empty.
 
 use std::collections::HashSet;
 
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
 use gpui_kit::*;
+use gpui_kit::{InteractiveElement, StatefulInteractiveElement};
 
 use crate::{
-    client::{Client, EventOut},
+    service::{EngineEvent, EventOut, ServiceHandle},
     theme,
 };
 
@@ -25,16 +24,11 @@ use crate::{
 /// English strings come from `packages/ui/src/i18n/locales/en.ts`.
 fn badge_for(event_type: &str) -> (&str, BadgeTone) {
     match event_type {
-        "project" => ("Project", BadgeTone::Info),
-        "run_initialized" | "language_detected" | "analysis_saved" | "book_synopsis_saved" => {
-            ("Preparation", BadgeTone::Secondary)
-        }
-        "batch_translated" => ("Translation", BadgeTone::Info),
-        "batch_skipped" => ("Translation", BadgeTone::Secondary),
-        "chapter_done" => ("Completed", BadgeTone::Success),
-        "chapter_reviewed" => ("Review", BadgeTone::Warning),
-        "batch_glossary_extracted" => ("Terms", BadgeTone::Secondary),
-        "assembled" => ("Export", BadgeTone::Success),
+        "started" => ("Started", BadgeTone::Info),
+        "progress" => ("Progress", BadgeTone::Info),
+        "done" => ("Done", BadgeTone::Success),
+        "failed" => ("Failed", BadgeTone::Warning),
+        "interrupted" => ("Interrupted", BadgeTone::Warning),
         _ => ("Event", BadgeTone::Secondary),
     }
 }
@@ -58,113 +52,51 @@ impl BadgeTone {
     }
 }
 
-fn payload_str(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Null => "—".into(),
-        other => {
-            let s = other.to_string();
-            if s.len() > 200 {
-                s.chars().take(200).collect()
-            } else {
-                s
-            }
-        }
-    }
-}
-
-/// Human-readable one-liner. Mirrors `describe(e)` in `EventsPage.tsx`.
-fn describe(event: &EventOut) -> String {
-    let p = &event.payload;
-    let get = |key: &str| {
-        p.get(key)
-            .map(payload_str)
-            .unwrap_or_else(|| "—".into())
+/// Human-readable one-liner for an engine progress event.
+fn describe(event: &EngineEvent) -> String {
+    let detail = if event.total > 0 {
+        format!(" ({}/{})", event.done, event.total)
+    } else if event.done > 0 {
+        format!(" ({})", event.done)
+    } else {
+        String::new()
     };
-    match event.event_type.as_str() {
-        "language_detected" => format!("Source language detected: {}", get("source_lang")),
-        "analysis_saved" => "Style analysis completed".into(),
-        "book_synopsis_saved" => "Book synopsis generated".into(),
-        "batch_translated" => format!(
-            "Chapter {}: batch completed (paragraphs: {})",
-            chapter_one_based(p),
-            get("count")
-        ),
-        "batch_skipped" => format!("Chapter {}: translated batch skipped", chapter_one_based(p)),
-        "chapter_done" => format!(
-            "Chapter {} “{}” translated",
-            chapter_one_based(p),
-            get("title")
-        ),
-        "chapter_reviewed" => format!(
-            "Chapter {} — review issues: {}",
-            chapter_one_based(p),
-            get("issue_count")
-        ),
-        "assembled" => {
-            let files = match p.get("outputs") {
-                Some(serde_json::Value::Array(items)) => items
-                    .iter()
-                    .map(payload_str)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                other => other.map(payload_str).unwrap_or_default(),
-            };
-            format!("Exported files: {files}")
-        }
-        "run_initialized" => format!("Project initialized — chapters: {}", get("chapters")),
-        _ => event.event_type.clone(),
+    if event.message.trim().is_empty() {
+        format!("{}{}", event.kind, detail)
+    } else {
+        format!("{}{} — {}", event.kind, detail, event.message.trim())
     }
 }
 
-/// Source adds 1 to the 0-based chapter index (`Number(p.chapter) + 1`).
-fn chapter_one_based(payload: &serde_json::Value) -> String {
-    match payload.get("chapter") {
-        Some(serde_json::Value::Number(n)) => n
-            .as_i64()
-            .map(|c| (c + 1).to_string())
-            .unwrap_or_else(|| n.to_string()),
-        other => other.map(payload_str).unwrap_or_else(|| "—".into()),
-    }
-}
-
-/// Compact `key: value` lines for the expandable payload.
-/// Same convention as `compact_json` in `views/progress.rs` (copied, not
-/// imported — sibling views stay independent per integration rules).
-fn compact_json(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Object(map) if !map.is_empty() => map
-            .iter()
-            .take(6)
-            .map(|(k, v)| format!("{k}: {v}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        serde_json::Value::Null => "—".into(),
-        other => other.to_string().chars().take(200).collect(),
-    }
-}
-
-fn payload_lines(payload: &serde_json::Value) -> Vec<String> {
-    match payload {
-        serde_json::Value::Object(map) if !map.is_empty() => map
-            .iter()
-            .map(|(k, v)| format!("{k}: {}", payload_str(v)))
-            .collect(),
-        _ => vec![compact_json(payload)],
-    }
+/// Expandable payload lines for an engine event.
+fn event_lines(event: &EngineEvent) -> Vec<String> {
+    vec![
+        format!("project: {}", event.project_id),
+        format!("run: {}", event.run_id),
+        format!("kind: {}", event.kind),
+        format!("progress: {}/{}", event.done, event.total),
+        format!("message: {}", event.message),
+    ]
 }
 
 pub struct EventsView {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     pid: String,
-    events: Option<Vec<EventOut>>,
-    /// Pre-rendered per-event strings, rebuilt when `events` changes.
-    /// Keeps `render` free of JSON traversal and `format!` per frame.
     rows: Vec<EventRow>,
+    /// Virtualized row state; reset when the row count changes so only
+    /// visible rows are built (was: up to 500 plain `div` rows).
+    rows_list: ListState,
+    /// Content-based row signature for the no-op guard: an unchanged
+    /// history load skips `reset` + `notify` entirely.
+    rows_sig: (usize, u64, u64),
+    /// Highest seen per-project sequence (engine `EngineEvent` has no global
+    /// id; the row id is a local counter).
+    next_id: i64,
     error: Option<String>,
     expanded: HashSet<i64>,
-    /// Whether this screen is currently shown; the 5s poll timer only
-    /// re-arms while visible (set by the App shell on navigation).
+    /// Whether this screen is currently shown (set by the App shell on
+    /// navigation). Stored as a plain flag; live updates arrive via the
+    /// engine `subscribe()` pump while visible.
     visible: bool,
 }
 
@@ -179,13 +111,33 @@ struct EventRow {
 }
 
 impl EventRow {
-    fn new(event: &EventOut) -> Self {
+    fn new(id: i64, event: &EngineEvent) -> Self {
         Self {
-            id: event.id,
-            event_type: event.event_type.clone(),
-            timestamp: event.created_at.clone().unwrap_or_default(),
+            id,
+            event_type: event.kind.clone(),
+            timestamp: String::new(),
             summary: describe(event),
-            lines: payload_lines(&event.payload),
+            lines: event_lines(event),
+        }
+    }
+
+    fn from_stored(id: i64, event: &EventOut) -> Self {
+        let summary = match event.payload.get("message").and_then(|v| v.as_str()) {
+            Some(message) if !message.trim().is_empty() => {
+                format!("{} — {}", event.event_type, message.trim())
+            }
+            _ => event.event_type.clone(),
+        };
+        Self {
+            id,
+            event_type: event.event_type.clone(),
+            timestamp: super::widgets::short_time(&event.ts.to_string()),
+            summary,
+            lines: vec![
+                format!("job: {}", event.job_id),
+                format!("kind: {}", event.event_type),
+                format!("payload: {event}", event = event.payload),
+            ],
         }
     }
 }
@@ -193,32 +145,149 @@ impl EventRow {
 impl EventsView {
     pub fn new(pid: String, _window: &mut Window, _cx: &mut Context<Self>) -> Self {
         Self {
-            client: None,
+            service: None,
             pid,
-            events: None,
             rows: Vec::new(),
+            rows_list: ListState::new(0, ListAlignment::Top, px(120.0)),
+            rows_sig: (0, 0, 0),
+            next_id: 0,
             error: None,
             expanded: HashSet::new(),
             visible: true,
         }
     }
 
-    /// Called by the App shell on navigation. Becoming visible resumes the
-    /// poll loop with an immediate refresh.
+    /// Signature of the current row set for change detection. Content-based
+    /// (engine events carry no stable per-project id and the local row
+    /// counter grows per load, so raw ids never match across reloads).
+    fn rows_signature(rows: &[EventRow]) -> (usize, u64, u64) {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for row in rows {
+            row.event_type.hash(&mut hasher);
+            row.timestamp.hash(&mut hasher);
+            row.summary.hash(&mut hasher);
+        }
+        let newest = rows.first().map(|r| r.id).unwrap_or(0);
+        let oldest = rows.last().map(|r| r.id).unwrap_or(0);
+        (
+            rows.len(),
+            hasher.finish(),
+            (newest as u64) ^ ((oldest as u64) << 1),
+        )
+    }
+
+    /// Replace rows only when the signature changed; resets the virtual
+    /// list and notifies. Returns true when a re-render was triggered.
+    fn set_rows(&mut self, mut rows: Vec<EventRow>, cx: &mut Context<Self>) -> bool {
+        rows.truncate(500);
+        let sig = Self::rows_signature(&rows);
+        if sig == self.rows_sig {
+            return false;
+        }
+        self.rows = rows;
+        self.rows_sig = sig;
+        self.rows_list.reset(self.rows.len());
+        cx.notify();
+        true
+    }
+    /// Called by the App shell on navigation. Becoming visible resumes live
+    /// updates; when the history is empty (or a past load failed) it also
+    /// triggers a reload so a stale view never stays blank.
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
-        if visible && !self.visible {
-            self.visible = true;
-            self.refresh(cx);
-        } else {
-            self.visible = visible;
+        let became_visible = visible && !self.visible;
+        self.visible = visible;
+        if became_visible && (self.rows.is_empty() || self.error.is_some()) {
+            self.reload_history(cx);
         }
     }
 
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client);
-        self.refresh(cx);
+    /// One-shot history load with the no-op guard (`set_rows` skips reset +
+    /// notify when nothing changed). Failures surface in `error` instead of
+    /// leaving the "Listening…" spinner forever.
+    fn reload_history(&mut self, cx: &mut Context<Self>) {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let history = cx
+                .background_spawn(async move { service.list_events(&pid) })
+                .await;
+            _ = this.update(cx, |view: &mut EventsView, cx| match history {
+                Ok(events) => {
+                    let mut rows: Vec<EventRow> = events
+                        .into_iter()
+                        .rev()
+                        .map(|event| {
+                            view.next_id += 1;
+                            EventRow::from_stored(view.next_id, &event)
+                        })
+                        .collect();
+                    // History comes back oldest-first from `rev()`: flip so
+                    // newest is at index 0 like the live pump maintains.
+                    rows.reverse();
+                    // No-op guard: an unchanged history skips reset + notify.
+                    view.error = None;
+                    view.set_rows(rows, cx);
+                }
+                Err(err) => {
+                    let msg = err.to_string();
+                    if view.error.as_ref() != Some(&msg) {
+                        view.error = Some(msg);
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service.clone());
+        // History first (persisted job events), then the live push pump.
+        self.reload_history(cx);
+        // `subscribe()` opens a broadcast channel per pump iteration; the
+        // pump runs on a background thread and forwards matching events to
+        // the UI thread. Resubscribing each iteration keeps the non-Clone
+        // receiver inside a single `background_spawn` future.
+        let pid = self.pid.clone();
+        cx.spawn(async move |this, cx| loop {
+            let mut rx = service.subscribe();
+            let pid = pid.clone();
+            let event = cx
+                .background_spawn(async move {
+                    loop {
+                        match rx.recv().await {
+                            Ok(event) => {
+                                if event.project_id == pid {
+                                    return Some(event);
+                                }
+                            }
+                            Err(_) => return None,
+                        }
+                    }
+                })
+                .await;
+            let Some(event) = event else { break };
+            let stop = this
+                .update(cx, |view: &mut EventsView, cx| {
+                    if view.visible {
+                        view.next_id += 1;
+                        let row = EventRow::new(view.next_id, &event);
+                        let mut rows = std::mem::take(&mut view.rows);
+                        rows.insert(0, row);
+                        view.error = None;
+                        view.set_rows(rows, cx);
+                    }
+                    false
+                })
+                .is_err();
+            if stop {
+                break;
+            }
+        })
+        .detach();
+    }
     fn toggle(&mut self, id: i64, cx: &mut Context<Self>) {
         if !self.expanded.remove(&id) {
             self.expanded.insert(id);
@@ -226,84 +295,82 @@ impl EventsView {
         cx.notify();
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
-            return;
+    /// One virtualized event row (badge + summary + expandable payload).
+    /// Reads by index — only visible rows are built.
+    fn event_row(
+        view: &EventsView,
+        ix: usize,
+        palette: theme::Palette,
+        cx: &mut Context<EventsView>,
+    ) -> AnyElement {
+        let Some(row) = view.rows.get(ix) else {
+            return div().into_any_element();
         };
-        // Incremental tail: first load fetches full history, later polls
-        // only new rows (2s cadence, cheap since_id query).
-        let since = self.events.as_ref().and_then(|v| v.first().map(|e| e.id));
-        cx.spawn(async move |this, cx| {
-            // reqwest needs Tokio: run the future on the shared runtime from
-            // a background thread, then update the entity on the UI thread.
-            let result = cx
-                .background_spawn(async move {
-                    crate::client::block_on(async {
-                        match since {
-                            Some(id) => client.list_events_since(&pid, id).await,
-                            None => client.list_events(&pid).await,
-                        }
-                    })
-                })
-                .await;
-            _ = this.update(cx, |view: &mut EventsView, cx| {
-                match result {
-                    Ok(mut events) => {
-                        // Backend returns asc; newest first (mirrors `select`).
-                        events.sort_by(|a, b| b.id.cmp(&a.id));
-                        if since.is_some() && !events.is_empty() {
-                            // Merge delta: prepend new rows, cap history.
-                            let mut merged = events;
-                            if let Some(old) = view.events.take() {
-                                merged.extend(old);
-                            }
-                            merged.truncate(500);
-                            view.rows = merged.iter().map(EventRow::new).collect();
-                            view.events = Some(merged);
-                            view.error = None;
-                            cx.notify();
-                        } else if since.is_none()
-                            && (view.events.as_ref() != Some(&events) || view.error.is_some())
-                        {
-                            view.rows = events.iter().map(EventRow::new).collect();
-                            view.events = Some(events);
-                            view.error = None;
-                            cx.notify();
-                        }
-                    }
-                    Err(err) => {
-                        let msg = err.to_string();
-                        if view.error.as_ref() != Some(&msg) {
-                            view.error = Some(msg);
-                            cx.notify();
-                        }
-                    }
-                }
-            });
-        })
-        .detach();
-        // 2s delta poll; full history only on first load or navigation.
-        // Only re-arms while visible; navigation resumes via `set_visible`.
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(std::time::Duration::from_secs(2))
-                .await;
-            _ = this.update(cx, |view: &mut EventsView, cx| {
-                if view.visible {
-                    view.refresh(cx);
-                }
-            });
-        })
-        .detach();
+        let id = row.id;
+        let open = view.expanded.contains(&id);
+        let (badge_label, tone) = badge_for(&row.event_type);
+        let tone = tone.color(&palette);
+        let summary_row = div()
+            .id(format!("event-{id}"))
+            .flex()
+            .items_start()
+            .gap_3()
+            .text_sm()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(palette.separator)
+            .cursor_pointer()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(palette.muted_foreground)
+                    .child(row.timestamp.clone()),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .px_2()
+                    .py_0()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(tone)
+                    .text_color(tone)
+                    .child(badge_label.to_string()),
+            )
+            .child(div().flex_1().child(format!(
+                "{} {}",
+                if open { "▾" } else { "▸" },
+                row.summary
+            )))
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)));
+        let payload_box = div()
+            .mt_3()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(palette.border)
+            .flex()
+            .flex_col()
+            .gap_1()
+            .children(row.lines.iter().cloned().map(|line| {
+                div()
+                    .text_xs()
+                    .text_color(palette.muted_foreground)
+                    .child(line)
+            }));
+        Collapsible::new()
+            .w_full()
+            .open(open)
+            .child(summary_row)
+            .content(payload_box)
+            .into_any_element()
     }
 }
 
 impl Render for EventsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::current_palette();
-        // Scroll region owns overflow; flex_1 + min_h_0 lets it shrink in
-        // the app-shell column. Payloads expand via Collapsible (native
-        // <details> equivalent, keyboard-togglable by default).
         let mut col = div()
             .flex()
             .flex_col()
@@ -313,93 +380,33 @@ impl Render for EventsView {
             .p_6()
             .overflow_y_scrollbar()
             .font(theme::fonts::ui())
-            .child(
-                super::ui::page_title("Event log", None::<Div>),
-            );
-
-        // ErrorNotice equivalent (rendered above the card, like the source).
+            .child(super::ui::page_title("Event log", None::<Div>));
         if let Some(err) = &self.error {
             col = col.child(super::ui::error_box(err, &palette));
         }
-
-        let Some(events) = &self.events else {
-            // Loading branch: `useQuery` pending (error shown above if set).
-            if self.error.is_none() {
-                col = col.child(
-                    div()
-                        .text_sm()
-                        .text_color(palette.muted_foreground)
-                        .child("Loading…"),
-                );
-            }
-            return col;
-        };
+        if self.rows.is_empty() && self.error.is_none() {
+            return col.child(
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
+                    .child("Listening for engine events…"),
+            );
+        }
 
         let mut card = super::ui::list_container(&palette);
 
         if self.rows.is_empty() {
             card = card.child(super::ui::empty_state("No events yet.", &palette));
         } else {
-            let expanded = self.expanded.clone();
-            let rows = self.rows.clone();
-            for row in &rows {
-                let id = row.id;
-                let open = expanded.contains(&id);
-                let (badge_label, tone) = badge_for(&row.event_type);
-                let tone = tone.color(&palette);
-                let timestamp = row.timestamp.clone();
-                let summary = row.summary.clone();
-                let lines = row.lines.clone();
-
-                let summary_row = div()
-                    .id(format!("event-{id}"))
-                    .flex()
-                    .items_start()
-                    .gap_3()
-                    .text_sm()
-                    .px_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(palette.separator)
-                    .cursor_pointer()
-                    .child(div().text_xs().text_color(palette.muted_foreground).child(timestamp))
-                    .child(
-                        div()
-                            .text_xs()
-                            .px_2()
-                            .py_0()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(tone)
-                            .text_color(tone)
-                            .child(badge_label.to_string()),
-                    )
-                    .child(div().flex_1().child(format!("{} {}", if open { "▾" } else { "▸" }, summary)))
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)));
-
-                let payload_box = div()
-                    .mt_3()
-                    .p_3()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(palette.border)
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .children(
-                        lines
-                            .into_iter()
-                            .map(|line| div().text_xs().text_color(palette.muted_foreground).child(line)),
-                    );
-
-                card = card.child(
-                    Collapsible::new()
-                        .w_full()
-                        .open(open)
-                        .child(summary_row)
-                        .content(payload_box),
-                );
-            }
+            // Virtualized rows (proofreading `seg_list` pattern): only
+            // visible rows are built; per-index reads, no row clone.
+            let view = cx.entity();
+            let rows = list(self.rows_list.clone(), move |ix, _window, cx: &mut App| {
+                view.update(cx, |view, cx| Self::event_row(view, ix, palette, cx))
+            })
+            .flex_1()
+            .min_h_0();
+            card = card.child(rows);
         }
 
         col.child(card)

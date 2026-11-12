@@ -225,3 +225,66 @@ impl TermMatcher {
         self.first_hit(text).is_some()
     }
 }
+
+/// Multi-pattern candidate index over one glossary snapshot.
+///
+/// An Aho-Corasick automaton over normalized keys finds candidate spans in
+/// one pass; every candidate is re-verified with
+/// [`matches_normalized_at`] (oracle boundary semantics). The index is a
+/// candidate filter, never the correctness rule.
+#[derive(Debug, Default)]
+pub struct CandidateIndex {
+    /// Normalized key per pattern id.
+    keys: Vec<String>,
+    /// Term row index per pattern id.
+    owners: Vec<usize>,
+    /// Automaton over `keys`, if any.
+    automaton: Option<aho_corasick::AhoCorasick>,
+}
+
+impl CandidateIndex {
+    /// Build over `(term_index, key)` pairs (raw keys, normalized here).
+    pub fn build(entries: &[(usize, String)]) -> Self {
+        let mut keys = Vec::new();
+        let mut owners = Vec::new();
+        for (owner, raw) in entries {
+            let key = normalize_match_key(raw);
+            if key.is_empty() {
+                continue;
+            }
+            keys.push(key);
+            owners.push(*owner);
+        }
+        let automaton = if keys.is_empty() {
+            None
+        } else {
+            aho_corasick::AhoCorasick::new(&keys).ok()
+        };
+        Self {
+            keys,
+            owners,
+            automaton,
+        }
+    }
+
+    /// Verified `(term_index, matched_key, byte_start, byte_end)` hits.
+    pub fn find_verified(&self, text: &str) -> Vec<(usize, String, usize, usize)> {
+        let Some(automaton) = &self.automaton else {
+            return Vec::new();
+        };
+        let normalized = match_text(text);
+        let mut out = Vec::new();
+        for hit in automaton.find_iter(&normalized) {
+            let key = &self.keys[hit.pattern().as_usize()];
+            if matches_normalized_at(key, &normalized, hit.start(), hit.end()) {
+                out.push((
+                    self.owners[hit.pattern().as_usize()],
+                    key.clone(),
+                    hit.start(),
+                    hit.end(),
+                ));
+            }
+        }
+        out
+    }
+}

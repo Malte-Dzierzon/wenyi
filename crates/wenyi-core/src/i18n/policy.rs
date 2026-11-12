@@ -161,11 +161,40 @@ pub fn task_groups(
     polish: bool,
     best_of_three: bool,
 ) -> Result<Vec<&'static str>> {
+    task_groups_full(
+        phase,
+        book_understanding,
+        polish,
+        best_of_three,
+        true,
+        true,
+        true,
+        true,
+    )
+}
+
+/// Task groups with explicit review flags (oracle `Config._policy_tasks`).
+#[allow(clippy::too_many_arguments)]
+pub fn task_groups_full(
+    phase: &str,
+    book_understanding: bool,
+    polish: bool,
+    best_of_three: bool,
+    review_agent_loop: bool,
+    review_conflict_arbitration: bool,
+    review_fix_loop: bool,
+    review_autofix: bool,
+) -> Result<Vec<&'static str>> {
     match phase {
         "analysis" => Ok(if book_understanding {
-            vec!["analyzer", "chapter_digest", "book_synopsis"]
+            vec![
+                "analyzer",
+                "chapter_digest",
+                "book_synopsis",
+                "style_observer",
+            ]
         } else {
-            vec!["analyzer"]
+            vec!["analyzer", "style_observer"]
         }),
         "translation" => {
             let mut groups = if best_of_three {
@@ -185,6 +214,19 @@ pub fn task_groups(
             };
             if polish && !best_of_three {
                 groups.push("polisher");
+            }
+            Ok(groups)
+        }
+        "review" => {
+            let mut groups = vec!["reviewer"];
+            if review_agent_loop || review_autofix {
+                groups.push("review_agent");
+            }
+            if review_agent_loop && review_conflict_arbitration {
+                groups.push("review_arbiter");
+            }
+            if review_fix_loop || review_autofix {
+                groups.push("review_fixer");
             }
             Ok(groups)
         }
@@ -313,7 +355,7 @@ pub fn resolve_policy(
 ) -> Result<PolicyPlan> {
     let source = require_language(source, true)?;
     let target = require_language(target, false)?;
-    if phase != "analysis" && phase != "translation" {
+    if phase != "analysis" && phase != "translation" && phase != "review" {
         return Err(Error::Config(format!(
             "Unsupported language policy phase: {phase}"
         )));

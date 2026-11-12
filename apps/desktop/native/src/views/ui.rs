@@ -7,7 +7,6 @@
 //! All helpers are pure element builders (no entities, no fetches) so they
 //! cost nothing outside render and stay safe to call per frame.
 use gpui_kit::component::StyledExt;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::theme;
@@ -17,17 +16,13 @@ use crate::theme;
 /// `.text_xl().font_weight(BOLD)` titles.
 pub fn page_title(title: impl IntoElement, caption: Option<impl IntoElement>) -> impl IntoElement {
     let t = theme::text::title();
-    let mut col = div()
-        .flex()
-        .flex_col()
-        .gap_0()
-        .child(
-            div()
-                .text_size(t.size)
-                .font_weight(t.weight)
-                .font(theme::fonts::ui())
-                .child(title),
-        );
+    let mut col = div().flex().flex_col().gap_0().child(
+        div()
+            .text_size(t.size)
+            .font_weight(t.weight)
+            .font(theme::fonts::ui())
+            .child(title),
+    );
     if let Some(caption) = caption {
         let c = theme::text::caption();
         col = col.child(
@@ -41,6 +36,8 @@ pub fn page_title(title: impl IntoElement, caption: Option<impl IntoElement>) ->
 }
 
 /// Section heading inside a page: 16px semibold + optional description.
+// Staged for table/list screens. Allowed until those screens compose it.
+#[allow(dead_code)]
 pub fn section_title(title: impl IntoElement, desc: Option<impl IntoElement>) -> impl IntoElement {
     let h = theme::text::h2();
     let mut col = div().flex().flex_col().gap_0().child(
@@ -109,6 +106,8 @@ pub fn list_container(palette: &theme::Palette) -> Div {
 }
 
 /// Table header row inside a [`list_container`]: muted 12px medium labels.
+// Staged for table/list screens. Allowed until those screens compose it.
+#[allow(dead_code)]
 pub fn list_header(palette: &theme::Palette) -> Div {
     div()
         .flex()
@@ -122,6 +121,8 @@ pub fn list_header(palette: &theme::Palette) -> Div {
 
 /// List row inside a [`list_container`]: hairline top divider, comfortable
 /// padding, hover wash for clickable rows.
+// Staged for table/list screens. Allowed until those screens compose it.
+#[allow(dead_code)]
 pub fn list_row(palette: &theme::Palette, hoverable: bool) -> Div {
     let row = div()
         .flex()
@@ -156,15 +157,6 @@ pub fn empty_state(text: impl IntoElement, palette: &theme::Palette) -> impl Int
         .text_center()
         .text_sm()
         .text_color(palette.muted_foreground)
-        .child(text)
-}
-
-/// Monospace span for IDs, timestamps, counts (JetBrains Mono + CJK mono).
-pub fn mono_span(text: impl IntoElement) -> impl IntoElement {
-    let m = theme::text::mono();
-    div()
-        .text_size(m.size)
-        .font(theme::fonts::mono())
         .child(text)
 }
 
@@ -259,7 +251,10 @@ pub fn book_cover(
                 .h_full()
                 .bg({
                     let bg_hsla = gpui_kit::Hsla::from(bg);
-                    gpui_kit::Hsla { l: bg_hsla.l * 0.55, ..bg_hsla }
+                    gpui_kit::Hsla {
+                        l: bg_hsla.l * 0.55,
+                        ..bg_hsla
+                    }
                 })
                 .flex_none(),
         )

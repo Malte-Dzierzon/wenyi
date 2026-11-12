@@ -28,7 +28,7 @@ static ALIASES: LazyLock<serde_json::Value> =
 macro_rules! tasks {
     ($($name:ident),*) => {
         /// All embedded task template names (oracle `i18n/policy/tasks.py::TASKS`).
-        pub const TASKS: [&str; 34] = [$(stringify!($name)),*];
+        pub const TASKS: [&str; 36] = [$(stringify!($name)),*];
         /// Look up one embedded task template by name.
         pub fn task(name: &str) -> Result<&'static str> {
             match name {
@@ -70,6 +70,8 @@ tasks!(
     srt_batch_user,
     srt_single_system,
     srt_single_user,
+    style_observer_system,
+    style_observer_user,
     title_translator_system,
     title_translator_user,
     translator_system,

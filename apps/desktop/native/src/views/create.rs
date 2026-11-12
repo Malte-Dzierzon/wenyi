@@ -1,26 +1,25 @@
-//! Create project (screen 2): form + file browse + preview + create.
+//! Create project (screen 2): form + file browse + create.
 //!
 //! Parity source: `features/project-create/CreateProject.tsx`,
-//! `SourceFilePicker.tsx`, `SourcePreview.tsx`.
+//! `SourceFilePicker.tsx`.
 //! - Fields: name, source/target lang, PDF backend (pdf only), mode radios,
 //!   prepare checkbox. Resume-edit `?project=` path deferred to U1 follow-up
 //!   (needs project deeplink state; documented gap).
 //! - Browse via `rfd` (off UI thread); validation mirrors picker (nonempty +
 //!   extension allowlist from capabilities).
-//! - Create: multipart `POST /projects`, then poll `GET preview` until ready.
+//! - Create: multipart `POST /projects`.
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Disableable, IndexPath, StyledExt};
-use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::{Disableable, IndexPath};
 use gpui_kit::*;
 
 use crate::{
-    client::{block_on, Capabilities, Client, ProjectCreate, UploadPreview},
+    service::{Capabilities, ServiceHandle},
     theme,
 };
 
@@ -41,7 +40,7 @@ fn allowed_extensions(caps: Option<&Capabilities>) -> Vec<String> {
 }
 
 pub struct Create {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     capabilities: Option<Capabilities>,
     name: Entity<InputState>,
     source_lang: String,
@@ -53,8 +52,6 @@ pub struct Create {
     /// Name prefill applied on next render (set_value needs Window).
     pending_name: Option<String>,
     file_error: Option<String>,
-    preview: Option<UploadPreview>,
-    preview_pending: bool,
     created_pid: Option<String>,
     busy: bool,
     error: Option<String>,
@@ -66,7 +63,7 @@ impl Create {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Project name"));
         Self {
-            client: None,
+            service: None,
             capabilities: None,
             name,
             source_lang: "auto".into(),
@@ -77,8 +74,6 @@ impl Create {
             file_path: None,
             pending_name: None,
             file_error: None,
-            preview: None,
-            preview_pending: false,
             created_pid: None,
             busy: false,
             error: None,
@@ -86,83 +81,78 @@ impl Create {
             target_select: None,
         }
     }
-
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client.clone());
+    // Wired by the App shell once the create screen joins the nav graph.
+    #[allow(dead_code)]
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service.clone());
         // Load capabilities for language lists + format allowlist.
         cx.spawn(async move |this, cx| {
-            let result =
-                cx.background_spawn(async move { block_on(client.capabilities()) }).await;
+            let caps = cx
+                .background_spawn(async move { service.capabilities() })
+                .await;
             _ = this.update(cx, |view: &mut Create, cx| {
-                match result {
-                    Ok(caps) => {
-                        view.capabilities = Some(caps);
-                    }
-                    Err(err) => {
-                        view.error = Some(err.to_string());
-                    }
-                }
+                view.capabilities = Some(caps);
                 cx.notify();
             });
         })
         .detach();
     }
 
-    fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn browse(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let extensions = allowed_extensions(self.capabilities.as_ref());
         cx.spawn(async move |this, cx| {
             let picked = cx
                 .background_spawn(async move {
                     rfd::FileDialog::new()
-                        .add_filter("source", &extensions.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+                        .add_filter(
+                            "source",
+                            &extensions.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                        )
                         .pick_file()
                 })
                 .await;
             _ = this.update(cx, |view: &mut Create, cx| {
-                match picked {
-                    Some(path) => {
-                        // Validate: nonempty + extension allowlist (mirrors picker).
-                        let ext_ok = path
+                if let Some(path) = picked {
+                    // Validate: nonempty + extension allowlist (mirrors picker).
+                    let ext_ok = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| {
+                            allowed_extensions(view.capabilities.as_ref())
+                                .iter()
+                                .any(|a| a == &e.to_lowercase())
+                        })
+                        .unwrap_or(false);
+                    let size_ok = std::fs::metadata(&path)
+                        .map(|m| m.len() > 0)
+                        .unwrap_or(false);
+                    if !ext_ok {
+                        view.file_error = Some("Unsupported file type".into());
+                    } else if !size_ok {
+                        view.file_error = Some("Source file is empty".into());
+                    } else {
+                        view.file_error = None;
+                        // PDF backend select appears for pdf (mirrors source).
+                        if path
                             .extension()
                             .and_then(|e| e.to_str())
-                            .map(|e| {
-                                allowed_extensions(view.capabilities.as_ref())
-                                    .iter()
-                                    .any(|a| a == &e.to_lowercase())
-                            })
-                            .unwrap_or(false);
-                        let size_ok = std::fs::metadata(&path)
-                            .map(|m| m.len() > 0)
-                            .unwrap_or(false);
-                        if !ext_ok {
-                            view.file_error = Some("Unsupported file type".into());
-                        } else if !size_ok {
-                            view.file_error = Some("Source file is empty".into());
+                            .map(|e| e.eq_ignore_ascii_case("pdf"))
+                            .unwrap_or(false)
+                        {
+                            view.pdf_backend = Some("mineru".into());
                         } else {
-                            view.file_error = None;
-                            // PDF backend select appears for pdf (mirrors source).
-                            if path
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .map(|e| e.eq_ignore_ascii_case("pdf"))
-                                .unwrap_or(false)
-                            {
-                                view.pdf_backend = Some("mineru".into());
-                            } else {
-                                view.pdf_backend = None;
-                            }
-                            // Default the project name from the file stem.
-                            // Applied on next render (set_value needs Window).
-                            if view.name.read(cx).value().is_empty() {
-                                view.pending_name = path
-                                    .file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .map(str::to_string);
-                            }
-                            view.file_path = Some(path);
+                            view.pdf_backend = None;
                         }
+                        // Default the project name from the file stem.
+                        // Applied on next render (set_value needs Window).
+                        if view.name.read(cx).value().is_empty() {
+                            view.pending_name = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .map(str::to_string);
+                        }
+                        view.file_path = Some(path);
                     }
-                    None => {}
                 }
                 cx.notify();
             });
@@ -171,13 +161,14 @@ impl Create {
     }
 
     fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(client), Some(path)) = (self.client.clone(), self.file_path.clone()) else {
+        let (Some(service), Some(path)) = (self.service.clone(), self.file_path.clone()) else {
             self.error = Some("Pick a source file first".into());
             cx.notify();
             return;
         };
         let name: String = self.name.read(cx).value().to_string();
-        if name.trim().is_empty() {
+        let name = name.trim().to_string();
+        if name.is_empty() {
             self.error = Some("Project name is required".into());
             cx.notify();
             return;
@@ -187,15 +178,8 @@ impl Create {
             .and_then(|n| n.to_str())
             .unwrap_or("source")
             .to_string();
-        let body = ProjectCreate {
-            name: name.trim().to_string(),
-            source_lang: self.source_lang.clone(),
-            target_lang: self.target_lang.clone(),
-            strategy: serde_json::Value::Object(Default::default()),
-            prepare: self.prepare,
-            pdf_backend: self.pdf_backend.clone(),
-            translation_mode: self.translation_mode.clone(),
-        };
+        let source_lang = self.source_lang.clone();
+        let target_lang = self.target_lang.clone();
         self.busy = true;
         self.error = None;
         cx.notify();
@@ -210,7 +194,8 @@ impl Create {
                         Ok(bytes) if !bytes.is_empty() => bytes,
                         _ => return Err("Could not read source file".to_string()),
                     };
-                    block_on(client.create_project(&body, &filename, bytes))
+                    service
+                        .create_project(&name, &source_lang, &target_lang, &bytes, &filename)
                         .map_err(|err| err.to_string())
                 })
                 .await;
@@ -219,61 +204,11 @@ impl Create {
                 match result {
                     Ok(detail) => {
                         view.created_pid = Some(detail.project.id.clone());
-                        view.poll_preview(cx);
                     }
                     Err(err) => {
                         view.error = Some(err);
                     }
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-
-    /// Poll `GET preview` until ready (409 while parsing) — mirrors preview poll.
-    fn poll_preview(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), Some(pid)) = (self.client.clone(), self.created_pid.clone()) else {
-            return;
-        };
-        self.preview_pending = true;
-        cx.spawn(async move |this, cx| {
-            for _ in 0..60 {
-                let result =
-                    cx.background_spawn({
-                        let client = client.clone();
-                        let pid = pid.clone();
-                        async move { block_on(client.get_preview(&pid)) }
-                    })
-                    .await;
-                match result {
-                    Ok(preview) => {
-                        _ = this.update(cx, |view: &mut Create, cx| {
-                            view.preview = Some(preview);
-                            view.preview_pending = false;
-                            cx.notify();
-                        });
-                        return;
-                    }
-                    Err(crate::client::Error::Api { status: 409, .. }) => {
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_secs(2))
-                            .await;
-                    }
-                    Err(err) => {
-                        _ = this.update(cx, |view: &mut Create, cx| {
-                            view.error = Some(err.to_string());
-                            view.preview_pending = false;
-                            cx.notify();
-                        });
-                        return;
-                    }
-                }
-            }
-            _ = this.update(cx, |view: &mut Create, cx| {
-                view.error = Some("Preview timed out".into());
-                view.preview_pending = false;
                 cx.notify();
             });
         })
@@ -286,7 +221,13 @@ impl Create {
             opts.extend(caps.languages.iter().map(|l| l.code.clone()));
         } else {
             // Fallback until capabilities load (mirrors registry subset).
-            opts.extend(["zh", "en", "ja", "ko", "fr", "de", "es", "it", "pt", "ru", "vi"].iter().map(|s| s.to_string()));
+            opts.extend(
+                [
+                    "zh", "en", "ja", "ko", "fr", "de", "es", "it", "pt", "ru", "vi",
+                ]
+                .iter()
+                .map(|s| s.to_string()),
+            );
         }
         opts
     }
@@ -307,29 +248,37 @@ impl Render for Create {
         // subscribing to Confirm so selection writes back to the form state.
         if self.source_select.is_none() {
             let opts = self.lang_options();
-            let idx = opts.iter().position(|o| o == &self.source_lang).unwrap_or(0);
-            let entity = cx.new(|cx| {
-                SelectState::new(opts, Some(IndexPath::new(idx)), window, cx)
-            });
-            cx.subscribe(&entity, |this: &mut Create, _, event: &SelectEvent<Vec<String>>, _| {
-                if let SelectEvent::Confirm(Some(value)) = event {
-                    this.source_lang = value.clone();
-                }
-            })
+            let idx = opts
+                .iter()
+                .position(|o| o == &self.source_lang)
+                .unwrap_or(0);
+            let entity = cx.new(|cx| SelectState::new(opts, Some(IndexPath::new(idx)), window, cx));
+            cx.subscribe(
+                &entity,
+                |this: &mut Create, _, event: &SelectEvent<Vec<String>>, _| {
+                    if let SelectEvent::Confirm(Some(value)) = event {
+                        this.source_lang = value.clone();
+                    }
+                },
+            )
             .detach();
             self.source_select = Some(entity);
         }
         if self.target_select.is_none() {
             let opts = self.lang_options();
-            let idx = opts.iter().position(|o| o == &self.target_lang).unwrap_or(1);
-            let entity = cx.new(|cx| {
-                SelectState::new(opts, Some(IndexPath::new(idx)), window, cx)
-            });
-            cx.subscribe(&entity, |this: &mut Create, _, event: &SelectEvent<Vec<String>>, _| {
-                if let SelectEvent::Confirm(Some(value)) = event {
-                    this.target_lang = value.clone();
-                }
-            })
+            let idx = opts
+                .iter()
+                .position(|o| o == &self.target_lang)
+                .unwrap_or(1);
+            let entity = cx.new(|cx| SelectState::new(opts, Some(IndexPath::new(idx)), window, cx));
+            cx.subscribe(
+                &entity,
+                |this: &mut Create, _, event: &SelectEvent<Vec<String>>, _| {
+                    if let SelectEvent::Confirm(Some(value)) = event {
+                        this.target_lang = value.clone();
+                    }
+                },
+            )
             .detach();
             self.target_select = Some(entity);
         }
@@ -355,34 +304,53 @@ impl Render for Create {
 
         col = col
             .child(
-                div().flex().flex_col().gap_1().child("Project name").child(Input::new(&self.name)),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child("Project name")
+                    .child(Input::new(&self.name)),
             )
             .child(
                 div()
                     .flex()
                     .gap_3()
                     .child(
-                        div().flex().flex_col().gap_1().child("Source language").child(
-                            Select::new(self.source_select.as_ref().unwrap()),
-                        ),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Source language")
+                            .child(Select::new(self.source_select.as_ref().unwrap())),
                     )
                     .child(
-                        div().flex().flex_col().gap_1().child("Target language").child(
-                            Select::new(self.target_select.as_ref().unwrap()),
-                        ),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Target language")
+                            .child(Select::new(self.target_select.as_ref().unwrap())),
                     ),
             )
             .child(
                 RadioGroup::new("mode")
-                    .child(Radio::new("mode-standard").label("Standard").checked(mode_standard))
+                    .child(
+                        Radio::new("mode-standard")
+                            .label("Standard")
+                            .checked(mode_standard),
+                    )
                     .child(
                         Radio::new("mode-best")
                             .label("Best of three (precision)")
                             .checked(!mode_standard),
                     )
                     .on_change(cx.listener(|this, index: &usize, _, cx| {
-                        this.translation_mode =
-                            if *index == 0 { "standard" } else { "best_of_three" }.into();
+                        this.translation_mode = if *index == 0 {
+                            "standard"
+                        } else {
+                            "best_of_three"
+                        }
+                        .into();
                         cx.notify();
                     })),
             )
@@ -396,62 +364,51 @@ impl Render for Create {
                     })),
             )
             .child(
-                div().flex().items_center().gap_2().child(
-                    Button::new("browse")
-                        .label("Browse source file…")
-                        .disabled(self.busy)
-                        .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
-                ).child(match &self.file_path {
-                    Some(p) => p.display().to_string(),
-                    None => "No file selected".to_string(),
-                }),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Button::new("browse")
+                            .label("Browse source file…")
+                            .disabled(self.busy)
+                            .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
+                    )
+                    .child(match &self.file_path {
+                        Some(p) => p.display().to_string(),
+                        None => "No file selected".to_string(),
+                    }),
             );
 
         if let Some(err) = &self.file_error {
-            col = col.child(div().text_sm().text_color(palette.destructive).child(err.clone()));
+            col = col.child(
+                div()
+                    .text_sm()
+                    .text_color(palette.destructive)
+                    .child(err.clone()),
+            );
         }
 
         col = col.child(
             Button::new("create")
                 .primary()
-                .label(if self.busy { "Creating…" } else { "Create project" })
+                .label(if self.busy {
+                    "Creating…"
+                } else {
+                    "Create project"
+                })
                 .disabled(self.busy || self.file_path.is_none())
                 .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
         );
 
-        // Preview after create (mirrors SourcePreview disclosure).
-        if self.preview_pending {
-            col = col.child(
-                div().text_sm().text_color(palette.muted_foreground).child("Parsing source…"),
-            );
-        }
-        if let Some(preview) = &self.preview {
-            let mut list = div().flex().flex_col().gap_1();
-            for ch in preview.chapters.iter().take(20) {
-                list = list.child(format!("{}. {} ({} words)", ch.index, ch.title, ch.word_count));
-            }
-            col = col.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .p_4()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(palette.border)
-                    .child(div().font_medium().child(format!(
-                        "{} — {} chapters, {} words",
-                        preview.title, preview.chapter_count, preview.total_word_count
-                    )))
-                    .child(format!("Format: {}", preview.fmt))
-                    .child(list),
-            );
-        }
         if let Some(pid) = &self.created_pid {
             col = col.child(
-                div().text_sm().text_color(palette.muted_foreground).child(format!(
-                    "Created project {pid}. Open it from Projects to continue."
-                )),
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
+                    .child(format!(
+                        "Created project {pid}. Open it from Projects to continue."
+                    )),
             );
         }
         col

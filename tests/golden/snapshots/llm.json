@@ -292,7 +292,8 @@
     "synopsis.book",
     "synopsis.chapter",
     "translation.body",
-    "translation.title"
+    "translation.title",
+    "style.observe"
   ],
   "repairs": {
     "extra_close": {
@@ -505,6 +506,10 @@
     "translation.title": {
       "fallbacks": [],
       "primary": "0e3e1cf29d947e4ed580f2b683ea21ea29fea5243d38dcbb8164845ec4b4e937"
+    },
+    "style.observe": {
+      "primary": "7d8161d0128b72a5d1770658362af9cb60b9c7755f5645aff2220cd148293fe1",
+      "fallbacks": []
     }
   },
   "usage_delta": {

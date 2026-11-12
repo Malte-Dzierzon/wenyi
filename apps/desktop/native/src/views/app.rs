@@ -8,37 +8,39 @@
 //! supports a collapsed icon-only mode with tooltips; both persist to a
 //! local JSON file (mirrors `wenyi.sidebarCollapsed`).
 
-use gpui_kit::base::component_traits::{Collapsible as _, Selectable as _};
+use gpui_kit::assets::IconName;
+use gpui_kit::base::component_traits::Selectable as _;
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem,
     SidebarToggleButton,
 };
 use gpui_kit::component::theme::{ActiveTheme as _, Theme, ThemeMode as KitThemeMode};
-use gpui_kit::component::{Icon, Side, Sizable as _, h_flex};
-use gpui_kit::assets::IconName;
+use gpui_kit::component::{h_flex, Icon, Side};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use super::branding::brand_header;
 use super::sidebar as sidebar_prefs;
 use super::{
-    contents::ContentsView, create::Create, dashboard::Dashboard, events::EventsView,
-    export::ExportView, global_settings::GlobalSettingsView, glossary::GlossaryView,
-    progress::ProgressView, proj_settings::ProjSettingsView, proofreading::ProofreadingView,
-    review::ReviewView, style::StyleView, subtitles::SubtitlesView,
+    create::Create, dashboard::Dashboard, events::EventsView, export::ExportView,
+    global_settings::GlobalSettingsView, glossary::GlossaryView, progress::ProgressView,
+    proofreading::ProofreadingView, style::StyleView,
 };
 use crate::{
-    backend::Backend,
-    client::{Client, Project},
     nav::{GlobalNav, ProjectNav},
+    service::{Project, ServiceHandle},
     theme,
 };
 
 /// Current location: a global screen or a project screen.
+#[allow(clippy::large_enum_variant)] // Project carries the open project; boxed would churn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
     Global(GlobalNav),
-    Project { project: Project, screen: ProjectNav },
+    Project {
+        project: Project,
+        screen: ProjectNav,
+    },
 }
 
 /// Drag payload for the sidebar-width handle.
@@ -69,124 +71,58 @@ pub struct App {
     progress_views: std::collections::HashMap<String, Entity<ProgressView>>,
     /// Per-project Glossary views, keyed by pid (created on first visit).
     glossary_views: std::collections::HashMap<String, Entity<GlossaryView>>,
-    /// Per-project Contents views, keyed by pid (created on first visit).
-    contents_views: std::collections::HashMap<String, Entity<ContentsView>>,
     /// Per-project Proofreading views, keyed by pid (created on first visit).
     proofreading_views: std::collections::HashMap<String, Entity<ProofreadingView>>,
     /// Per-project Style views, keyed by pid (created on first visit).
     style_views: std::collections::HashMap<String, Entity<StyleView>>,
-    /// Per-project Review views, keyed by pid (created on first visit).
-    review_views: std::collections::HashMap<String, Entity<ReviewView>>,
-    /// Per-project Subtitles views, keyed by pid (created on first visit).
-    subtitle_views: std::collections::HashMap<String, Entity<SubtitlesView>>,
     /// Per-project Events views, keyed by pid (created on first visit).
     event_views: std::collections::HashMap<String, Entity<EventsView>>,
     /// Per-project Export views, keyed by pid (created on first visit).
     export_views: std::collections::HashMap<String, Entity<ExportView>>,
-    /// Per-project Settings views, keyed by pid (created on first visit).
-    settings_views: std::collections::HashMap<String, Entity<ProjSettingsView>>,
     global_settings: Entity<GlobalSettingsView>,
     pub theme_choice: theme::ThemeChoice,
-    _backend: Option<Backend>,
-    client: Option<Client>,
-    backend_error: Option<String>,
+    service: Option<ServiceHandle>,
+    service_error: Option<String>,
 }
 
 impl App {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Window title parity with the web app (`document.title` / index.html).
         window.set_window_title("Wenyi");
-        // Attach mode (--backend/--token): connect directly, no spawn.
-        // Otherwise spawn the sidecar off the UI thread, then build the client.
-        // Dev: set WENYI_DESKTOP_PYTHON to a venv python for `python -m wenyi_desktop`.
-        let attach = std::env::var("WENYI_NATIVE_BACKEND")
-            .ok()
-            .zip(std::env::var("WENYI_NATIVE_TOKEN").ok());
-        let data_dir = std::env::var("WENYI_NATIVE_DATA_DIR").ok();
+        // Open the in-process engine off the UI thread: `Service::open`
+        // migrates the workspace DB, then `start()` admits jobs. Views
+        // receive the shared `ServiceHandle` once ready.
         let (tx, rx) = futures::channel::oneshot::channel();
         cx.background_spawn(async move {
-            let result: Result<(Option<Backend>, Client), String> = match attach {
-                Some((api_base, token)) => Ok((None, Client::new(api_base, token))),
-                None => Backend::spawn(data_dir.as_deref().map(std::path::Path::new))
-                    .map(|backend| {
-                        let client = Client::new(
-                            backend.connection.api_base.clone(),
-                            backend.connection.token.clone(),
-                        );
-                        (Some(backend), client)
-                    })
-                    .map_err(|e| e.to_string()),
-            };
+            let result = (|| {
+                let dir = ServiceHandle::default_dir();
+                let service = ServiceHandle::open(&dir).map_err(|e| e.to_string())?;
+                crate::service::block_on(service.start()).map_err(|e| e.to_string())?;
+                Ok::<_, String>(service)
+            })();
             let _ = tx.send(result);
         })
         .detach();
         cx.spawn(async move |this, cx| {
-            let result = rx.await.unwrap_or(Err("sidecar spawn cancelled".into()));
+            let result = rx.await.unwrap_or(Err("service open cancelled".into()));
             _ = this.update(cx, |app: &mut App, cx| {
                 match result {
-                    Ok((backend, client)) => {
-                        tracing::info!("backend connected");
-                        app._backend = backend;
-                        app.client = Some(client.clone());
-                        app.dashboard.update(cx, |d, cx| d.set_client(client.clone(), cx));
-                        app.global_settings.update(cx, |g, cx| g.set_client(client.clone(), cx));
+                    Ok(service) => {
+                        tracing::info!("engine service ready");
+                        app.service = Some(service.clone());
+                        app.dashboard
+                            .update(cx, |d, cx| d.set_client(service.clone(), cx));
+                        app.global_settings
+                            .update(cx, |g, cx| g.set_client(service.clone(), cx));
                         // AUDIT-ONLY (temporary): WENYI_AUDIT_OPEN=<pid>:<screen>
                         // opens a project screen directly for screenshots.
                         if let Ok(spec) = std::env::var("WENYI_AUDIT_OPEN") {
-                            // Global screens: "global:<settings|create>".
-                            if let Some(global) = spec.strip_prefix("global:") {
-                                let nav = match global {
-                                    "settings" => Some(GlobalNav::InterfaceSettings),
-                                    "create" => Some(GlobalNav::CreateProject),
-                                    _ => None,
-                                };
-                                if let Some(nav) = nav {
-                                    app.navigate(Location::Global(nav), cx);
-                                }
-                            } else {
-                            let mut parts = spec.splitn(2, ':');
-                            if let (Some(pid), Some(screen)) = (parts.next(), parts.next()) {
-                                let pid = pid.to_string();
-                                let screen = screen.to_string();
-                                let client2 = client.clone();
-                                cx.spawn(async move |this, cx| {
-                                    let result = cx
-                                        .background_spawn(async move {
-                                            crate::client::block_on(client2.get_project(&pid))
-                                        })
-                                        .await;
-                                    if let Ok(detail) = result {
-                                        let nav = match screen.as_str() {
-                                            "proofreading" => ProjectNav::Proofreading,
-                                            "review" => ProjectNav::Review,
-                                            "glossary" => ProjectNav::Glossary,
-                                            "style" => ProjectNav::Style,
-                                            "contents" => ProjectNav::Contents,
-                                            "export" => ProjectNav::Export,
-                                            "settings" => ProjectNav::Settings,
-                                            "events" => ProjectNav::Events,
-                                            "subtitles" => ProjectNav::Subtitles,
-                                            _ => ProjectNav::Overview,
-                                        };
-                                        tracing::info!(screen = %screen, nav = ?nav, "audit hook navigating");
-                                        _ = this.update(cx, |app: &mut App, cx| {
-                                            let project = detail.project.clone();
-                                            app.open_project(project.clone(), cx);
-                                            app.navigate(
-                                                Location::Project { project, screen: nav },
-                                                cx,
-                                            );
-                                        });
-                                    }
-                                })
-                                .detach();
-                            }
-                            }
+                            Self::audit_open(app, &spec, &service, cx);
                         }
                     }
                     Err(err) => {
-                        tracing::error!(error = %err, "backend failed");
-                        app.backend_error = Some(err);
+                        tracing::error!(error = %err, "engine service failed");
+                        app.service_error = Some(err);
                     }
                 }
                 cx.notify();
@@ -222,18 +158,65 @@ impl App {
             theme_choice: theme::load_choice(),
             glossary_views: Default::default(),
             progress_views: Default::default(),
-            contents_views: Default::default(),
             proofreading_views: Default::default(),
             style_views: Default::default(),
-            review_views: Default::default(),
-            subtitle_views: Default::default(),
             event_views: Default::default(),
             export_views: Default::default(),
-            settings_views: Default::default(),
-            _backend: None,
-            client: None,
-            backend_error: None,
+            service: None,
+            service_error: None,
         }
+    }
+
+    /// AUDIT-ONLY (temporary): `WENYI_AUDIT_OPEN=<pid>:<screen>` opens a
+    /// project screen directly for screenshots. Global screens via
+    /// `"global:<settings|create>"`.
+    fn audit_open(app: &mut App, spec: &str, service: &ServiceHandle, cx: &mut Context<Self>) {
+        if let Some(global) = spec.strip_prefix("global:") {
+            let nav = match global {
+                "settings" => Some(GlobalNav::InterfaceSettings),
+                "create" => Some(GlobalNav::CreateProject),
+                _ => None,
+            };
+            if let Some(nav) = nav {
+                app.navigate(Location::Global(nav), cx);
+            }
+            return;
+        }
+        let mut parts = spec.splitn(2, ':');
+        let (Some(pid), Some(screen)) = (parts.next(), parts.next()) else {
+            return;
+        };
+        let pid = pid.to_string();
+        let screen = screen.to_string();
+        let service = service.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { service.get_project(&pid) })
+                .await;
+            if let Ok(detail) = result {
+                let nav = match screen.as_str() {
+                    "proofreading" => ProjectNav::Proofreading,
+                    "glossary" => ProjectNav::Glossary,
+                    "style" => ProjectNav::Style,
+                    "export" => ProjectNav::Export,
+                    "events" => ProjectNav::Events,
+                    _ => ProjectNav::Overview,
+                };
+                tracing::info!(screen = %screen, nav = ?nav, "audit hook navigating");
+                _ = this.update(cx, |app: &mut App, cx| {
+                    let project = detail.project.clone();
+                    app.open_project(project.clone(), cx);
+                    app.navigate(
+                        Location::Project {
+                            project,
+                            screen: nav,
+                        },
+                        cx,
+                    );
+                });
+            }
+        })
+        .detach();
     }
 
     /// Persist the sidebar prefs (best-effort; shell state only).
@@ -269,13 +252,13 @@ impl App {
 
     /// Open a project (Dashboard card click) — mirrors router navigate.
     pub fn open_project(&mut self, project: Project, cx: &mut Context<Self>) {
-        // Lazily create the per-project Progress view (needs client).
+        // Lazily create the per-project Progress view (needs the service).
         if !self.progress_views.contains_key(&project.id) {
-            if let Some(client) = self.client.clone() {
+            if let Some(service) = self.service.clone() {
                 let pid = project.id.clone();
                 let view = cx.new(|cx| {
                     let mut view = ProgressView::new(pid);
-                    view.set_client(client, cx);
+                    view.set_client(service, cx);
                     view
                 });
                 self.progress_views.insert(project.id.clone(), view);
@@ -301,15 +284,11 @@ impl App {
     }
 
     /// Apply a visibility flag to the polling view (if any) behind `location`.
-    fn set_location_visible(
-        &mut self,
-        location: &Location,
-        visible: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn set_location_visible(&mut self, location: &Location, visible: bool, cx: &mut Context<Self>) {
         match location {
             Location::Global(GlobalNav::Projects) => {
-                self.dashboard.update(cx, |d, cx| d.set_visible(visible, cx));
+                self.dashboard
+                    .update(cx, |d, cx| d.set_visible(visible, cx));
             }
             Location::Project { project, screen } => match screen {
                 ProjectNav::Overview => {
@@ -324,11 +303,6 @@ impl App {
                 }
                 ProjectNav::Export => {
                     if let Some(view) = self.export_views.get(&project.id) {
-                        view.update(cx, |v, cx| v.set_visible(visible, cx));
-                    }
-                }
-                ProjectNav::Settings => {
-                    if let Some(view) = self.settings_views.get(&project.id) {
                         view.update(cx, |v, cx| v.set_visible(visible, cx));
                     }
                 }
@@ -357,13 +331,9 @@ impl App {
         match nav {
             ProjectNav::Overview => IconName::Sparkles,
             ProjectNav::Proofreading => IconName::BookOpenCheck,
-            ProjectNav::Review => IconName::ListChecks,
-            ProjectNav::Subtitles => IconName::Captions,
             ProjectNav::Glossary => IconName::Library,
             ProjectNav::Style => IconName::Languages,
-            ProjectNav::Contents => IconName::ListTree,
             ProjectNav::Export => IconName::FileOutput,
-            ProjectNav::Settings => IconName::Settings2,
             ProjectNav::Events => IconName::ScrollText,
         }
     }
@@ -454,32 +424,23 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        // Window closed: pause running work first so the worker exits at
-        // the next checkpoint with a clean `paused` status instead of
-        // `pausing` stuck mid-batch; then signal shutdown synchronously
-        // (a few ms, never lost) and let the 30s grace wait run on a
-        // background thread so the UI exits immediately. The sidecar
-        // enforces its own checkpoint deadline + watchdog; orphans are
-        // reaped on relaunch.
-        if let Some(client) = self.client.clone() {
-            // Best-effort, bounded: never hold the close path hostage.
-            let _ = std::thread::scope(|s| {
+        // Window closed: pause running work first so jobs exit at the next
+        // checkpoint with a clean `paused` status, then shut the runtime
+        // down. Best-effort and bounded: never hold the close path hostage.
+        // The sync engine calls run on a scoped thread; the async shutdown
+        // drains in-flight checkpoint writes.
+        if let Some(service) = self.service.clone() {
+            std::thread::scope(|s| {
                 s.spawn(|| {
-                    crate::client::block_on(async {
-                        let projects = client.list_projects().await.unwrap_or_default();
-                        for p in projects.iter().filter(|p| {
-                            crate::client::is_project_busy(p.status.as_str())
-                        }) {
-                            let _ = client.pause(&p.id).await;
-                        }
-                    })
+                    let projects = service.list_projects().unwrap_or_default();
+                    for p in projects
+                        .iter()
+                        .filter(|p| crate::service::is_project_busy(p.status.as_str()))
+                    {
+                        let _ = service.pause(&p.id);
+                    }
+                    crate::service::block_on(service.shutdown());
                 });
-            });
-        }
-        if let Some(mut backend) = self._backend.take() {
-            backend.signal_shutdown();
-            std::thread::spawn(move || {
-                backend.wait_for_exit(std::time::Duration::from_secs(30));
             });
         }
     }
@@ -498,7 +459,11 @@ impl Render for App {
         let kit_dark = cx.theme().mode.is_dark();
         if dark != kit_dark {
             Theme::change(
-                if dark { KitThemeMode::Dark } else { KitThemeMode::Light },
+                if dark {
+                    KitThemeMode::Dark
+                } else {
+                    KitThemeMode::Light
+                },
                 None,
                 cx,
             );
@@ -515,7 +480,10 @@ impl Render for App {
                 .when(collapsed, |this| this.justify_center())
                 .when(!collapsed, |this| {
                     this.justify_between().child(
-                        div().flex_1().min_w_0().child(brand_header(collapsed, palette)),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(brand_header(collapsed, palette)),
                     )
                 })
                 .child(
@@ -545,14 +513,12 @@ impl Render for App {
         // it reads `current_project`, not the in-progress location.
         let project_groups: Vec<SidebarGroup<SidebarMenu>> =
             if let Some(project) = self.current_project.clone() {
-                let items: Vec<SidebarMenuItem> = ProjectNav::visible_for(&project)
+                let items: Vec<SidebarMenuItem> = ProjectNav::visible_for()
                     .into_iter()
                     .map(|nav| self.project_item(&project, nav, cx))
                     .collect();
-                vec![
-                    SidebarGroup::new(project.name.clone())
-                        .children([SidebarMenu::new().children(items)]),
-                ]
+                vec![SidebarGroup::new(project.name.clone())
+                    .children([SidebarMenu::new().children(items)])]
             } else {
                 Vec::new()
             };
@@ -583,18 +549,16 @@ impl Render for App {
 
         // Drag handle: resizing the sidebar edge updates + persists width.
         // Hidden while collapsed (the toggle restores the stored width).
-        let shell = h_flex()
-            .size_full()
-            .child(
-                div()
-                    .h_full()
-                    .flex_shrink_0()
-                    .min_h_0()
-                    // Kit collapses to a 48px icon rail; the wrapper must not
-                    // clamp wider or the collapse animation fights the layout.
-                    .min_w(px(48.0))
-                    .child(sidebar),
-            );
+        let shell = h_flex().size_full().child(
+            div()
+                .h_full()
+                .flex_shrink_0()
+                .min_h_0()
+                // Kit collapses to a 48px icon rail; the wrapper must not
+                // clamp wider or the collapse animation fights the layout.
+                .min_w(px(48.0))
+                .child(sidebar),
+        );
         let shell = if collapsed {
             shell
         } else {
@@ -628,12 +592,12 @@ impl Render for App {
                     .flex_col()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(match (&self.backend_error, &self.client, &self.location) {
+                    .child(match (&self.service_error, &self.service, &self.location) {
                         (Some(err), _, _) => div()
                             .flex_1()
                             .items_center()
                             .justify_center()
-                            .child(format!("Backend failed: {err}"))
+                            .child(format!("Engine failed: {err}"))
                             .into_any_element(),
                         (None, None, _) => div()
                             .flex_1()
@@ -641,38 +605,44 @@ impl Render for App {
                             .justify_center()
                             .child("Starting local engine…")
                             .into_any_element(),
-                        (None, Some(_), Location::Global(GlobalNav::Projects)) => {
-                            div().flex_1().min_h_0().child(self.dashboard.clone()).into_any_element()
-                        }
-                        (None, Some(_), Location::Global(GlobalNav::CreateProject)) => {
-                            div().flex_1().min_h_0().child(self.create.clone()).into_any_element()
-                        }
-                        (None, Some(_), Location::Global(GlobalNav::InterfaceSettings)) => {
-                            div().flex_1().min_h_0().child(self.global_settings.clone()).into_any_element()
-                        }
-                        (None, Some(client), Location::Project { project, screen }) => {
+                        (None, Some(_), Location::Global(GlobalNav::Projects)) => div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.dashboard.clone())
+                            .into_any_element(),
+                        (None, Some(_), Location::Global(GlobalNav::CreateProject)) => div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.create.clone())
+                            .into_any_element(),
+                        (None, Some(_), Location::Global(GlobalNav::InterfaceSettings)) => div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(self.global_settings.clone())
+                            .into_any_element(),
+                        (None, Some(service), Location::Project { project, screen }) => {
                             match screen {
-                                ProjectNav::Overview => match self.progress_views.get(&project.id)
-                                {
-                                    Some(view) => div()
-                                        .flex_1()
-                                        .min_h_0()
-                                        .child(view.clone())
-                                        .into_any_element(),
-                                    None => div()
-                                        .flex_1()
-                                        .items_center()
-                                        .justify_center()
-                                        .child("Loading overview…")
-                                        .into_any_element(),
-                                },
+                                ProjectNav::Overview => {
+                                    match self.progress_views.get(&project.id) {
+                                        Some(view) => div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .child(view.clone())
+                                            .into_any_element(),
+                                        None => div()
+                                            .flex_1()
+                                            .items_center()
+                                            .justify_center()
+                                            .child("Loading overview…")
+                                            .into_any_element(),
+                                    }
+                                }
                                 ProjectNav::Glossary => {
-                                    // Lazily create on first visit (needs Window).
                                     if !self.glossary_views.contains_key(&project.id) {
                                         let pid = project.id.clone();
                                         let view = cx.new(|cx| {
                                             let mut view = GlossaryView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
+                                            view.set_client(service.clone(), cx);
                                             view
                                         });
                                         self.glossary_views.insert(project.id.clone(), view);
@@ -683,30 +653,12 @@ impl Render for App {
                                         .child(self.glossary_views[&project.id].clone())
                                         .into_any_element()
                                 }
-                                ProjectNav::Contents => {
-                                    // Lazily create on first visit (needs Window).
-                                    if !self.contents_views.contains_key(&project.id) {
-                                        let pid = project.id.clone();
-                                        let view = cx.new(|cx| {
-                                            let mut view = ContentsView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
-                                            view
-                                        });
-                                        self.contents_views.insert(project.id.clone(), view);
-                                    }
-                                    div()
-                                        .flex_1()
-                                        .min_h_0()
-                                        .child(self.contents_views[&project.id].clone())
-                                        .into_any_element()
-                                }
                                 ProjectNav::Proofreading => {
-                                    // Lazily create on first visit (needs Window).
                                     if !self.proofreading_views.contains_key(&project.id) {
                                         let pid = project.id.clone();
                                         let view = cx.new(|cx| {
                                             let mut view = ProofreadingView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
+                                            view.set_client(service.clone(), cx);
                                             view
                                         });
                                         self.proofreading_views.insert(project.id.clone(), view);
@@ -717,30 +669,12 @@ impl Render for App {
                                         .child(self.proofreading_views[&project.id].clone())
                                         .into_any_element()
                                 }
-                                ProjectNav::Review => {
-                                    // Lazily create on first visit (needs Window).
-                                    if !self.review_views.contains_key(&project.id) {
-                                        let pid = project.id.clone();
-                                        let view = cx.new(|cx| {
-                                            let mut view = ReviewView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
-                                            view
-                                        });
-                                        self.review_views.insert(project.id.clone(), view);
-                                    }
-                                    div()
-                                        .flex_1()
-                                        .min_h_0()
-                                        .child(self.review_views[&project.id].clone())
-                                        .into_any_element()
-                                }
                                 ProjectNav::Style => {
-                                    // Lazily create on first visit (needs Window).
                                     if !self.style_views.contains_key(&project.id) {
                                         let pid = project.id.clone();
                                         let view = cx.new(|cx| {
                                             let mut view = StyleView::new(pid);
-                                            view.set_client(client.clone(), cx);
+                                            view.set_client(service.clone(), cx);
                                             view
                                         });
                                         self.style_views.insert(project.id.clone(), view);
@@ -751,30 +685,12 @@ impl Render for App {
                                         .child(self.style_views[&project.id].clone())
                                         .into_any_element()
                                 }
-                                ProjectNav::Subtitles => {
-                                    // Lazily create on first visit (needs Window).
-                                    if !self.subtitle_views.contains_key(&project.id) {
-                                        let pid = project.id.clone();
-                                        let view = cx.new(|cx| {
-                                            let mut view = SubtitlesView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
-                                            view
-                                        });
-                                        self.subtitle_views.insert(project.id.clone(), view);
-                                    }
-                                    div()
-                                        .flex_1()
-                                        .min_h_0()
-                                        .child(self.subtitle_views[&project.id].clone())
-                                        .into_any_element()
-                                }
                                 ProjectNav::Events => {
-                                    // Lazily create on first visit (needs Window).
                                     if !self.event_views.contains_key(&project.id) {
                                         let pid = project.id.clone();
                                         let view = cx.new(|cx| {
                                             let mut view = EventsView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
+                                            view.set_client(service.clone(), cx);
                                             view
                                         });
                                         self.event_views.insert(project.id.clone(), view);
@@ -786,12 +702,11 @@ impl Render for App {
                                         .into_any_element()
                                 }
                                 ProjectNav::Export => {
-                                    // Lazily create on first visit (needs Window).
                                     if !self.export_views.contains_key(&project.id) {
                                         let pid = project.id.clone();
                                         let view = cx.new(|cx| {
                                             let mut view = ExportView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
+                                            view.set_client(service.clone(), cx);
                                             view
                                         });
                                         self.export_views.insert(project.id.clone(), view);
@@ -802,40 +717,6 @@ impl Render for App {
                                         .child(self.export_views[&project.id].clone())
                                         .into_any_element()
                                 }
-                                ProjectNav::Settings => {
-                                    // Lazily create on first visit (needs Window).
-                                    if !self.settings_views.contains_key(&project.id) {
-                                        let pid = project.id.clone();
-                                        let view = cx.new(|cx| {
-                                            let mut view = ProjSettingsView::new(pid, window, cx);
-                                            view.set_client(client.clone(), cx);
-                                            view
-                                        });
-                                        self.settings_views.insert(project.id.clone(), view);
-                                    }
-                                    div()
-                                        .flex_1()
-                                        .min_h_0()
-                                        .child(self.settings_views[&project.id].clone())
-                                        .into_any_element()
-                                }
-                                _ => div()
-                                    .flex_1()
-                                    .flex()
-                                    .flex_col()
-                                    .p_6()
-                                    .gap_2()
-                                    .font(theme::fonts::ui())
-                                    .child(super::ui::page_title(
-                                        format!("{} — {}", project.name, screen.label()),
-                                        None::<Div>,
-                                    ))
-                                    .child(format!(
-                                        "Screen “{}” for project {} — coming in its milestone.",
-                                        screen.label(),
-                                        project.id
-                                    ))
-                                    .into_any_element(),
                             }
                         }
                     }),

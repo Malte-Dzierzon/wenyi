@@ -6,8 +6,11 @@
 
 pub mod matcher;
 pub mod store;
-pub use matcher::{normalize_match_key, source_matches_text, TermMatcher, SOURCE_ONLY_TYPES};
+pub use matcher::{
+    normalize_match_key, source_matches_text, CandidateIndex, TermMatcher, SOURCE_ONLY_TYPES,
+};
 pub use store::{
-    all_terms, get_term, open_conflicts, resolve_term, set_mentions, stats, terms_in, upsert_term,
-    GlossaryTerm,
+    all_terms, all_terms_counts, book_overrides, clear_override, get_term, mark_conflicts_resolved,
+    open_conflicts, resolve_term, set_mentions, set_override, stats, terms_for_book, terms_in,
+    upsert_term, GlossaryTerm,
 };

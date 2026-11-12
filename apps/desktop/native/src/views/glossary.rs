@@ -8,9 +8,7 @@
 //! - Add/Edit dialogs: real Input entities for source/target/reading/
 //!   gender/aliases/note + type Select; comma-separated aliases mirror the
 //!   React `split(",")` mapping on update.
-//! - Import: rfd pick → client-side CSV/JSON parse → overwrite/skip conflict
-//!   step → `import_glossary`. Export: format pick → `export_glossary` bytes
-//!   → rfd save dialog → write file.
+//!
 //! Term types mirror `termTypes()` in the source.
 
 use std::collections::HashSet;
@@ -22,11 +20,13 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{Disableable, IndexPath, StyledExt};
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::{
-    client::{block_on, is_project_busy, Client, GlossaryTerm, TermConflict, TermIn},
+    service::{
+        is_project_busy, CuratorStatus, GlossaryTerm, ServiceError, ServiceHandle, TermConflict,
+        TermIn,
+    },
     theme,
 };
 
@@ -41,12 +41,16 @@ const TERM_TYPES: &[(&str, &str)] = &[
 ];
 
 fn term_type_label(t: &str) -> &str {
-    TERM_TYPES.iter().find(|(id, _)| *id == t).map(|(_, l)| *l).unwrap_or(t)
+    TERM_TYPES
+        .iter()
+        .find(|(id, _)| *id == t)
+        .map(|(_, l)| *l)
+        .unwrap_or(t)
 }
 
 /// Tag badges for a term row: mention-count ranking + conflict flag.
 /// Pure display from cached fields (no backend round-trip per row).
-fn term_tags(term: &crate::client::GlossaryTerm, palette: &theme::Palette) -> impl IntoElement {
+fn term_tags(term: &GlossaryTerm, palette: &theme::Palette) -> impl IntoElement {
     let mut tags = div().flex().flex_none().items_center().gap_1();
     if term.mentions > 0 {
         let label = if term.mentions >= 50 {
@@ -80,8 +84,7 @@ fn term_tags(term: &crate::client::GlossaryTerm, palette: &theme::Palette) -> im
     tags
 }
 
-/// Workspace tab: browse terms (default), review conflicts, or watch the
-/// background curator worker.
+/// Workspace tab: browse terms (default), review conflicts, or worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum GlossaryTab {
     #[default]
@@ -91,9 +94,8 @@ enum GlossaryTab {
 }
 
 pub struct GlossaryView {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     pid: String,
-    /// Whether this screen is shown; the curator poll only runs while visible.
     visible: bool,
     project_status: String,
     terms: Vec<GlossaryTerm>,
@@ -110,11 +112,13 @@ pub struct GlossaryView {
     tab: GlossaryTab,
     loading: bool,
     error: Option<String>,
+    /// Signature of the last applied (terms, conflicts, status) triple;
+    /// `refresh` skips resets + notify when a reload is unchanged.
+    data_sig: u64,
     search: Entity<InputState>,
     search_text: String,
     type_filter: String,
     selected: HashSet<String>,
-    /// Add dialog open; edit target when Some(source).
     editing: Option<Option<String>>,
     form: TermIn,
     form_error: Option<String>,
@@ -129,50 +133,36 @@ pub struct GlossaryView {
     form_note: Option<Entity<InputState>>,
     form_type_select: Option<Entity<SelectState<Vec<String>>>>,
     form_type_options: Vec<String>,
-    /// Import flow state (mirrors the React ImportDialog steps).
-    import_open: bool,
-    import_conflicts: Vec<ImportConflict>,
-    import_parsed: Vec<TermIn>,
-    import_error: Option<String>,
-    importing: bool,
-    /// Export menu / in-flight flag.
-    export_open: bool,
-    exporting: bool,
-    /// Background curator status (loaded on Worker tab open + refresh).
-    curator: Option<serde_json::Value>,
+    curator: Option<CuratorStatus>,
     curator_loading: bool,
     curator_error: Option<String>,
+    /// Search debounce token: typing re-arms a 150ms timer, so fast typing
+    /// filters once instead of cloning the term set per keystroke.
+    search_token: u64,
 }
-/// Import-time conflict for an incoming term whose source already exists.
-/// Mirrors `ImportConflict` in `GlossaryPage.tsx` (`skip`/`overwrite`).
-#[derive(Debug, Clone)]
-struct ImportConflict {
-    source: String,
-    existing_target: String,
-    new_target: String,
-    decision: ImportDecision,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ImportDecision {
-    Skip,
-    Overwrite,
-}
-
 impl GlossaryView {
     pub fn new(pid: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search terms…"));
-        // Live local filtering (mirrors proofreading): typing filters the
-        // loaded terms without a backend round-trip.
-        cx.subscribe(
-            &search,
-            |this: &mut GlossaryView, _, _: &InputEvent, cx| {
-                this.apply_filter(cx);
-            },
-        )
+        // Live local filtering, debounced: typing re-arms a 150ms timer so
+        // a burst filters once (per-keystroke clones stuttered at 3k terms).
+        cx.subscribe(&search, |this: &mut GlossaryView, _, _: &InputEvent, cx| {
+            this.search_token = this.search_token.wrapping_add(1);
+            let token = this.search_token;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(150))
+                    .await;
+                _ = this.update(cx, |view: &mut GlossaryView, cx| {
+                    if view.search_token == token {
+                        view.apply_filter(cx);
+                    }
+                });
+            })
+            .detach();
+        })
         .detach();
         Self {
-            client: None,
+            service: None,
             pid,
             visible: true,
             project_status: String::new(),
@@ -185,6 +175,7 @@ impl GlossaryView {
             tab: GlossaryTab::Browse,
             loading: true,
             error: None,
+            data_sig: 0,
             search,
             search_text: String::new(),
             type_filter: String::new(),
@@ -201,33 +192,23 @@ impl GlossaryView {
             form_note: None,
             form_type_select: None,
             form_type_options: Vec::new(),
-            import_open: false,
-            import_conflicts: Vec::new(),
-            import_parsed: Vec::new(),
-            import_error: None,
-            importing: false,
-            export_open: false,
-            exporting: false,
             curator: None,
             curator_loading: false,
             curator_error: None,
+            search_token: 0,
         }
     }
 
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client);
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service);
         self.refresh(cx);
     }
 
-    /// Called by the App shell on navigation. Becoming visible refreshes;
-    /// the curator poll below also gates on this flag.
+    /// Called by the App shell on navigation. Becoming visible refreshes.
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         if visible && !self.visible {
             self.visible = true;
             self.refresh(cx);
-            if self.tab == GlossaryTab::Worker {
-                self.refresh_curator(cx);
-            }
         } else {
             self.visible = visible;
         }
@@ -237,6 +218,27 @@ impl GlossaryView {
         is_project_busy(&self.project_status)
     }
 
+    /// Signature of the (terms, conflicts, status) triple for the refresh
+    /// no-op guard: term sources + targets, conflict ids + targets, and
+    /// the project status.
+    fn data_signature(terms: &[GlossaryTerm], conflicts: &[TermConflict], status: &str) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        terms.len().hash(&mut hasher);
+        for t in terms {
+            t.source.hash(&mut hasher);
+            t.target.hash(&mut hasher);
+            t.term_type.hash(&mut hasher);
+        }
+        conflicts.len().hash(&mut hasher);
+        for c in conflicts {
+            c.id.hash(&mut hasher);
+            c.existing_target.hash(&mut hasher);
+            c.proposed_target.hash(&mut hasher);
+        }
+        status.hash(&mut hasher);
+        hasher.finish()
+    }
     /// Recompute the filtered view from loaded terms + current search text
     /// and type filter. Local and cheap (no backend round-trip); called on
     /// every keystroke, chip click, and after data loads.
@@ -247,7 +249,7 @@ impl GlossaryView {
             .terms
             .iter()
             .filter(|t| {
-                (self.type_filter.is_empty() || t.r#type == self.type_filter)
+                (self.type_filter.is_empty() || t.term_type == self.type_filter)
                     && (q.is_empty()
                         || t.source.to_lowercase().contains(&q)
                         || t.target.to_lowercase().contains(&q)
@@ -264,10 +266,10 @@ impl GlossaryView {
     fn recompute_type_counts(&mut self) {
         let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
         for t in &self.terms {
-            let key = if t.r#type.trim().is_empty() {
+            let key = if t.term_type.trim().is_empty() {
                 "uncategorized".to_string()
             } else {
-                term_type_label(&t.r#type).to_string()
+                term_type_label(&t.term_type).to_string()
             };
             *counts.entry(key).or_default() += 1;
         }
@@ -305,9 +307,21 @@ impl GlossaryView {
                         this.toggle_select(source.clone(), cx);
                     })),
             )
-            .child(div().w_40().font_medium().truncate().child(term.source.clone()))
+            .child(
+                div()
+                    .w_40()
+                    .font_medium()
+                    .truncate()
+                    .child(term.source.clone()),
+            )
             .child(div().flex_1().truncate().child(term.target.clone()))
-            .child(div().w_32().text_xs().truncate().child(term_type_label(&term.r#type).to_string()))
+            .child(
+                div()
+                    .w_32()
+                    .text_xs()
+                    .truncate()
+                    .child(term_type_label(&term.term_type).to_string()),
+            )
             .child(term_tags(term, &palette))
             .child(
                 div()
@@ -331,7 +345,9 @@ impl GlossaryView {
                             .disabled(busy)
                             .on_click({
                                 let source = term.source.clone();
-                                cx.listener(move |this, _, _, cx| this.delete_one(source.clone(), cx))
+                                cx.listener(move |this, _, _, cx| {
+                                    this.delete_one(source.clone(), cx)
+                                })
                             }),
                     ),
             )
@@ -409,7 +425,7 @@ impl GlossaryView {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         // Fetch the full term set; search/type filtering happens locally in
@@ -421,28 +437,42 @@ impl GlossaryView {
                 .background_spawn(async move {
                     // Sequential, not join!: terms/conflicts/project render
                     // independently; one hanging endpoint must not blank all.
-                    let terms = block_on(client.list_terms(&pid, None, None))?;
-                    let conflicts = block_on(client.list_conflicts(&pid))?;
-                    let project = block_on(client.get_project(&pid))?;
-                    Ok::<_, crate::client::Error>((terms, conflicts, project.project.status))
+                    let terms = service.list_terms(&pid)?;
+                    let conflicts = service.list_conflicts(&pid)?;
+                    let project = service.get_project(&pid)?;
+                    Ok::<_, ServiceError>((terms, conflicts, project.project.status))
                 })
                 .await;
             _ = this.update(cx, |view: &mut GlossaryView, cx| {
                 view.loading = false;
                 match result {
                     Ok((terms, conflicts, status)) => {
-                        view.terms = terms;
-                        view.conflicts = conflicts;
-                        view.conflicts_list.reset(view.conflicts.len());
-                        view.project_status = status;
-                        view.recompute_type_counts();
-                        // Drop selections for vanished terms.
-                        view.selected.retain(|s| view.terms.iter().any(|t| &t.source == s));
-                        view.apply_filter(cx);
-                        return;
+                        // No-op guard: an unchanged reload skips resets +
+                        // notify (the refresh path had none, unlike the
+                        // filter path). Signature covers term identities +
+                        // targets, conflict ids, and project status.
+                        let sig = Self::data_signature(&terms, &conflicts, &status);
+                        if sig != view.data_sig {
+                            view.data_sig = sig;
+                            view.terms = terms;
+                            view.conflicts = conflicts;
+                            view.conflicts_list.reset(view.conflicts.len());
+                            view.project_status = status;
+                            view.recompute_type_counts();
+                            // Drop selections for vanished terms.
+                            view.selected
+                                .retain(|s| view.terms.iter().any(|t| &t.source == s));
+                            view.apply_filter(cx);
+                            return;
+                        }
                     }
                     Err(err) => {
-                        view.error = Some(err.to_string());
+                        let msg = err.to_string();
+                        // Same guard for errors: repeated failures notify once.
+                        if view.error.as_ref() != Some(&msg) {
+                            view.error = Some(msg);
+                            cx.notify();
+                        }
                     }
                 }
                 cx.notify();
@@ -452,7 +482,7 @@ impl GlossaryView {
     }
 
     fn refresh_curator(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         self.curator_loading = true;
@@ -460,7 +490,7 @@ impl GlossaryView {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.curator_status(&pid)) })
+                .background_spawn(async move { service.curator_status(&pid) })
                 .await;
             _ = this.update(cx, |view: &mut GlossaryView, cx| {
                 view.curator_loading = false;
@@ -481,12 +511,7 @@ impl GlossaryView {
             _ = this.update(cx, |view: &mut GlossaryView, cx| {
                 let running = view.visible
                     && view.tab == GlossaryTab::Worker
-                    && view
-                        .curator
-                        .as_ref()
-                        .and_then(|s| s.get("running"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+                    && view.curator.as_ref().is_some_and(|s| s.running);
                 if running {
                     view.refresh_curator(cx);
                 }
@@ -496,14 +521,14 @@ impl GlossaryView {
     }
 
     fn curator_start(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         self.curator_loading = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.curator_start(&pid)) })
+                .background_spawn(async move { service.curator_start(&pid) })
                 .await;
             _ = this.update(cx, |view: &mut GlossaryView, cx| {
                 if let Err(err) = result {
@@ -519,14 +544,14 @@ impl GlossaryView {
     }
 
     fn curator_stop(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         self.curator_loading = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.curator_stop(&pid)) })
+                .background_spawn(async move { service.curator_stop(&pid) })
                 .await;
             _ = this.update(cx, |view: &mut GlossaryView, cx| {
                 if let Err(err) = result {
@@ -562,7 +587,11 @@ impl GlossaryView {
             source: term.source.clone(),
             target: term.target.clone(),
             reading: term.reading.clone(),
-            r#type: if term.r#type.is_empty() { "term".into() } else { term.r#type.clone() },
+            term_type: if term.term_type.is_empty() {
+                "term".into()
+            } else {
+                term.term_type.clone()
+            },
             gender: term.gender.clone(),
             aliases: term.aliases.clone(),
             note: term.note.clone(),
@@ -624,7 +653,7 @@ impl GlossaryView {
     }
 
     fn save_form(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         self.sync_form_from_widgets(cx);
@@ -642,9 +671,10 @@ impl GlossaryView {
             let result = cx
                 .background_spawn(async move {
                     match edit_key {
-                        Some(source) => block_on(client.update_term(&pid, &source, &form))
-                            .map(|_| ()),
-                        None => block_on(client.add_term(&pid, &form)).map(|_| ()),
+                        Some(source) => {
+                            service.update_term(&pid, &source, form.clone()).map(|_| ())
+                        }
+                        None => service.add_term(&pid, form.clone()).map(|_| ()),
                     }
                 })
                 .await;
@@ -674,21 +704,19 @@ impl GlossaryView {
     }
 
     fn delete_one(&mut self, source: String, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         let pid = self.pid.clone();
         cx.spawn(async move |this, cx| {
-            let result =
-                cx.background_spawn(async move { block_on(client.delete_term(&pid, &source)) })
-                    .await;
-            _ = this.update(cx, |view: &mut GlossaryView, cx| {
-                match result {
-                    Ok(_) => view.refresh(cx),
-                    Err(err) => {
-                        view.error = Some(err.to_string());
-                        cx.notify();
-                    }
+            let result = cx
+                .background_spawn(async move { service.delete_term(&pid, &source) })
+                .await;
+            _ = this.update(cx, |view: &mut GlossaryView, cx| match result {
+                Ok(_) => view.refresh(cx),
+                Err(err) => {
+                    view.error = Some(err.to_string());
+                    cx.notify();
                 }
             });
         })
@@ -719,7 +747,7 @@ impl GlossaryView {
     /// Run the confirmed batch delete (same backend loop as before; ErrorNotice
     /// stays the primary error surface).
     fn delete_selected_confirmed(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         let sources: Vec<String> = self.selected.iter().cloned().collect();
@@ -727,21 +755,19 @@ impl GlossaryView {
             let result = cx
                 .background_spawn(async move {
                     for source in &sources {
-                        block_on(client.delete_term(&pid, source))?;
+                        service.delete_term(&pid, source)?;
                     }
-                    Ok::<_, crate::client::Error>(())
+                    Ok::<_, ServiceError>(())
                 })
                 .await;
-            _ = this.update(cx, |view: &mut GlossaryView, cx| {
-                match result {
-                    Ok(()) => {
-                        view.selected.clear();
-                        view.refresh(cx);
-                    }
-                    Err(err) => {
-                        view.error = Some(err.to_string());
-                        cx.notify();
-                    }
+            _ = this.update(cx, |view: &mut GlossaryView, cx| match result {
+                Ok(()) => {
+                    view.selected.clear();
+                    view.refresh(cx);
+                }
+                Err(err) => {
+                    view.error = Some(err.to_string());
+                    cx.notify();
                 }
             });
         })
@@ -749,188 +775,33 @@ impl GlossaryView {
     }
 
     fn resolve(&mut self, cid: i64, decision: &str, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
+        let Some(service) = self.service.clone() else {
             return;
         };
         let pid = self.pid.clone();
-        let decision = decision.to_string();
+        // New engine takes the chosen final rendering as `target`: "current"
+        // keeps the existing target, "proposed" accepts the suggestion.
+        let target = self
+            .conflicts
+            .iter()
+            .find(|c| c.id == cid)
+            .map(|c| {
+                if decision == "proposed" {
+                    c.proposed_target.clone().unwrap_or_default()
+                } else {
+                    c.existing_target.clone().unwrap_or_default()
+                }
+            })
+            .unwrap_or_default();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move {
-                    block_on(client.resolve_conflict(&pid, cid, &decision, None))
-                })
+                .background_spawn(async move { service.resolve_conflict(&pid, cid, &target) })
                 .await;
-            _ = this.update(cx, |view: &mut GlossaryView, cx| {
-                match result {
-                    Ok(_) => view.refresh(cx),
-                    Err(err) => {
-                        view.error = Some(err.to_string());
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-    /// Pick a CSV/JSON file (rfd, off the UI thread), parse it client-side,
-    /// then either surface per-source overwrite/skip conflicts or import
-    /// directly. Mirrors the React `ImportDialog` steps.
-    fn pick_import_file(&mut self, cx: &mut Context<Self>) {
-        let existing: std::collections::HashMap<String, String> = self
-            .terms
-            .iter()
-            .map(|t| (t.source.clone(), t.target.clone()))
-            .collect();
-        cx.spawn(async move |this, cx| {
-            let outcome: Result<ImportPicked, String> = cx
-                .background_spawn(async move {
-                    let path = rfd::FileDialog::new()
-                        .add_filter("glossary", &["csv", "json"])
-                        .pick_file()
-                        .ok_or_else(|| "__cancelled__".to_string())?;
-                    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-                    let is_csv = path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e.eq_ignore_ascii_case("csv"))
-                        .unwrap_or(false);
-                    let items = if is_csv {
-                        parse_csv_terms(&text).map_err(|e| e.to_string())?
-                    } else {
-                        parse_json_terms(&text).map_err(|e| e.to_string())?
-                    };
-                    if items.is_empty() {
-                        return Err("The file is empty or has no valid terms".to_string());
-                    }
-                    Ok(ImportPicked { items })
-                })
-                .await;
-            _ = this.update(cx, |view: &mut GlossaryView, cx| {
-                match outcome {
-                    Err(cancelled) if cancelled == "__cancelled__" => {}
-                    Err(err) => {
-                        view.import_error = Some(err);
-                        cx.notify();
-                    }
-                    Ok(picked) => {
-                        view.import_error = None;
-                        view.import_parsed = picked.items;
-                        view.import_conflicts = view
-                            .import_parsed
-                            .iter()
-                            .filter_map(|it| {
-                                existing.get(&it.source).map(|current| ImportConflict {
-                                    source: it.source.clone(),
-                                    existing_target: current.clone(),
-                                    new_target: it.target.clone(),
-                                    decision: ImportDecision::Overwrite,
-                                })
-                            })
-                            .collect();
-                        if view.import_conflicts.is_empty() {
-                            view.do_import(cx);
-                        } else {
-                            cx.notify();
-                        }
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn toggle_import_conflict(&mut self, index: usize, cx: &mut Context<Self>) {
-        if let Some(c) = self.import_conflicts.get_mut(index) {
-            c.decision = if c.decision == ImportDecision::Skip {
-                ImportDecision::Overwrite
-            } else {
-                ImportDecision::Skip
-            };
-        }
-        cx.notify();
-    }
-
-    fn do_import(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
-            return;
-        };
-        let pid = self.pid.clone();
-        let skip: std::collections::HashSet<String> = self
-            .import_conflicts
-            .iter()
-            .filter(|c| c.decision == ImportDecision::Skip)
-            .map(|c| c.source.clone())
-            .collect();
-        let terms: Vec<TermIn> = self
-            .import_parsed
-            .iter()
-            .filter(|t| !skip.contains(&t.source))
-            .cloned()
-            .collect();
-        self.importing = true;
-        self.import_error = None;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { block_on(client.import_glossary(&pid, &terms)) })
-                .await;
-            _ = this.update(cx, |view: &mut GlossaryView, cx| {
-                view.importing = false;
-                match result {
-                    Ok(_) => {
-                        view.import_open = false;
-                        view.import_conflicts.clear();
-                        view.import_parsed.clear();
-                        view.import_error = None;
-                        view.refresh(cx);
-                    }
-                    Err(err) => {
-                        view.import_error = Some(err.to_string());
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// Export via `export_glossary` bytes → rfd save dialog → write file.
-    /// The blocking dialog + write run on a background thread.
-    fn run_export(&mut self, format: &str, cx: &mut Context<Self>) {
-        let Some(client) = self.client.clone() else {
-            return;
-        };
-        let pid = self.pid.clone();
-        let format = format.to_string();
-        self.export_open = false;
-        self.exporting = true;
-        self.error = None;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let saved: Result<String, String> = cx
-                .background_spawn(async move {
-                    let bytes = block_on(client.export_glossary(&pid, &format))
-                        .map_err(|e| e.to_string())?;
-                    let mut dialog = rfd::FileDialog::new()
-                        .set_title("Save glossary")
-                        .set_file_name(format!("glossary.{format}"));
-                    dialog = dialog.add_filter("glossary", &[format.as_str()]);
-                    let Some(dest) = dialog.save_file() else {
-                        return Err("__cancelled__".into());
-                    };
-                    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
-                    Ok(dest.to_string_lossy().into_owned())
-                })
-                .await;
-            _ = this.update(cx, |view: &mut GlossaryView, cx| {
-                view.exporting = false;
-                match saved {
-                    Ok(_) => view.refresh(cx),
-                    Err(cancelled) if cancelled == "__cancelled__" => cx.notify(),
-                    Err(err) => {
-                        view.error = Some(err);
-                        cx.notify();
-                    }
+            _ = this.update(cx, |view: &mut GlossaryView, cx| match result {
+                Ok(_) => view.refresh(cx),
+                Err(err) => {
+                    view.error = Some(err.to_string());
+                    cx.notify();
                 }
             });
         })
@@ -953,134 +824,6 @@ impl GlossaryView {
         cx.notify();
     }
 }
-/// Parsed-but-uncommitted import payload (kept small: terms only).
-struct ImportPicked {
-    items: Vec<TermIn>,
-}
-
-/// Parse the `glossary.export?format=csv` shape: header row + `|`-joined
-/// aliases. Mirrors `parseCsv` in `GlossaryPage.tsx`.
-fn parse_csv_terms(text: &str) -> Result<Vec<TermIn>, String> {
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut row: Vec<String> = Vec::new();
-    let mut value = String::new();
-    let mut quoted = false;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '"' {
-            if quoted && chars.peek() == Some(&'"') {
-                value.push('"');
-                chars.next();
-            } else {
-                quoted = !quoted;
-            }
-        } else if !quoted && c == ',' {
-            row.push(std::mem::take(&mut value));
-        } else if !quoted && c == '\n' {
-            if value.ends_with('\r') {
-                value.pop();
-            }
-            row.push(std::mem::take(&mut value));
-            rows.push(std::mem::take(&mut row));
-        } else {
-            value.push(c);
-        }
-    }
-    if quoted {
-        return Err("Unclosed quote in CSV".into());
-    }
-    if !value.is_empty() || !row.is_empty() {
-        if value.ends_with('\r') {
-            value.pop();
-        }
-        row.push(value);
-        rows.push(row);
-    }
-    let Some(headers) = rows.first().cloned() else {
-        return Ok(Vec::new());
-    };
-    let mut out = Vec::new();
-    for vals in rows.iter().skip(1) {
-        if !vals.iter().any(|v| !v.is_empty()) {
-            continue;
-        }
-        let mut get = |name: &str| -> String {
-            headers
-                .iter()
-                .position(|h| h == name)
-                .and_then(|i| vals.get(i))
-                .cloned()
-                .unwrap_or_default()
-        };
-        let source = get("source");
-        let target = get("target");
-        if source.is_empty() || target.is_empty() {
-            continue;
-        }
-        out.push(TermIn {
-            source,
-            target,
-            reading: get("reading"),
-            r#type: {
-                let t = get("type");
-                if t.is_empty() { "term".into() } else { t }
-            },
-            gender: get("gender"),
-            aliases: get("aliases")
-                .split('|')
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect(),
-            note: get("note"),
-        });
-    }
-    Ok(out)
-}
-
-/// Parse the `glossary.export?format=json` shape: a list of `{source,
-/// target, …}` objects. Mirrors the React `JSON.parse` import path.
-fn parse_json_terms(text: &str) -> Result<Vec<TermIn>, String> {
-    let items: Vec<serde_json::Value> =
-        serde_json::from_str(text).map_err(|_| "Could not parse JSON".to_string())?;
-    let mut out = Vec::new();
-    for item in &items {
-        let source = item.get("source").and_then(|v| v.as_str()).unwrap_or("");
-        let target = item.get("target").and_then(|v| v.as_str()).unwrap_or("");
-        if source.is_empty() || target.is_empty() {
-            return Err("The term file must be a list of {source, target} objects".into());
-        }
-        let aliases = match item.get("aliases") {
-            Some(serde_json::Value::Array(arr)) => arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .map(str::to_string)
-                .collect(),
-            Some(serde_json::Value::String(s)) => s
-                .split('|')
-                .filter(|p| !p.is_empty())
-                .map(str::to_string)
-                .collect(),
-            _ => Vec::new(),
-        };
-        let str_field = |name: &str, default: &str| {
-            item.get(name)
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| default.into())
-        };
-        out.push(TermIn {
-            source: source.into(),
-            target: target.into(),
-            reading: str_field("reading", ""),
-            r#type: str_field("type", "term"),
-            gender: str_field("gender", ""),
-            aliases,
-            note: str_field("note", ""),
-        });
-    }
-    Ok(out)
-}
-
 impl Render for GlossaryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::current_palette();
@@ -1088,40 +831,31 @@ impl Render for GlossaryView {
         // Fixed workspace: header + tabs + search + filters pinned; only the
         // central table scrolls; stats footer pinned at the bottom. The page
         // keeps its scroll container so the flex chain resolves heights.
-        let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar().font(theme::fonts::ui()).child(
-            div().flex().items_center().justify_between().child(
-                super::ui::page_title("Glossary", None::<Div>),
-            ).child(
-                div().flex().gap_2()
+        let mut col = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .gap_3()
+            .p_6()
+            .overflow_y_scrollbar()
+            .font(theme::fonts::ui())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(super::ui::page_title("Glossary", None::<Div>))
                     .child(
-                        Button::new("glossary-export")
-                            .label(if self.exporting { "Exporting…" } else { "Export" })
-                            .disabled(self.exporting)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.export_open = !this.export_open;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("glossary-import")
-                            .label("Import")
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.import_open = true;
-                                this.import_error = None;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("glossary-add")
-                            .label("Add term")
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, _, cx| this.open_add(cx))),
+                        div().flex().gap_2().child(
+                            Button::new("glossary-add")
+                                .label("Add term")
+                                .disabled(busy)
+                                .on_click(cx.listener(|this, _, _, cx| this.open_add(cx))),
+                        ),
                     ),
-            ),
-        );
-        // Workspace tabs: Browse Terms default; Conflicts red; Worker status.
+            );
+        // Workspace tabs: Browse Terms default; Conflicts red; Worker.
         let conflict_count = self.conflicts.len();
         let tab_index = match self.tab {
             GlossaryTab::Browse => 0,
@@ -1136,7 +870,9 @@ impl Render for GlossaryView {
                     this.tab = match *index {
                         1 => GlossaryTab::Conflicts,
                         2 => {
-                            this.refresh_curator(cx);
+                            if this.curator.is_none() && !this.curator_loading {
+                                this.refresh_curator(cx);
+                            }
                             GlossaryTab::Worker
                         }
                         _ => GlossaryTab::Browse,
@@ -1151,40 +887,21 @@ impl Render for GlossaryView {
                 )
                 .child(Tab::new().label("Worker")),
         );
-        // Export format menu (mirrors the React CSV/JSON dropdown).
-        if self.export_open {
-            col = col.child(
-                div().flex().gap_2().items_center()
-                    .child(
-                        Button::new("export-csv")
-                            .label("CSV file")
-                            .on_click(cx.listener(|this, _, _, cx| this.run_export("csv", cx))),
-                    )
-                    .child(
-                        Button::new("export-json")
-                            .label("JSON file")
-                            .on_click(cx.listener(|this, _, _, cx| this.run_export("json", cx))),
-                    )
-                    .child(
-                        Button::new("export-cancel").ghost().label("Cancel").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.export_open = false;
-                                cx.notify();
-                            }),
-                        ),
-                    ),
-            );
-        }
 
         if busy {
             col = col.child(
-                div().text_sm().text_color(palette.muted_foreground)
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
                     .child("Project is running — glossary is read-only."),
             );
         }
         if let Some(err) = &self.error {
             col = col.child(
-                div().p_3().rounded_md().bg(palette.destructive)
+                div()
+                    .p_3()
+                    .rounded_md()
+                    .bg(palette.destructive)
                     .text_color(palette.destructive_foreground)
                     .child(format!("Error: {err}")),
             );
@@ -1210,439 +927,355 @@ impl Render for GlossaryView {
         if self.tab == GlossaryTab::Conflicts {
             col = col.child(conflicts_panel(self, &palette, cx));
         }
+        // Worker tab: background curator status + controls.
         if self.tab == GlossaryTab::Worker {
             col = col.child(worker_panel(self, &palette, cx));
         }
         if self.tab == GlossaryTab::Browse {
-        // Add/Edit form directly under the search card (immediately visible;
-        // previously appended below the list, off-screen). Entities are
-        // created once per open and seed from `form`; values sync back on save.
-        if let Some(edit_key) = self.editing.clone() {
-            let title = if edit_key.is_some() { "Edit term" } else { "Add term" };
-            if self.form_source.is_none() {
-                let v = self.form.source.clone();
-                self.form_source = Some(cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("Source term");
-                    s.set_value(v, window, cx);
-                    s
-                }));
-            }
-            if self.form_target.is_none() {
-                let v = self.form.target.clone();
-                self.form_target = Some(cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("Translated term");
-                    s.set_value(v, window, cx);
-                    s
-                }));
-            }
-            if self.form_reading.is_none() {
-                let v = self.form.reading.clone();
-                self.form_reading = Some(cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("Reading");
-                    s.set_value(v, window, cx);
-                    s
-                }));
-            }
-            if self.form_gender.is_none() {
-                let v = self.form.gender.clone();
-                self.form_gender = Some(cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("Unspecified");
-                    s.set_value(v, window, cx);
-                    s
-                }));
-            }
-            if self.form_aliases.is_none() {
-                let v = self.form.aliases.join(", ");
-                self.form_aliases = Some(cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("alias1, alias2");
-                    s.set_value(v, window, cx);
-                    s
-                }));
-            }
-            if self.form_note.is_none() {
-                let v = self.form.note.clone();
-                self.form_note = Some(cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("Notes");
-                    s.set_value(v, window, cx);
-                    s
-                }));
-            }
-            // Type select (options mirror TERM_TYPES; writes back via Confirm).
-            let type_opts: Vec<String> = TERM_TYPES.iter().map(|(id, _)| id.to_string()).collect();
-            if self.form_type_select.is_none() || self.form_type_options != type_opts {
-                let cur = if self.form.r#type.is_empty() { "term".into() } else { self.form.r#type.clone() };
-                let idx = type_opts.iter().position(|o| o == &cur).unwrap_or(0);
-                let opts = type_opts.clone();
-                let entity = cx.new(|cx| {
-                    SelectState::new(opts, Some(IndexPath::new(idx)), window, cx)
-                });
-                cx.subscribe(
-                    &entity,
-                    |this: &mut GlossaryView, _, event: &SelectEvent<Vec<String>>, _| {
-                        if let SelectEvent::Confirm(Some(value)) = event {
-                            this.form.r#type = value.clone();
-                        }
-                    },
-                )
-                .detach();
-                self.form_type_select = Some(entity);
-                self.form_type_options = type_opts;
-            }
-            let mut panel = div().flex().flex_col().gap_2().p_4().rounded_md()
-                .border_1().border_color(palette.ring).bg(palette.card)
-                .on_key_down(cx.listener(|this, ev: &gpui_kit::KeyDownEvent, _, cx| {
-                    // Esc closes the term editor (dialogs also close on Esc
-                    // via the kit default); Tab order stays native.
-                    if ev.keystroke.key == "escape" {
-                        this.close_form(cx);
-                    }
-                }))
-                .child(div().font_medium().child(title))
-                .child(div().flex().flex_col().gap_1().child("Source term").child(Input::new(self.form_source.as_ref().unwrap())))
-                .child(div().flex().flex_col().gap_1().child("Translated term").child(Input::new(self.form_target.as_ref().unwrap())))
-                .child(div().flex().flex_col().gap_1().child("Reading").child(Input::new(self.form_reading.as_ref().unwrap())))
-                .child(div().flex().flex_col().gap_1().child("Type").child(Select::new(self.form_type_select.as_ref().unwrap())))
-                .child(div().flex().flex_col().gap_1().child("Gender (unspecified / male / female / other / unknown)").child(Input::new(self.form_gender.as_ref().unwrap())))
-                .child(div().flex().flex_col().gap_1().child("Aliases (comma-separated)").child(Input::new(self.form_aliases.as_ref().unwrap())))
-                .child(div().flex().flex_col().gap_1().child("Notes").child(Input::new(self.form_note.as_ref().unwrap())))
-                .child(
-                    div().flex().gap_2()
-                        .child(
-                            Button::new("save-term")
-                                .primary()
-                                .label(if self.saving { "Saving…" } else { "Save" })
-                                .disabled(self.saving)
-                                .on_click(cx.listener(|this, _, _, cx| this.save_form(cx))),
-                        )
-                        .child(
-                            Button::new("cancel-term").ghost().label("Cancel").on_click(
-                                cx.listener(|this, _, _, cx| this.close_form(cx)),
-                            ),
-                        ),
-                );
-            if let Some(err) = &self.form_error {
-                panel = panel.child(div().text_sm().text_color(palette.destructive).child(err.clone()));
-            }
-            col = col.child(panel);
-        }
-        // Batch bar.
-        if !self.selected.is_empty() {
-            col = col.child(
-                div().flex().items_center().gap_2()
-                    .child(format!("{} selected", self.selected.len()))
-                    .child(
-                        Button::new("batch-delete")
-                            .label("Delete selected")
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.delete_selected(window, cx);
-                            })),
+            // Add/Edit form directly under the search card (immediately visible;
+            // previously appended below the list, off-screen). Entities are
+            // created once per open and seed from `form`; values sync back on save.
+            if let Some(edit_key) = self.editing.clone() {
+                let title = if edit_key.is_some() {
+                    "Edit term"
+                } else {
+                    "Add term"
+                };
+                if self.form_source.is_none() {
+                    let v = self.form.source.clone();
+                    self.form_source = Some(cx.new(|cx| {
+                        let mut s = InputState::new(window, cx).placeholder("Source term");
+                        s.set_value(v, window, cx);
+                        s
+                    }));
+                }
+                if self.form_target.is_none() {
+                    let v = self.form.target.clone();
+                    self.form_target = Some(cx.new(|cx| {
+                        let mut s = InputState::new(window, cx).placeholder("Translated term");
+                        s.set_value(v, window, cx);
+                        s
+                    }));
+                }
+                if self.form_reading.is_none() {
+                    let v = self.form.reading.clone();
+                    self.form_reading = Some(cx.new(|cx| {
+                        let mut s = InputState::new(window, cx).placeholder("Reading");
+                        s.set_value(v, window, cx);
+                        s
+                    }));
+                }
+                if self.form_gender.is_none() {
+                    let v = self.form.gender.clone();
+                    self.form_gender = Some(cx.new(|cx| {
+                        let mut s = InputState::new(window, cx).placeholder("Unspecified");
+                        s.set_value(v, window, cx);
+                        s
+                    }));
+                }
+                if self.form_aliases.is_none() {
+                    let v = self.form.aliases.join(", ");
+                    self.form_aliases = Some(cx.new(|cx| {
+                        let mut s = InputState::new(window, cx).placeholder("alias1, alias2");
+                        s.set_value(v, window, cx);
+                        s
+                    }));
+                }
+                if self.form_note.is_none() {
+                    let v = self.form.note.clone();
+                    self.form_note = Some(cx.new(|cx| {
+                        let mut s = InputState::new(window, cx).placeholder("Notes");
+                        s.set_value(v, window, cx);
+                        s
+                    }));
+                }
+                // Type select (options mirror TERM_TYPES; writes back via Confirm).
+                let type_opts: Vec<String> =
+                    TERM_TYPES.iter().map(|(id, _)| id.to_string()).collect();
+                if self.form_type_select.is_none() || self.form_type_options != type_opts {
+                    let cur = if self.form.term_type.is_empty() {
+                        "term".into()
+                    } else {
+                        self.form.term_type.clone()
+                    };
+                    let idx = type_opts.iter().position(|o| o == &cur).unwrap_or(0);
+                    let opts = type_opts.clone();
+                    let entity =
+                        cx.new(|cx| SelectState::new(opts, Some(IndexPath::new(idx)), window, cx));
+                    cx.subscribe(
+                        &entity,
+                        |this: &mut GlossaryView, _, event: &SelectEvent<Vec<String>>, _| {
+                            if let SelectEvent::Confirm(Some(value)) = event {
+                                this.form.term_type = value.clone();
+                            }
+                        },
                     )
-                    .child(
-                        Button::new("batch-clear")
-                            .ghost()
-                            .label("Clear")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.selected.clear();
-                                cx.notify();
-                            })),
-                    ),
-            );
-        }
-
-        // Terms list card: header row + virtualized rows filling the available
-        // space (no fixed 400px box nested in the page scroll — the list owns
-        // its scroll region like the proofreading segment list).
-        if self.loading && self.terms.is_empty() {
-            col = col.child(div().text_sm().text_color(palette.muted_foreground).child("Loading…"));
-        } else if self.terms.is_empty() {
-            col = col.child(
-                div().py_12().text_center().text_sm().text_color(palette.muted_foreground)
-                    .child("No terms yet."),
-            );
-        } else if self.filtered.is_empty() {
-            col = col.child(
-                div()
+                    .detach();
+                    self.form_type_select = Some(entity);
+                    self.form_type_options = type_opts;
+                }
+                let mut panel = div()
                     .flex()
                     .flex_col()
-                    .gap_3()
+                    .gap_2()
                     .p_4()
                     .rounded_md()
                     .border_1()
-                    .border_color(palette.border)
+                    .border_color(palette.ring)
                     .bg(palette.card)
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Terms"))
-                    .child(
-                        div().py_8().text_center().text_sm().text_color(palette.muted_foreground)
-                            .child("No terms match the current search or filter."),
-                    ),
-            );
-        } else {
-            let all_selected = !self.terms.is_empty() && self.selected.len() == self.terms.len();
-            let filtered_count = self.filtered.len();
-            let total_count = self.terms.len();
-            let view = cx.entity();
-            let list_rows = list(self.terms_list.clone(), move |ix, _window, cx: &mut App| {
-                view.update(cx, |this, cx| {
-                    Self::term_row(this, ix, palette, cx)
-                })
-            })
-            .flex_1()
-            .min_h_0();
-            col = col.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .gap_1()
-                    .pt_1()
-                    .border_t_1()
-                    .border_color(palette.border)
-                    .overflow_hidden()
+                    .on_key_down(cx.listener(|this, ev: &gpui_kit::KeyDownEvent, _, cx| {
+                        // Esc closes the term editor (dialogs also close on Esc
+                        // via the kit default); Tab order stays native.
+                        if ev.keystroke.key == "escape" {
+                            this.close_form(cx);
+                        }
+                    }))
+                    .child(div().font_medium().child(title))
                     .child(
                         div()
                             .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_weight(FontWeight::MEDIUM).child(format!(
-                                "Terms ({filtered_count})"
-                            )))
-                            .child(
-                                div().text_xs().text_color(palette.muted_foreground).child(format!(
-                                    "{filtered_count} of {total_count} terms",
-                                )),
-                            ),
+                            .flex_col()
+                            .gap_1()
+                            .child("Source term")
+                            .child(Input::new(self.form_source.as_ref().unwrap())),
                     )
                     .child(
-                        div().flex().items_center().gap_2().text_xs().px_2()
-                            .font_medium().text_color(palette.muted_foreground)
-                            .child(
-                                Checkbox::new("select-all")
-                                    .checked(all_selected)
-                                    .on_change(cx.listener(|this, _, _, cx| this.toggle_select_all(cx))),
-                            )
-                            .child(div().w_40().child("Source"))
-                            .child(div().flex_1().child("Target"))
-                            .child(div().w_32().child("Type")),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Translated term")
+                            .child(Input::new(self.form_target.as_ref().unwrap())),
                     )
-                    .child(list_rows),
-            );
-        }
-
-
-        // Import panel (mirrors the React ImportDialog: upload → conflicts → importing).
-        if self.import_open {
-            let mut panel = div().flex().flex_col().gap_2().p_4().rounded_md()
-                .border_1().border_color(palette.ring).bg(palette.card)
-                .on_key_down(cx.listener(|this, ev: &gpui_kit::KeyDownEvent, _, cx| {
-                    // Esc closes the import panel.
-                    if ev.keystroke.key == "escape" {
-                        this.import_open = false;
-                        this.import_error = None;
-                        cx.notify();
-                    }
-                }))
-                .child(div().font_medium().child("Import terms"));
-            if let Some(err) = &self.import_error {
-                panel = panel.child(div().text_sm().text_color(palette.destructive).child(err.clone()));
-            }
-            if self.importing {
-                panel = panel.child(div().text_sm().text_color(palette.muted_foreground).child("Importing…"));
-            } else if self.import_conflicts.is_empty() {
-                panel = panel
-                    .child(div().text_sm().text_color(palette.muted_foreground).child(
-                        "Import terms from CSV or JSON. Existing sources become overwrite/skip conflicts.",
-                    ))
                     .child(
-                        div().flex().gap_2()
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Reading")
+                            .child(Input::new(self.form_reading.as_ref().unwrap())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Type")
+                            .child(Select::new(self.form_type_select.as_ref().unwrap())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Gender (unspecified / male / female / other / unknown)")
+                            .child(Input::new(self.form_gender.as_ref().unwrap())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Aliases (comma-separated)")
+                            .child(Input::new(self.form_aliases.as_ref().unwrap())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child("Notes")
+                            .child(Input::new(self.form_note.as_ref().unwrap())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
                             .child(
-                                Button::new("pick-import-file")
-                                    .label("Choose file")
-                                    .disabled(busy)
-                                    .on_click(cx.listener(|this, _, _, cx| this.pick_import_file(cx))),
+                                Button::new("save-term")
+                                    .primary()
+                                    .label(if self.saving { "Saving…" } else { "Save" })
+                                    .disabled(self.saving)
+                                    .on_click(cx.listener(|this, _, _, cx| this.save_form(cx))),
                             )
                             .child(
-                                Button::new("cancel-import").ghost().label("Cancel").on_click(
-                                    cx.listener(|this, _, _, cx| {
-                                        this.import_open = false;
-                                        this.import_error = None;
-                                        cx.notify();
-                                    }),
-                                ),
+                                Button::new("cancel-term")
+                                    .ghost()
+                                    .label("Cancel")
+                                    .on_click(cx.listener(|this, _, _, cx| this.close_form(cx))),
                             ),
                     );
-            } else {
-                let count = self.import_conflicts.len();
-                panel = panel.child(div().text_sm().child(format!(
-                    "{count} terms already exist — choose overwrite or skip each."
-                )));
-                let conflicts = self.import_conflicts.clone();
-                let mut list = div().flex().flex_col().gap_1();
-                for (i, c) in conflicts.iter().enumerate() {
-                    let label = if c.decision == ImportDecision::Overwrite { "Overwrite" } else { "Skip" };
-                    list = list.child(
-                        div().flex().items_center().gap_2().text_sm().p_2().rounded_md()
-                            .border_1().border_color(palette.border)
-                            .child(div().font_medium().child(c.source.clone()))
-                            .child(div().text_xs().text_color(palette.muted_foreground).child(format!(
-                                "current: {} · imported: {}",
-                                c.existing_target, c.new_target
-                            )))
-                            .child(
-                                Button::new(format!("import-conflict-{i}"))
-                                    .label(label)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.toggle_import_conflict(i, cx);
-                                    })),
-                            ),
+                if let Some(err) = &self.form_error {
+                    panel = panel.child(
+                        div()
+                            .text_sm()
+                            .text_color(palette.destructive)
+                            .child(err.clone()),
                     );
                 }
-                panel = panel.child(list);
-                panel = panel.child(
-                    div().flex().gap_2()
+                col = col.child(panel);
+            }
+            // Batch bar.
+            if !self.selected.is_empty() {
+                col = col.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(format!("{} selected", self.selected.len()))
                         .child(
-                            Button::new("confirm-import")
-                                .primary()
-                                .label("Confirm import")
+                            Button::new("batch-delete")
+                                .label("Delete selected")
                                 .disabled(busy)
-                                .on_click(cx.listener(|this, _, _, cx| this.do_import(cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.delete_selected(window, cx);
+                                })),
                         )
-                        .child(
-                            Button::new("cancel-import").ghost().label("Cancel").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.import_open = false;
-                                    this.import_conflicts.clear();
-                                    this.import_parsed.clear();
-                                    this.import_error = None;
-                                    cx.notify();
-                                }),
-                            ),
-                        ),
+                        .child(Button::new("batch-clear").ghost().label("Clear").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.selected.clear();
+                                cx.notify();
+                            }),
+                        )),
                 );
             }
-            col = col.child(panel);
-        }
-        } // end Browse tab content (form + batch + list + import)
-        // Fixed stats footer (always visible): category breakdown bar over
-        // the full glossary, from cached `type_counts`.
+
+            // Terms list card: header row + virtualized rows filling the available
+            // space (no fixed 400px box nested in the page scroll — the list owns
+            // its scroll region like the proofreading segment list).
+            if self.loading && self.terms.is_empty() {
+                col = col.child(
+                    div()
+                        .text_sm()
+                        .text_color(palette.muted_foreground)
+                        .child("Loading…"),
+                );
+            } else if self.terms.is_empty() {
+                col = col.child(
+                    div()
+                        .py_12()
+                        .text_center()
+                        .text_sm()
+                        .text_color(palette.muted_foreground)
+                        .child("No terms yet."),
+                );
+            } else if self.filtered.is_empty() {
+                col = col.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .p_4()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(palette.border)
+                        .bg(palette.card)
+                        .child(div().font_weight(FontWeight::MEDIUM).child("Terms"))
+                        .child(
+                            div()
+                                .py_8()
+                                .text_center()
+                                .text_sm()
+                                .text_color(palette.muted_foreground)
+                                .child("No terms match the current search or filter."),
+                        ),
+                );
+            } else {
+                let all_selected =
+                    !self.terms.is_empty() && self.selected.len() == self.terms.len();
+                let filtered_count = self.filtered.len();
+                let total_count = self.terms.len();
+                let view = cx.entity();
+                let list_rows = list(self.terms_list.clone(), move |ix, _window, cx: &mut App| {
+                    view.update(cx, |this, cx| Self::term_row(this, ix, palette, cx))
+                })
+                .flex_1()
+                .min_h_0();
+                col = col.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h_0()
+                        .gap_1()
+                        .pt_1()
+                        .border_t_1()
+                        .border_color(palette.border)
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(format!("Terms ({filtered_count})")),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(palette.muted_foreground)
+                                        .child(format!("{filtered_count} of {total_count} terms",)),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .text_xs()
+                                .px_2()
+                                .font_medium()
+                                .text_color(palette.muted_foreground)
+                                .child(Checkbox::new("select-all").checked(all_selected).on_change(
+                                    cx.listener(|this, _, _, cx| this.toggle_select_all(cx)),
+                                ))
+                                .child(div().w_40().child("Source"))
+                                .child(div().flex_1().child("Target"))
+                                .child(div().w_32().child("Type")),
+                        )
+                        .child(list_rows),
+                );
+            }
+        } // end Browse tab content (form + batch + list)
+          // Fixed stats footer (always visible): category breakdown bar over
+          // the full glossary, from cached `type_counts`.
         col = col.child(stats_footer(&self.type_counts, self.terms.len(), &palette));
         col
     }
 }
 
-/// Conflicts review queue (red tab content): virtualized rows with keep /
-/// accept actions. Empty → guidance text.
-fn conflicts_panel(
-    view: &GlossaryView,
-    palette: &theme::Palette,
-    cx: &mut gpui_kit::Context<GlossaryView>,
-) -> impl IntoElement {
-    let mut body = div().flex().flex_col().flex_1().min_h_0().gap_2();
-    if view.conflicts.is_empty() {
-        body = body.child(
-            div().py_12().text_center().text_sm().text_color(palette.muted_foreground)
-                .child("No conflicts — every suggestion is resolved."),
-        );
-        return body;
-    }
-    let entity = cx.entity();
-    let state = view.conflicts_list.clone();
-    let rows = list(state, move |ix, _window, cx: &mut App| {
-        entity.update(cx, |this, cx| {
-            GlossaryView::conflict_row(this, ix, theme::current_palette(), cx)
-        })
-    })
-    .flex_1()
-    .min_h_0();
-    body.child(rows)
-}
-
-
-/// Muted pastel segment colors for the category breakdown (stable order,
-/// Light-safe; mirrors the Model Usage Breakdown look).
-fn category_colors(palette: &theme::Palette) -> [Hsla; 8] {
-    [
-        palette.success.opacity(0.75),
-        palette.info.opacity(0.75),
-        palette.warning.opacity(0.75),
-        palette.primary.opacity(0.55),
-        palette.destructive.opacity(0.55),
-        palette.accent_foreground.opacity(0.6),
-        palette.muted_foreground.opacity(0.6),
-        palette.secondary_foreground.opacity(0.6),
-    ]
-}
-
-/// Fixed stats footer: category breakdown bar over the FULL glossary
-/// (independent of search/filters) — one muted pastel segment per type plus
-/// uncategorized, with legend carrying count + percentage. Mirrors the
-/// Model Usage Breakdown visualization. Real data only.
-fn stats_footer(
-    counts: &[(String, usize)],
-    total_terms: usize,
+/// One status card (dot + label + value).
+fn worker_stat(
+    label: &str,
+    value: &str,
+    dot: gpui_kit::Hsla,
     palette: &theme::Palette,
 ) -> impl IntoElement {
-    let colors = category_colors(palette);
-    let total = total_terms.max(1) as f64;
-    let mut bar = div()
+    div()
         .flex()
-        .flex_row()
-        .h(px(10.0))
-        .rounded_sm()
-        .bg(palette.muted)
-        .overflow_hidden();
-    for (i, (_, n)) in counts.iter().enumerate() {
-        let frac = ((*n as f64 / total).clamp(0.0, 1.0)) as f32;
-        if frac > 0.005 {
-            bar = bar.child(div().h_full().bg(colors[i % colors.len()]).w(relative(frac)));
-        }
-    }
-    let mut legend = div().flex().flex_row().flex_wrap().gap_x_3().gap_y_1();
-    for (i, (label, n)) in counts.iter().enumerate() {
-        let pct = *n as f64 / total * 100.0;
-        legend = legend.child(
+        .flex_col()
+        .gap_1()
+        .child(
             div()
                 .flex()
                 .items_center()
-                .gap_1()
-                .text_xs()
-                .text_color(palette.muted_foreground)
-                .child(div().w(px(8.0)).h(px(8.0)).rounded_sm().bg(colors[i % colors.len()]))
-                .child(format!("{label} {n} · {pct:.0}%")),
-        );
-    }
-    div()
-        .flex()
-        .flex_none()
-        .flex_col()
-        .gap_2()
-        .pt_2()
-        .border_t_1()
-        .border_color(palette.border)
-        .child(bar)
-        .child(legend)
-}
-
-/// Type filter chip — mirrors the Select options without a dropdown (U-pass).
-fn filter_chip(
-    id: &str,
-    label: &str,
-    active: &str,
-    _palette: theme::Palette,
-    cx: &mut gpui_kit::Context<GlossaryView>,
-) -> impl IntoElement {
-    let id = id.to_string();
-    let mut btn = Button::new(format!("type-{id}")).label(label.to_string());
-    if active == id {
-        btn = btn.primary();
-    } else {
-        btn = btn.ghost();
-    }
-    btn.on_click(cx.listener(move |this: &mut GlossaryView, _, _, cx| {
-        this.type_filter = id.clone();
-        this.apply_filter(cx);
-    }))
+                .gap_2()
+                .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(dot))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(palette.muted_foreground)
+                        .child(label.to_string()),
+                ),
+        )
+        .child(
+            div()
+                .text_xl()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(value.to_string()),
+        )
 }
 
 /// Background curator worker tab: status cards, start/stop, pass history.
@@ -1654,21 +1287,31 @@ fn worker_panel(
     let mut body = div().flex().flex_col().flex_1().min_h_0().gap_3();
     if view.curator_loading && view.curator.is_none() {
         return body.child(
-            div().py_12().text_center().text_sm().text_color(palette.muted_foreground)
+            div()
+                .py_12()
+                .text_center()
+                .text_sm()
+                .text_color(palette.muted_foreground)
                 .child("Loading worker status…"),
         );
     }
     if let Some(err) = &view.curator_error {
         body = body.child(
-            div().text_sm().text_color(palette.destructive).child(err.clone()),
+            div()
+                .text_sm()
+                .text_color(palette.destructive)
+                .child(err.clone()),
         );
     }
-    let status = view.curator.clone().unwrap_or(serde_json::Value::Null);
-    let running = status.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
-    let total = status.get("terms_total").and_then(|v| v.as_u64()).unwrap_or(0);
-    let checked = status.get("terms_checked").and_then(|v| v.as_u64()).unwrap_or(0);
-    let conflicts = status.get("open_conflicts").and_then(|v| v.as_u64()).unwrap_or(0);
-    let dot = if running { palette.success } else { palette.muted_foreground };
+    let running = view.curator.as_ref().is_some_and(|s| s.running);
+    let total = view.curator.as_ref().map(|s| s.terms_total).unwrap_or(0);
+    let checked = view.curator.as_ref().map(|s| s.terms_checked).unwrap_or(0);
+    let conflicts = view.curator.as_ref().map(|s| s.open_conflicts).unwrap_or(0);
+    let dot = if running {
+        palette.success
+    } else {
+        palette.muted_foreground
+    };
     body = body.child(
         div()
             .flex()
@@ -1678,7 +1321,12 @@ fn worker_panel(
             .p_4()
             .rounded_md()
             .bg(palette.muted)
-            .child(worker_stat("Status", if running { "Running" } else { "Idle" }, dot, palette))
+            .child(worker_stat(
+                "Status",
+                if running { "Running" } else { "Idle" },
+                dot,
+                palette,
+            ))
             .child(worker_stat(
                 "Terms checked",
                 &format!("{checked} / {total}"),
@@ -1718,7 +1366,11 @@ fn worker_panel(
     );
     body = body.child(actions);
     if running {
-        if let Some(term) = status.get("current_term").and_then(|v| v.as_str()) {
+        if let Some(term) = view
+            .curator
+            .as_ref()
+            .and_then(|s| s.current_term.as_deref())
+        {
             body = body.child(
                 div()
                     .flex()
@@ -1734,60 +1386,27 @@ fn worker_panel(
             );
         }
     }
-    body = body.child(
-        div().text_sm().text_color(palette.muted_foreground).child(
-            "The curator checks ~20 terms per pass against book passages and files \
-             disagreements as conflicts. It also runs automatically every 5 minutes. \
-             Model: the cheap tier (change it in Project Settings).",
-        ),
-    );
-    let activity = status.get("activity").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    if !activity.is_empty() {
-        body = body.child(div().text_sm().font_medium().child("Activity"));
-        let mut feed = div().flex().flex_col().gap_1();
-        for item in activity.iter().take(10) {
-            let source = item.get("source").and_then(|v| v.as_str()).unwrap_or("?");
-            let ok = item.get("status").and_then(|v| v.as_str()).unwrap_or("") == "verified";
-            let occ = item.get("occurrences").and_then(|v| v.as_u64()).unwrap_or(0);
-            let reason = item.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-            let secs = item.get("elapsed_seconds").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let tone = if ok { palette.success } else { palette.warning };
-            feed = feed.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_3()
-                    .py_1p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(palette.border)
-                    .text_sm()
-                    .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(tone).flex_none())
-                    .child(div().flex_none().font_weight(FontWeight::MEDIUM).child(source.to_string()))
-                    .child(div().flex_1().min_w_0().truncate().text_xs().text_color(palette.muted_foreground).child(
-                        if reason.is_empty() {
-                            format!("{occ} passages · {secs:.0}s")
-                        } else {
-                            format!("{occ} passages · {reason} · {secs:.0}s")
-                        },
-                    )),
-            );
-        }
-        body = body.child(feed);
-    }
-    let empty: Vec<serde_json::Value> = Vec::new();
-    let passes = status.get("recent_passes").and_then(|v| v.as_array()).unwrap_or(&empty);
+    body = body.child(div().text_sm().text_color(palette.muted_foreground).child(
+        "The curator checks ~20 terms per pass against book passages and files \
+             disagreements as conflicts. It also runs automatically every 5 minutes.",
+    ));
+    let passes = view
+        .curator
+        .as_ref()
+        .map(|s| s.recent_passes.as_slice())
+        .unwrap_or(&[]);
     if !passes.is_empty() {
         body = body.child(div().text_sm().font_medium().child("Recent passes"));
         let mut list = div().flex().flex_col().gap_1();
         for pass in passes {
-            let ts = pass.get("ts").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-            let short_ts = ts.get(..19).unwrap_or(&ts).replace('T', " ");
+            let ts = pass.get("ts").and_then(|v| v.as_str()).unwrap_or("?");
+            let short_ts = ts.get(..19).unwrap_or(ts).replace('T', " ");
             let checked_n = pass.get("checked").and_then(|v| v.as_u64()).unwrap_or(0);
             let verified = pass.get("verified").and_then(|v| v.as_u64()).unwrap_or(0);
-            let found = pass.get("conflicts").and_then(|v| v.as_u64()).unwrap_or(0);
-            let secs = pass.get("elapsed_seconds").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let filed = pass
+                .get("conflicts_filed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             list = list.child(
                 div()
                     .flex()
@@ -1799,9 +1418,15 @@ fn worker_panel(
                     .border_1()
                     .border_color(palette.border)
                     .text_sm()
-                    .child(div().flex_none().text_color(palette.muted_foreground).child(short_ts))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(palette.muted_foreground)
+                            .child(short_ts),
+                    )
                     .child(div().flex_1().child(format!(
-                        "{checked_n} checked · {verified} verified · {found} conflicts · {secs:.0}s"
+                        "{checked_n} checked · {verified} verified · {filed} conflicts"
                     ))),
             );
         }
@@ -1810,50 +1435,130 @@ fn worker_panel(
     body
 }
 
-fn worker_stat(label: &str, value: &str, dot: gpui_kit::Hsla, palette: &theme::Palette) -> impl IntoElement {
-    div()
+/// Conflicts review queue (red tab content): virtualized rows with keep /
+/// accept actions. Empty → guidance text.
+fn conflicts_panel(
+    view: &GlossaryView,
+    palette: &theme::Palette,
+    cx: &mut gpui_kit::Context<GlossaryView>,
+) -> impl IntoElement {
+    let mut body = div().flex().flex_col().flex_1().min_h_0().gap_2();
+    if view.conflicts.is_empty() {
+        body = body.child(
+            div()
+                .py_12()
+                .text_center()
+                .text_sm()
+                .text_color(palette.muted_foreground)
+                .child("No conflicts — every suggestion is resolved."),
+        );
+        return body;
+    }
+    let entity = cx.entity();
+    let state = view.conflicts_list.clone();
+    let rows = list(state, move |ix, _window, cx: &mut App| {
+        entity.update(cx, |this, cx| {
+            GlossaryView::conflict_row(this, ix, theme::current_palette(), cx)
+        })
+    })
+    .flex_1()
+    .min_h_0();
+    body.child(rows)
+}
+
+/// Muted pastel segment colors for the category breakdown (stable order,
+/// Light-safe; mirrors the Model Usage Breakdown look).
+fn category_colors(palette: &theme::Palette) -> [Hsla; 8] {
+    [
+        palette.success.opacity(0.75),
+        palette.info.opacity(0.75),
+        palette.warning.opacity(0.75),
+        palette.primary.opacity(0.55),
+        palette.destructive.opacity(0.55),
+        palette.accent_foreground.opacity(0.6),
+        palette.muted_foreground.opacity(0.6),
+        palette.secondary_foreground.opacity(0.6),
+    ]
+}
+
+/// Fixed stats footer: category breakdown bar over the FULL glossary
+/// (independent of search/filters) — one muted pastel segment per type plus
+/// uncategorized, with legend carrying count + percentage. Mirrors the
+/// Model Usage Breakdown visualization. Real data only.
+fn stats_footer(
+    counts: &[(String, usize)],
+    total_terms: usize,
+    palette: &theme::Palette,
+) -> impl IntoElement {
+    let colors = category_colors(palette);
+    let total = total_terms.max(1) as f64;
+    let mut bar = div()
         .flex()
-        .flex_col()
-        .gap_1()
-        .child(
+        .flex_row()
+        .h(px(10.0))
+        .rounded_sm()
+        .bg(palette.muted)
+        .overflow_hidden();
+    for (i, (_, n)) in counts.iter().enumerate() {
+        let frac = ((*n as f64 / total).clamp(0.0, 1.0)) as f32;
+        if frac > 0.005 {
+            bar = bar.child(
+                div()
+                    .h_full()
+                    .bg(colors[i % colors.len()])
+                    .w(relative(frac)),
+            );
+        }
+    }
+    let mut legend = div().flex().flex_row().flex_wrap().gap_x_3().gap_y_1();
+    for (i, (label, n)) in counts.iter().enumerate() {
+        let pct = *n as f64 / total * 100.0;
+        legend = legend.child(
             div()
                 .flex()
                 .items_center()
-                .gap_2()
-                .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(dot))
-                .child(div().text_xs().text_color(palette.muted_foreground).child(label.to_string())),
-        )
-        .child(div().text_xl().font_weight(gpui_kit::FontWeight::SEMIBOLD).child(value.to_string()))
+                .gap_1()
+                .text_xs()
+                .text_color(palette.muted_foreground)
+                .child(
+                    div()
+                        .w(px(8.0))
+                        .h(px(8.0))
+                        .rounded_sm()
+                        .bg(colors[i % colors.len()]),
+                )
+                .child(format!("{label} {n} · {pct:.0}%")),
+        );
+    }
+    div()
+        .flex()
+        .flex_none()
+        .flex_col()
+        .gap_2()
+        .pt_2()
+        .border_t_1()
+        .border_color(palette.border)
+        .child(bar)
+        .child(legend)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_csv_terms, parse_json_terms};
-
-    #[test]
-    fn csv_parses_headers_and_alias_pipes() {
-        let text = "source,target,reading,type,gender,aliases,note\npomme,apple,,term,,a|b,n\n";
-        let terms = parse_csv_terms(text).unwrap();
-        assert_eq!(terms.len(), 1);
-        assert_eq!(terms[0].source, "pomme");
-        assert_eq!(terms[0].target, "apple");
-        assert_eq!(terms[0].aliases, vec!["a".to_string(), "b".to_string()]);
+/// Type filter chip — mirrors the Select options without a dropdown (U-pass).
+fn filter_chip(
+    id: &str,
+    label: &str,
+    active: &str,
+    _palette: theme::Palette,
+    cx: &mut gpui_kit::Context<GlossaryView>,
+) -> impl IntoElement {
+    let id = id.to_string();
+    let mut btn = Button::new(format!("type-{id}")).label(label.to_string());
+    if active == id {
+        btn = btn.primary();
+    } else {
+        btn = btn.ghost();
     }
-
-    #[test]
-    fn csv_rejects_unclosed_quote_and_skips_blank_sources() {
-        assert!(parse_csv_terms("source,target\n\"abc,def\n").is_err());
-        let terms = parse_csv_terms("source,target\n,apple\nx,y\n").unwrap();
-        assert_eq!(terms.len(), 1);
-        assert_eq!(terms[0].source, "x");
-    }
-
-    #[test]
-    fn json_parses_and_rejects_non_term_rows() {
-        let ok = parse_json_terms(r#"[{"source":"a","target":"b"}]"#).unwrap();
-        assert_eq!(ok.len(), 1);
-        assert_eq!(ok[0].r#type, "term");
-        assert!(parse_json_terms(r#"[{"source":"a"}]"#).is_err());
-        assert!(parse_json_terms("nope").is_err());
-    }
+    btn.on_click(cx.listener(move |this: &mut GlossaryView, _, _, cx| {
+        this.type_filter = id.clone();
+        this.apply_filter(cx);
+    }))
 }

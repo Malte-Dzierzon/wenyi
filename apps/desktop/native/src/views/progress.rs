@@ -1,119 +1,152 @@
 //! Progress / overview (screen 3): run controls + overview + chapters.
 //!
-//! Parity source: `features/progress/ProgressPage.tsx` (+ WorkflowPanel,
-//! Accounting, UsageChart, RunTimeChart, accountingData.ts, useLiveTiming).
+//! Parity source: `features/progress/ProgressPage.tsx` (+ WorkflowPanel).
 //! Header actions (translate/pause/resume with exact visibility conditions),
 //! overview card (done/total + Progress), workflow stages list, connection
-//! label, not-initialized note, report disclosure + regenerate, ChapterTable
-//! (5 columns + per-chapter translate + review badges), and the Accounting
-//! block: metric cards + usage breakdown (group tabs + stacked token bars)
-//! + run history (kit `BarChart` + duration rows) + usage-over-time
-//! (kit `LineChart`). Polling replaces WS for now (WS client lands with the
-//! progress bus); one 3s while-busy round-trip covers the source's 2.5s
-//! project / 3s chapters / 5s stats+report cadences.
-//! Read-contents link (`on_open_contents`, App-wired → Contents screen)
-//! mirrors the React contents link for book projects with chapters.
+//! label, not-initialized note, ChapterTable (5 columns + per-chapter
+//! translate + review badges). Polling replaces WS for now (WS lands
+//! with the progress bus); one 3s while-busy round-trip covers the source's
+//! 2.5s project / 3s chapters cadences. Stats/report cards were removed;
+//! run usage + history live behind the engine service.
 
-use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::link::Link;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{Disableable, StyledExt};
+use gpui_kit::component::Disableable;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use super::widgets::{
-    self, UsageGroup, UsageMetrics,
-};
 use crate::{
-    client::{
-        block_on, is_project_busy, ChapterSummary, Client, Project, ProjectStats, WorkflowOut,
+    service::{
+        is_project_busy, ChapterSummary, Project, ReviewRunOut, ServiceError, ServiceHandle,
+        WorkflowOut,
     },
     theme,
 };
 
 /// Load all progress data in one background round-trip.
-/// Report fetch failures are non-fatal (mirrors the disclosure-scoped
-/// `ErrorNotice`): stored separately so the page still renders.
 #[derive(PartialEq)]
 struct Snapshot {
     project: Project,
     project_total_words: u64,
     chapters: Vec<ChapterSummary>,
-    stats: Option<ProjectStats>,
-    stats_running: bool,
     workflow: Option<WorkflowOut>,
-    report: Option<serde_json::Value>,
-    report_error: Option<String>,
+    usage: serde_json::Value,
+    timing: serde_json::Value,
+    review_runs: Vec<ReviewRunOut>,
+    /// Hash of the `usage`/`timing` ledgers; the view memoizes derived
+    /// visualization inputs on it (see `LedgerViz`).
+    ledger_hash: u64,
 }
 
-fn load(client: &Client, pid: &str) -> Result<Snapshot, crate::client::Error> {
-    // Independent reads run concurrently (one runtime hop); wall time is
-    // the slowest call (~600ms), not the sum (~1.4s).
-    let (detail, chapters, stats, workflow, report) = block_on(async {
-        tokio::join!(
-            client.get_project(pid),
-            client.list_chapters(pid),
-            client.get_stats(pid),
-            client.get_workflow(pid),
-            client.get_report(pid),
+/// Hash the usage/timing ledgers for change detection. `serde_json::Value`
+/// has no `Hash` impl; the canonical string form is stable for equal
+/// ledgers and cheap at ledger sizes (a few KB).
+fn ledger_hash(usage: &serde_json::Value, timing: &serde_json::Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    usage.to_string().hash(&mut hasher);
+    timing.to_string().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Ledger-derived display inputs (metrics + run rows). Rebuilt only when
+/// the ledger hash changes — GPUI elements rebuild every render by design,
+/// so this memoizes the JSON walks for unrelated renders (translate
+/// spinner, tab switch, window events).
+#[derive(Clone)]
+struct LedgerViz {
+    hash: u64,
+    metrics: super::widgets::UsageMetrics,
+    runs: Vec<super::widgets::RunRow>,
+}
+
+fn load(service: &ServiceHandle, pid: &str) -> Result<Snapshot, ServiceError> {
+    let started = std::time::Instant::now();
+    // Parallelize the five independent reads in ONE background task via
+    // scoped threads (no new deps; mirrors the old `tokio::join!`): wall
+    // time is the slowest leg, not the sum. All five legs share the 5s
+    // cross-view cache, so steady-state refreshes are usually free.
+    let (detail, chapters, workflow, stats, review_runs) = std::thread::scope(|s| {
+        let detail = s.spawn(|| service.get_project(pid));
+        let chapters = s.spawn(|| service.list_chapters(pid));
+        let workflow = s.spawn(|| service.get_workflow(pid));
+        let stats = s.spawn(|| service.get_stats(pid));
+        let review_runs = s.spawn(|| service.list_review_runs(pid));
+        (
+            detail.join(),
+            chapters.join(),
+            workflow.join(),
+            stats.join(),
+            review_runs.join(),
         )
     });
-    let detail = detail?;
+    let detail = match detail {
+        Ok(result) => result?,
+        Err(_) => return Err(ServiceError::Engine("project load failed".into())),
+    };
     let project = detail.project;
     let project_total_words = detail.total_word_count;
-    let stats_running = is_project_busy(&project.status);
-    let chapters = chapters.unwrap_or_default();
-    let stats = stats.ok();
-    let workflow = workflow.ok();
-    let (report, report_error) = match report {
-        Ok(report) => (Some(report), None),
-        Err(err) => (None, Some(err.to_string())),
-    };
+    let chapters = chapters.ok().and_then(|r| r.ok()).unwrap_or_default();
+    let workflow = workflow.ok().and_then(|r| r.ok());
+    let stats = stats.ok().and_then(|r| r.ok()).unwrap_or_default();
+    let review_runs = review_runs.ok().and_then(|r| r.ok()).unwrap_or_default();
+    tracing::debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "progress snapshot loaded"
+    );
+    let usage = stats.usage;
+    let timing = stats.timing;
+    let hash = ledger_hash(&usage, &timing);
     Ok(Snapshot {
         project,
         project_total_words,
         chapters,
-        stats,
-        stats_running,
         workflow,
-        report,
-        report_error,
+        usage,
+        timing,
+        review_runs,
+        ledger_hash: hash,
     })
 }
 
 pub struct ProgressView {
-    client: Option<Client>,
+    service: Option<ServiceHandle>,
     pid: String,
     snapshot: Option<Snapshot>,
     error: Option<String>,
     action_pending: bool,
-    regen_pending: bool,
+    /// Chapter with a translate in flight (row spinner); cleared on completion.
     translating_chapter: Option<u32>,
-    usage_group: UsageGroup,
-    /// Cross-screen link into Contents (mirrors the React
-    /// "read contents source" link), set by the App pass.
-    on_open_contents: Option<std::rc::Rc<dyn Fn()>>,
     /// Whether this screen is currently shown; the 3s busy-poll timer only
     /// re-arms while visible (set by the App shell on navigation).
     visible: bool,
+    /// Usage breakdown grouping (stage/model/provider tabs).
+    usage_group: super::widgets::UsageGroup,
+    /// Singularized busy-poll timer: at most one timer task is armed at a
+    /// time (the old code spawned one per refresh — O(n) timers after n
+    /// polls). `poll_token` guards the chain: arming bumps it, firing only
+    /// re-arms when the token still matches.
+    poll_token: u64,
+    /// Ledger-derived display inputs, memoized on `Snapshot::ledger_hash`
+    /// so chain builds/walks run only on ledger change.
+    ledger_viz: Option<LedgerViz>,
 }
 
 impl ProgressView {
     pub fn new(pid: String) -> Self {
         Self {
-            client: None,
+            service: None,
             pid,
             snapshot: None,
             error: None,
             action_pending: false,
-            regen_pending: false,
             translating_chapter: None,
-            usage_group: UsageGroup::ByStage,
-            on_open_contents: None,
             visible: true,
+            usage_group: super::widgets::UsageGroup::ByStage,
+            poll_token: 0,
+            ledger_viz: None,
         }
     }
 
@@ -128,76 +161,96 @@ impl ProgressView {
         }
     }
 
-    /// Set the cross-screen link into Contents. Without it the overview
-    /// shows no read-contents affordance.
-    pub fn on_open_contents(mut self, f: impl Fn() + 'static) -> Self {
-        self.on_open_contents = Some(std::rc::Rc::new(f));
-        self
-    }
-
-    pub fn set_client(&mut self, client: Client, cx: &mut Context<Self>) {
-        self.client = Some(client);
+    pub fn set_client(&mut self, service: ServiceHandle, cx: &mut Context<Self>) {
+        self.service = Some(service);
         self.refresh(cx);
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         cx.spawn(async move |this, cx| {
-            let result =
-                cx.background_spawn(async move { load(&client, &pid) }).await;
-            _ = this.update(cx, |view: &mut ProgressView, cx| {
-                match result {
-                    Ok(snapshot) => {
-                        if view.snapshot.as_ref() != Some(&snapshot) || view.error.is_some() {
-                            view.snapshot = Some(snapshot);
-                            view.error = None;
-                            cx.notify();
-                        }
+            let result = cx
+                .background_spawn(async move { load(&service, &pid) })
+                .await;
+            _ = this.update(cx, |view: &mut ProgressView, cx| match result {
+                Ok(snapshot) => {
+                    if view.snapshot.as_ref() != Some(&snapshot) || view.error.is_some() {
+                        view.snapshot = Some(snapshot);
+                        view.error = None;
+                        cx.notify();
                     }
-                    Err(err) => {
-                        let msg = err.to_string();
-                        if view.error.as_ref() != Some(&msg) {
-                            view.error = Some(msg);
-                            cx.notify();
-                        }
+                    // Live follow-up only while busy: re-arm the status ping
+                    // (the light leg decides; the heavy snapshot stays cached).
+                    view.arm_status_ping(cx);
+                }
+                Err(err) => {
+                    let msg = err.to_string();
+                    if view.error.as_ref() != Some(&msg) {
+                        view.error = Some(msg);
+                        cx.notify();
                     }
                 }
             });
         })
         .detach();
-        // Poll while busy (WS lands later); 3s cadence like chapter queries.
-        // Only re-arms while visible; navigation resumes via `set_visible`.
+    }
+
+    /// Light status ping (one cached `get_project`, no snapshot rebuild).
+    /// Re-arms every 3s while visible AND busy; any transition (busy state
+    /// or data change) triggers a full `refresh`, otherwise the view sits
+    /// idle with zero renders. Singularized via `poll_token` like before.
+    fn arm_status_ping(&mut self, cx: &mut Context<Self>) {
+        self.poll_token = self.poll_token.wrapping_add(1);
+        let token = self.poll_token;
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
+            return;
+        };
+        let last_status = self
+            .snapshot
+            .as_ref()
+            .map(|s| s.project.status.clone())
+            .unwrap_or_default();
+        let last_hash = self.snapshot.as_ref().map(|s| s.ledger_hash).unwrap_or(0);
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(3))
                 .await;
+            // Light leg off the UI thread: cached status + ledger fingerprint.
+            let probe = cx
+                .background_spawn(async move {
+                    let detail = service.get_project(&pid).ok()?;
+                    let stats = service.get_stats(&pid).ok()?;
+                    let hash = ledger_hash(&stats.usage, &stats.timing);
+                    Some((detail.project.status, hash))
+                })
+                .await;
             _ = this.update(cx, |view: &mut ProgressView, cx| {
-                if !view.visible {
+                if view.poll_token != token || !view.visible {
                     return;
                 }
-                // Persistent load error with no snapshot: stop polling.
-                // Hammering a failing endpoint every 3s helps nobody;
-                // revisiting the screen retries via set_visible.
-                if view.error.is_some() && view.snapshot.is_none() {
+                let Some((status, hash)) = probe else {
                     return;
-                }
-                let busy = view
-                    .snapshot
-                    .as_ref()
-                    .map(|s| is_project_busy(&s.project.status))
-                    .unwrap_or(true);
-                if busy {
+                };
+                let was_busy = is_project_busy(&last_status);
+                let is_busy = is_project_busy(&status);
+                // Transition or ledger change → full snapshot refresh (which
+                // re-arms this ping). Steady busy → re-arm the light ping
+                // without touching the snapshot (no render).
+                if status != last_status || hash != last_hash {
                     view.refresh(cx);
+                } else if was_busy && is_busy {
+                    view.arm_status_ping(cx);
                 }
+                // Idle + unchanged: stop. `set_visible` resumes on revisit.
             });
         })
         .detach();
     }
 
     fn run_action(&mut self, kind: &str, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         let kind = kind.to_string();
@@ -207,9 +260,9 @@ impl ProgressView {
             let result = cx
                 .background_spawn(async move {
                     match kind.as_str() {
-                        "pause" => block_on(client.pause(&pid)),
-                        "resume" => block_on(client.resume(&pid)),
-                        _ => block_on(client.translate(&pid)),
+                        "pause" => service.pause(&pid),
+                        "resume" => service.resume(&pid),
+                        _ => service.translate(&pid),
                     }
                 })
                 .await;
@@ -227,43 +280,15 @@ impl ProgressView {
         .detach();
     }
 
-    fn regenerate(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
-            return;
-        };
-        self.regen_pending = true;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let result =
-                cx.background_spawn(async move { block_on(client.regenerate_report(&pid)) }).await;
-            _ = this.update(cx, |view: &mut ProgressView, cx| {
-                view.regen_pending = false;
-                match result {
-                    Ok(report) => {
-                        if let Some(s) = view.snapshot.as_mut() {
-                            s.report = Some(report);
-                            s.report_error = None;
-                        }
-                    }
-                    Err(err) => {
-                        view.error = Some(err.to_string());
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     fn translate_chapter(&mut self, ci: u32, cx: &mut Context<Self>) {
-        let (Some(client), pid) = (self.client.clone(), self.pid.clone()) else {
+        let (Some(service), pid) = (self.service.clone(), self.pid.clone()) else {
             return;
         };
         self.translating_chapter = Some(ci);
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { block_on(client.translate_chapter(&pid, ci)) })
+                .background_spawn(async move { service.translate_chapter(&pid, ci) })
                 .await;
             _ = this.update(cx, |view: &mut ProgressView, cx| {
                 view.translating_chapter = None;
@@ -291,12 +316,10 @@ impl ProgressView {
         }
     }
 
-    /// Chapters panel for the stats-grid side column: compact rows (title +
-    /// words + status pill + per-chapter translate) in a fixed-height scroll
-    /// container, so long chapter lists never extend the page. The full
-    /// 6-column table doesn't fit half width — rows stack like the
-    /// proofreading chapter list. The translate button only shows for
-    /// chapters that are not done (mirrors the source condition).
+    /// Chapters panel: compact rows (title + words + status pill +
+    /// per-chapter translate) in a fixed-height scroll container, so long
+    /// chapter lists never extend the page. The translate button only shows
+    /// for chapters that are not done (mirrors the source condition).
     fn chapter_panel(
         &self,
         chapters: &[ChapterSummary],
@@ -340,14 +363,14 @@ impl ProgressView {
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(format!("#{} {}", ch.index, ch.title)),
                         )
-                        .child(
-                            div().text_xs().text_color(palette.muted_foreground).child(format!(
+                        .child(div().text_xs().text_color(palette.muted_foreground).child(
+                            format!(
                                 "{}/{} words · {}",
                                 ch.target_word_count,
                                 ch.word_count,
                                 Self::review_badge(ch),
-                            )),
-                        ),
+                            ),
+                        )),
                 )
                 .child(
                     div()
@@ -374,14 +397,22 @@ impl ProgressView {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Chapters"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Chapters"),
+            )
             .child(div().h(px(320.0)).overflow_y_scrollbar().child(list))
     }
 
-    /// Workflow section for the stats-grid side panel: kind + status header,
-    /// then one row per stage (number square + label + state pill). No card
-    /// frame — the side panel provides the fill.
-    fn workflow_section(workflow: Option<&WorkflowOut>, palette: &theme::Palette) -> impl IntoElement {
+    /// Workflow section: kind + status header, then one row per stage
+    /// (number square + label + state pill). No card frame — the panel
+    /// provides the fill.
+    fn workflow_section(
+        workflow: Option<&WorkflowOut>,
+        palette: &theme::Palette,
+    ) -> impl IntoElement {
         let Some(workflow) = workflow else {
             return div()
                 .text_sm()
@@ -435,7 +466,8 @@ impl ProgressView {
                             .text_xs()
                             .flex_none()
                             .when(stage.enabled, |this| {
-                                this.bg(palette.success.opacity(0.15)).text_color(palette.success)
+                                this.bg(palette.success.opacity(0.15))
+                                    .text_color(palette.success)
                             })
                             .when(!stage.enabled, |this| {
                                 this.bg(palette.muted).text_color(palette.muted_foreground)
@@ -453,14 +485,23 @@ impl ProgressView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Current workflow"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Current workflow"),
+                    )
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap_2()
                             .text_sm()
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child(workflow.kind.clone()))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(workflow.kind.clone()),
+                            )
                             .child(
                                 div()
                                     .px_2()
@@ -481,23 +522,62 @@ impl Render for ProgressView {
         let palette = theme::current_palette();
         // Scroll region owns overflow (scrollbar overlay); flex_1 + min_h_0
         // lets it shrink inside the app-shell column.
-        let mut col = div().flex().flex_col().flex_1().min_h_0().gap_3().p_6()
-            .overflow_y_scrollbar().font(theme::fonts::ui());
+        let mut col = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .gap_3()
+            .p_6()
+            .overflow_y_scrollbar()
+            .font(theme::fonts::ui());
 
-        let Some(snapshot) = &self.snapshot else {
+        if self.snapshot.is_none() {
             col = col.child(super::ui::page_title("Translation overview", None::<Div>));
             if let Some(err) = &self.error {
                 col = col.child(super::ui::error_box(err, &palette));
             } else {
                 col = col.child(
-                    div().text_sm().text_color(palette.muted_foreground).child("Loading…"),
+                    div()
+                        .text_sm()
+                        .text_color(palette.muted_foreground)
+                        .child("Loading…"),
                 );
             }
             return col;
-        };
+        }
 
+        let busy = is_project_busy(
+            &self
+                .snapshot
+                .as_ref()
+                .expect("snapshot checked")
+                .project
+                .status,
+        );
+        let ledger_hash = self
+            .snapshot
+            .as_ref()
+            .expect("snapshot checked")
+            .ledger_hash;
+        let stale = self
+            .ledger_viz
+            .as_ref()
+            .is_none_or(|viz| viz.hash != ledger_hash);
+        if stale {
+            let snapshot = self.snapshot.as_ref().expect("snapshot checked");
+            self.ledger_viz = Some(LedgerViz {
+                hash: snapshot.ledger_hash,
+                metrics: super::widgets::UsageMetrics::from_parts(
+                    &snapshot.usage,
+                    &snapshot.timing,
+                    busy,
+                ),
+                runs: super::widgets::timing_runs(&snapshot.timing),
+            });
+        }
+        let snapshot = self.snapshot.as_ref().expect("snapshot checked");
         let project = &snapshot.project;
-        let busy = is_project_busy(&project.status);
         let paused = project.status == "paused";
         // Segment counts, not finished chapters (mirrors source comment).
         let done: u64 = snapshot.chapters.iter().map(|c| c.target_word_count).sum();
@@ -507,7 +587,11 @@ impl Render for ProgressView {
             .map(|c| c.word_count)
             .sum::<u64>()
             .max(snapshot.project_total_words);
-        let pct = if total > 0 { ((done as f64 / total as f64) * 100.0).round() as f32 } else { 0.0 };
+        let pct = if total > 0 {
+            ((done as f64 / total as f64) * 100.0).round() as f32
+        } else {
+            0.0
+        };
 
         // Header with exact visibility conditions from ProgressPage.
         let caption = format!(
@@ -516,9 +600,12 @@ impl Render for ProgressView {
             project.target_lang.as_deref().unwrap_or("—"),
             project.title.as_deref().unwrap_or("waiting for source"),
         );
-        let mut header = div().flex().items_center().justify_between().gap_2().child(
-            super::ui::page_title(project.name.clone(), Some(caption)),
-        );
+        let mut header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(super::ui::page_title(project.name.clone(), Some(caption)));
         let mut actions = div().flex().items_center().gap_2();
         if !busy && !paused && project.status != "error" && project.fmt.is_some() {
             actions = actions.child(
@@ -566,7 +653,11 @@ impl Render for ProgressView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Translation overview"))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Translation overview"),
+                    )
                     .child(
                         div()
                             .flex()
@@ -593,141 +684,94 @@ impl Render for ProgressView {
             .child(div().text_sm().child(format!("{done} / {total}")))
             .child(Progress::new("overview-progress").value(pct));
 
-        // Stats grid: metric row on top, then a two-column grid — usage
-        // visualization left, run history + workflow right — and a compact
-        // over-time strip below. Sections use spacing + muted fills instead
-        // of boxed cards (angular direction, no border stacks).
-        match &snapshot.stats {
-            Some(stats) => {
-                let metrics = UsageMetrics::from_stats(stats, snapshot.stats_running);
-                overview = overview.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("Total usage & run time"))
-                        .child(widgets::metric_cards(&metrics, &palette)),
-                );
-                let group = self.usage_group;
-                let selected = UsageGroup::ALL.iter().position(|g| *g == group).unwrap_or(0);
-                let tabs = TabBar::new("usage-group-tabs")
-                    .segmented()
-                    .selected_index(selected)
-                    .on_click(cx.listener(|this, index: &usize, _, cx| {
-                        if let Some(g) = UsageGroup::ALL.get(*index) {
-                            this.usage_group = *g;
-                            cx.notify();
-                        }
-                    }))
-                    .child(Tab::new().label(UsageGroup::ByStage.tab_label()))
-                    .child(Tab::new().label(UsageGroup::ByModel.tab_label()))
-                    .child(Tab::new().label(UsageGroup::ByProvider.tab_label()));
-                let usage_viz = match group {
-                    UsageGroup::ByStage => {
-                        widgets::usage_rows(&stats.usage, group, &palette).into_any_element()
+        // Usage + run history (engine ledgers; empty states when no runs).
+        // `usage`/`timing` walks are memoized on the ledger hash above (only
+        // the group tabs re-render cheaply on `usage_group` switch).
+        let viz = self.ledger_viz.clone().expect("ledger_viz memoized");
+        let has_usage = viz.metrics.total_tokens.is_some() || viz.metrics.calls.is_some();
+        if has_usage {
+            overview = overview.child(super::widgets::metric_cards(&viz.metrics, &palette));
+            // Underline tabs (same pattern as glossary/settings).
+            let group = self.usage_group;
+            let selected = super::widgets::UsageGroup::ALL
+                .iter()
+                .position(|g| *g == group)
+                .unwrap_or(0);
+            let mut tabs = TabBar::new("usage-group-tabs")
+                .underline()
+                .selected_index(selected)
+                .on_click(cx.listener(|this, index: &usize, _, cx| {
+                    if let Some(g) = super::widgets::UsageGroup::ALL.get(*index) {
+                        this.usage_group = *g;
+                        cx.notify();
                     }
-                    UsageGroup::ByModel => {
-                        widgets::usage_donut(&stats.usage, &palette).into_any_element()
-                    }
-                    UsageGroup::ByProvider => {
-                        widgets::usage_provider_donut(&stats.usage, &palette).into_any_element()
-                    }
-                };
-                let runs = widgets::timing_runs(&stats.timing);
-                let usage_panel = div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_4()
-                    .rounded_sm()
-                    .bg(palette.muted.opacity(0.35))
-                    .child(tabs)
-                    // Center the visualization in the leftover panel height
-                    // (the panel stretches to the side panel; tall content
-                    // like stage bars is unaffected).
-                    .child(div().flex_1().flex().flex_col().justify_center().child(usage_viz));
-                let side_panel = div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .p_4()
-                    .rounded_sm()
-                    .bg(palette.muted.opacity(0.35))
-                    .child(widgets::run_chart(&runs, &palette))
-                    .child(self.chapter_panel(&snapshot.chapters, busy, &palette, cx));
-                overview = overview.child(
-                    div().flex().gap_3().child(usage_panel).child(side_panel),
-                );
-                overview = overview.child(widgets::usage_over_time_compact(&runs, &palette));
+                }));
+            for g in super::widgets::UsageGroup::ALL {
+                tabs = tabs.child(Tab::new().label(g.tab_label()));
             }
-            None => {
-                overview = overview.child(
-                    div().text_sm().text_color(palette.muted_foreground).child("No usage recorded yet"),
-                );
-            }
+            overview = overview.child(tabs);
+            let usage_viz = match group {
+                super::widgets::UsageGroup::ByStage => {
+                    super::widgets::usage_rows(&snapshot.usage, group, &palette).into_any_element()
+                }
+                super::widgets::UsageGroup::ByModel => {
+                    super::widgets::usage_donut(&snapshot.usage, &palette).into_any_element()
+                }
+                super::widgets::UsageGroup::ByProvider => {
+                    super::widgets::usage_provider_donut(&snapshot.usage, &palette)
+                        .into_any_element()
+                }
+            };
+            overview = overview.child(usage_viz);
         }
-        col = col.child(overview);
-
-        // Read-contents link (book projects with chapters; mirrors React).
-        let subtitle = project.fmt.as_deref() == Some("srt");
-        if !subtitle && !snapshot.chapters.is_empty() {
-            if let Some(cb) = self.on_open_contents.clone() {
-                col = col.child(
-                    Link::new("read-contents")
-                        .child("Read contents source")
-                        .on_click(move |_, _, _| cb()),
-                );
-            }
+        if !viz.runs.is_empty() {
+            overview = overview.child(super::widgets::run_chart(&viz.runs, &palette));
         }
-
-        // Project report disclosure (mirrors the React `Disclosure`): update
-        // button + structured summary, placed before the chapter table like
-        // the source.
-        let mut report_body = div().flex().flex_col().gap_2().child(
-            Button::new("regen-report")
-                .label("Update report")
-                .disabled(self.regen_pending || busy || !project.initialized)
-                .on_click(cx.listener(|this, _, _, cx| this.regenerate(cx))),
-        );
-        if let Some(report) = &snapshot.report {
-            // Mirror the disclosure body: summary minus usage/timing ledgers
-            // (those render as charts above), one row per key.
-            for (key, text) in report_rows(report) {
-                report_body = report_body.child(
-                    div()
-                        .flex()
-                        .justify_between()
-                        .gap_4()
-                        .text_xs()
-                        .child(div().text_color(palette.muted_foreground).child(key))
-                        .child(div().flex_1().text_right().child(text)),
-                );
-            }
-        } else if let Some(err) = &snapshot.report_error {
-            // Mirrors the disclosure-scoped ErrorNotice (e.g. 500 before first
-            // translation produces a report).
-            report_body = report_body.child(
-                div().text_xs().text_color(palette.muted_foreground).child(format!(
-                    "No report yet ({err})"
-                )),
+        // Review runs (engine review history; hidden when never reviewed).
+        if !snapshot.review_runs.is_empty() {
+            let mut review = div().flex().flex_col().gap_2().child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Review runs"),
             );
+            for run in snapshot.review_runs.iter().take(5) {
+                review = review.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_sm()
+                        .child(div().flex_1().min_w_0().truncate().child(run.id.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(palette.muted_foreground)
+                                .child(format!("{} issues", run.issues.len())),
+                        )
+                        .child(
+                            div()
+                                .px_2()
+                                .rounded_sm()
+                                .bg(palette.muted)
+                                .text_xs()
+                                .child(run.status.clone()),
+                        ),
+                );
+            }
+            overview = overview.child(review);
         }
-        col = col.child(
-            Accordion::new("project-report").item(|item| {
-                item.title("Project report").child(report_body)
-            }),
-        );
+        // Chapters panel below the overview progress.
+        col = col.child(overview.child(self.chapter_panel(&snapshot.chapters, busy, &palette, cx)));
 
         // Not-initialized note. The source links to the create screen with a
         // project prefill the native create screen has no API for, so this
         // stays a plain note rather than a dead link.
         if !project.initialized {
             col = col.child(
-                div().text_sm().text_color(palette.muted_foreground)
+                div()
+                    .text_sm()
+                    .text_color(palette.muted_foreground)
                     .child("Upload a source file to initialize this project."),
             );
         }
@@ -749,34 +793,4 @@ impl Render for ProgressView {
         col = col.child(div().h(px(24.0)).flex_none());
         col
     }
-}
-
-
-/// Report summary minus the usage/timing ledgers (those render as charts
-/// above), as key/value rows. Mirrors the `StructuredData` filter.
-fn report_rows(report: &serde_json::Value) -> Vec<(String, String)> {
-    let map = report
-        .get("summary")
-        .and_then(|v| v.as_object())
-        .filter(|m| !m.is_empty())
-        .map(|m| m.iter().collect::<Vec<_>>());
-    let entries = map.unwrap_or_else(|| {
-        report.as_object().map(|m| m.iter().collect()).unwrap_or_default()
-    });
-    entries
-        .into_iter()
-        .filter(|(k, _)| *k != "usage" && *k != "timing")
-        .take(8)
-        .map(|(k, v)| {
-            let text = match v {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Null => "—".into(),
-                other => {
-                    let s = other.to_string();
-                    if s.len() > 120 { format!("{}…", &s[..120]) } else { s }
-                }
-            };
-            (k.clone(), text)
-        })
-        .collect()
 }

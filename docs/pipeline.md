@@ -4,7 +4,7 @@
 
 Wenyi first builds a whole-book understanding and then translates chapters in order. Optional stages can be disabled in `config.yaml` to reduce cost or runtime.
 
-Source parsing is a separate, model-free stage. `wenyi parse` and the Web/Desktop upload task save a content- and configuration-bound source snapshot before AI preparation. The UI can show its table of contents and original paragraphs read-only immediately after parsing, including while preparation runs or after it fails. Parsing does not commit an initialized manifest, expose partially staged targets, or enable translation editing. Matching source snapshots survive initialization retries; changed source identities are not reused.
+Source parsing is a separate, model-free stage. The Desktop app saves a content- and configuration-bound source snapshot before AI preparation. The UI can show its table of contents and original paragraphs read-only immediately after parsing, including while preparation runs or after it fails. Parsing does not commit an initialized manifest, expose partially staged targets, or enable translation editing. Matching source snapshots survive initialization retries; changed source identities are not reused.
 
 ```mermaid
 flowchart TD
@@ -97,7 +97,7 @@ offline tests do not establish model quality.
 
 This policy provides cross-chapter terminology context at the cost of larger prompts and potentially higher token usage. It does not guarantee provider prefix-cache hits or improved translation quality. Selective evidence queries and segment Fixer requests still use relevant terms. `pipeline.glossary_scope` has been removed; configuration containing that key is rejected and must be edited explicitly.
 
-If analysis, glossary extraction, or historical term alignment returns a collection with an invalid type, Wenyi ignores that collection and logs a warning with the operation, field, and actual type. Arrays retain object members and log the number of discarded non-object members. Missing or null fields and valid empty arrays do not produce warnings. These diagnostics use the CLI/worker's standard Python logs, exclude source text and model response content, and help identify missing candidates without interrupting translation.
+If analysis, glossary extraction, or historical term alignment returns a collection with an invalid type, Wenyi ignores that collection and logs a warning with the operation, field, and actual type. Arrays retain object members and log the number of discarded non-object members. Missing or null fields and valid empty arrays do not produce warnings. These diagnostics use the engine and worker's standard Python logs, exclude source text and model response content, and help identify missing candidates without interrupting translation.
 
 The glossary constrains later translation and supplies evidence to the final review, but it does not automatically rewrite every previously translated occurrence. Use `glossary list` and `glossary conflicts` to inspect entries, then combine Review results, reports, and manual decisions when necessary.
 
@@ -136,7 +136,7 @@ reusing completed results or old run-scoped fixer traces. Older caches without t
 guidance identity remain available for inspection but are not reused. The revised
 character guidance also advances the Review/Autofix Fixer request protocols, so a
 subsequent run may require new model calls; previously completed translations are unchanged.
-The CLI shows chapter loading and checkpoint preparation before reviewing paragraphs.
+The Desktop app shows chapter loading and checkpoint preparation before reviewing paragraphs.
 Elapsed time measures the entire current workflow and never resets at stage or round
 boundaries. It continues advancing while model requests are pending, even after a stage
 reaches its final count. Each invocation's duration is saved in the target's `timing.json`
@@ -224,7 +224,7 @@ Publication metadata means a structurally valid synthesized result, not a semant
 acceptance gate. `target_before_polish` stores the first initial draft as a comparison
 reference, not a selected accurate draft; `target` stores the synthesized final text.
 
-Initial drafts always use built-in three-branch concurrency. Web manual proofreading
+Initial drafts always use built-in three-branch concurrency. Desktop manual proofreading
 can inspect published T1/T2/T3 and the original synthesis as read-only archives;
 inspection does not make model calls or choose a draft for publication. Draft lookup
 validates source and segment identity, hashes, and the saved T1 comparison. Unavailable
@@ -294,7 +294,7 @@ not a guaranteed quality improvement.
 
 Each completed translation batch is persisted immediately. When polishing is enabled, each segment in the chapter JSON keeps the translation-stage text in `target_before_polish` and the polished final text in `target`. Running `translate` again skips completed batches and fills only missing work. A standalone `assemble` briefly freezes the persisted manifest and chapter snapshot, releases the state lock, and renders from that snapshot, so it does not wait for a full translation running in another terminal.
 
-On Windows, local JSON state reads/writes and artifact access use extended-length drive and UNC paths. Artifact keys remain relative to the run directory, and listings and resume operations retain portable `/`-separated keys. This does not guarantee arbitrarily long path support across all CLI operations or dependencies.
+On Windows, local JSON state reads/writes and artifact access use extended-length drive and UNC paths. Artifact keys remain relative to the run directory, and listings and resume operations retain portable `/`-separated keys. This does not guarantee arbitrarily long path support across all engine operations or dependencies.
 
 ## Subtitle path (SRT)
 
@@ -303,12 +303,12 @@ Orchestrator above. There is no whole-book prescan, glossary, polishing, or
 Review. Translation uses overlapping cue windows with high concurrency on the
 strong model tier; progress is stored under `state/srt/<slug>/targets/<target-language>/` with
 `cues.jsonl`, batch caches, `usage.json`, and `events.jsonl`. See
-[CLI guide — SRT subtitles](cli.md#srt-subtitles).
+[Engine contract — SRT subtitles](cli.md#srt-subtitles).
 
 ## Model registration and usage
 
 All model calls use stable operation IDs from `llm/operations.py`; `llm/registry.py` registers provider adapters. Runtime and the separate SRT workflow each own one routed client, reusing SDK connections and sharing invocation concurrency, quotas and usage. Agents select no provider or tier; Orchestrator retains only assembly and workflow routing.
 
-To add a model operation, register an `OperationSpec` with its ID, default tier or inherited operation, output hint, workflow flags and protocol version, then call `complete(..., operation="domain.operation")` in the domain service. Validation, CLI previews and inference fingerprints read the same registry. To add a provider, implement its options, request builder, usage normalization and `ProviderAdapter` under `llm/providers/`, then register a `ProviderSpec`. Keep SDK initialization lazy and SDK retries disabled. Change the relevant protocol version when request semantics change, and cover requests, usage and resume behavior with offline tests. Registries are immutable after startup.
+To add a model operation, register an `OperationSpec` with its ID, default tier or inherited operation, output hint, workflow flags and protocol version, then call `complete(..., operation="domain.operation")` in the domain service. Validation, Desktop previews and inference fingerprints read the same registry. To add a provider, implement its options, request builder, usage normalization and `ProviderAdapter` under `llm/providers/`, then register a `ProviderSpec`. Keep SDK initialization lazy and SDK retries disabled. Change the relevant protocol version when request semantics change, and cover requests, usage and resume behavior with offline tests. Registries are immutable after startup.
 
 Review compares the effective inference identity of reachable operations. Model, endpoint or option changes create a new Review, while unrelated routes or concurrency changes preserve caches. Pending Autofix publication takes priority; evidence traces are never replayed under another model. Book and Review ledgers journal their snapshots in `usage-pending.json` before updating each `usage.json`, allowing idempotent recovery.

@@ -1,7 +1,5 @@
 [workspace]
-members = ["crates/wenyi-core"]
-# apps/desktop/native stays standalone until engine integration (Slice 7);
-# joining it now would rewrite its lockfile and build graph for no benefit.
+members = ["crates/wenyi-core", "apps/desktop/native"]
 resolver = "2"
 
 [workspace.package]
@@ -21,3 +19,4 @@ sha2 = "0.11"
 tiktoken-rs = "0.12"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 quick-xml = "0.42"
+aho-corasick = "1"

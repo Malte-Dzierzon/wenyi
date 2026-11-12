@@ -31,6 +31,8 @@ TASKS = (
     "srt_batch_user",
     "srt_single_system",
     "srt_single_user",
+    "style_observer_system",
+    "style_observer_user",
     "title_translator_system",
     "title_translator_user",
     "translator_system",

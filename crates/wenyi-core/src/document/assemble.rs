@@ -2036,3 +2036,209 @@ pub fn __parse_package_for_tests(source_path: &Path) -> Result<OpfPackage> {
     let opf_path = find_opf_path(&mut archive)?;
     parse_opf(&mut archive, &opf_path)
 }
+
+/// Heading level: segment meta wins, chapter meta is the fallback (oracle
+/// `_heading_level`).
+pub fn heading_level(chapter: &Chapter, segment: Option<&Segment>) -> i64 {
+    let mut level = chapter
+        .meta
+        .get("heading_level")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(1);
+    if let Some(segment) = segment {
+        if let Some(value) = segment.meta.get("heading_level").and_then(|v| v.as_i64()) {
+            level = value;
+        }
+    }
+    if level > 0 {
+        level
+    } else {
+        1
+    }
+}
+
+/// Merge continuations into `(kind, target, source, level)` paragraphs
+/// (oracle `_merged_paragraphs`).
+pub fn merged_paragraphs(chapter: &Chapter) -> Vec<(String, String, String, i64)> {
+    let mut kinds = Vec::new();
+    let mut targets: Vec<String> = Vec::new();
+    let mut sources: Vec<String> = Vec::new();
+    let mut levels = Vec::new();
+    for segment in &chapter.segments {
+        if segment.source.trim().is_empty() {
+            continue;
+        }
+        if segment.cont && !targets.is_empty() {
+            let last = targets.len() - 1;
+            targets[last].push_str(seg_text(segment));
+            sources[last].push_str(&segment.source);
+        } else {
+            kinds.push(segment.kind.clone());
+            targets.push(seg_text(segment).to_string());
+            sources.push(segment.source.clone());
+            levels.push(heading_level(chapter, Some(segment)));
+        }
+    }
+    kinds
+        .into_iter()
+        .zip(targets)
+        .zip(sources)
+        .zip(levels)
+        .map(|(((kind, target), source), level)| (kind, target, source, level))
+        .collect()
+}
+
+/// Order a bilingual pair (oracle `_ordered_pair`).
+pub fn ordered_pair<'a>(source: &'a str, target: &'a str, order: &str) -> (&'a str, &'a str) {
+    if order == "source_first" {
+        (source, target)
+    } else {
+        (target, source)
+    }
+}
+
+/// Write a file atomically via same-directory temp + rename.
+pub fn write_atomic(out_path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = out_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| Error::Io {
+                path: parent.to_path_buf(),
+                message: e.to_string(),
+            })?;
+        }
+    }
+    let tmp_path = out_path.with_extension(
+        out_path
+            .extension()
+            .map(|ext| format!("{}.tmp", ext.to_string_lossy()))
+            .unwrap_or_else(|| "tmp".to_string()),
+    );
+    std::fs::write(&tmp_path, bytes).map_err(|e| Error::Io {
+        path: tmp_path.clone(),
+        message: e.to_string(),
+    })?;
+    std::fs::rename(&tmp_path, out_path).map_err(|e| Error::Io {
+        path: out_path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    Ok(())
+}
+
+/// Assemble plain text or Markdown (oracle `text_writer`).
+pub fn assemble_text(
+    document: &Document,
+    out_path: &Path,
+    options: &AssembleOptions,
+    markdown: bool,
+) -> Result<()> {
+    let mut chapter_blocks = Vec::new();
+    for chapter in &document.chapters {
+        let mut blocks = Vec::new();
+        for (kind, mut target, source, level) in merged_paragraphs(chapter) {
+            if kind == KIND_HEADING && markdown {
+                target = format!("{} {target}", "#".repeat(level.clamp(1, 6) as usize));
+            }
+            let src = if options.bilingual && kind != KIND_HEADING {
+                bilingual_source(&source, &target)
+            } else {
+                String::new()
+            };
+            if src.is_empty() {
+                blocks.push(target);
+            } else {
+                let (first, second) = ordered_pair(&src, &target, &options.order);
+                blocks.push(first.to_string());
+                blocks.push(second.to_string());
+            }
+        }
+        chapter_blocks.push(blocks.join("\n\n"));
+    }
+    write_atomic(
+        out_path,
+        format!("{}\n", chapter_blocks.join("\n\n")).as_bytes(),
+    )
+}
+
+/// Escape HTML text (oracle `html.escape`).
+pub fn escape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Assemble a standalone HTML document (oracle `html_writer`, template-free
+/// path). EPUB-template backfill stays in `assemble_epub`.
+pub fn assemble_html(
+    document: &Document,
+    out_path: &Path,
+    options: &AssembleOptions,
+) -> Result<()> {
+    if document.target_lang.is_empty() {
+        return Err(Error::Store("State is missing target_lang".to_string()));
+    }
+    let mut head_html = document
+        .meta
+        .get("head_html")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if !head_html
+        .replace(' ', "")
+        .to_lowercase()
+        .contains("charset")
+    {
+        head_html = format!("<meta charset=\"utf-8\"/>\n{head_html}");
+    }
+    if options.bilingual
+        && !options.preserve_source_style
+        && !head_html.contains(BILINGUAL_STYLE_ID)
+    {
+        head_html += &format!("<style id=\"{BILINGUAL_STYLE_ID}\">\n{BILINGUAL_CSS}</style>");
+    }
+    let mut body_parts = Vec::new();
+    for chapter in &document.chapters {
+        for (kind, target, source, level) in merged_paragraphs(chapter) {
+            let target_html = if kind == KIND_HEADING {
+                format!(
+                    "<h{level}>{}</h{level}>",
+                    escape_html(&target),
+                    level = level.clamp(1, 6)
+                )
+            } else {
+                format!("<p>{}</p>", escape_html(&target))
+            };
+            let src = if options.bilingual && kind != KIND_HEADING {
+                bilingual_source(&source, &target)
+            } else {
+                String::new()
+            };
+            if src.is_empty() {
+                body_parts.push(target_html);
+                continue;
+            }
+            let source_html = format!("<p class=\"tn-source\">{}</p>", escape_html(&src));
+            if options.order == "source_first" {
+                body_parts.push(source_html);
+                body_parts.push(target_html);
+            } else {
+                body_parts.push(target_html);
+                body_parts.push(source_html);
+            }
+        }
+    }
+    let full_html = format!(
+        "<!DOCTYPE html>\n<html lang=\"{}\">\n<head>\n{head_html}\n</head>\n<body>\n{}\n</body>\n</html>",
+        escape_html(epub_lang(&document.target_lang)),
+        body_parts.join("")
+    );
+    write_atomic(out_path, full_html.as_bytes())
+}
